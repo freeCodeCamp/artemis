@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -287,6 +288,50 @@ func TestValidateToken_NegativeCache_NotFor5xx(t *testing.T) {
 		assert.True(t, IsGitHubUnavailable(err))
 	}
 	assert.EqualValues(t, 3, gh.userCalls.Load(), "5xx must NOT be cached")
+}
+
+// TestValidateToken_SingleflightOnConcurrentMiss — B2: N concurrent
+// cold-cache calls for the same token must coalesce into ONE upstream
+// /user request. Without singleflight, all N race past the lock-check
+// and fan out.
+func TestValidateToken_SingleflightOnConcurrentMiss(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+
+	// Slow the response so all goroutines pile up on the miss path.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		gh.userCalls.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	})
+	gh.server.Close()
+	gh.server = httptest.NewServer(mux)
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:  gh.server.URL,
+		Org:      "freeCodeCamp",
+		CacheTTL: time.Minute,
+	})
+
+	const N = 10
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			login, err := c.ValidateToken(context.Background(), "ghp_concurrent")
+			assert.NoError(t, err)
+			assert.Equal(t, "alice", login)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.EqualValues(t, 1, gh.userCalls.Load(),
+		"expected singleflight to coalesce N concurrent misses into 1 upstream call")
 }
 
 func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {
