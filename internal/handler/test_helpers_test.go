@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -287,8 +286,6 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-var _ = errors.New // keep errors imported for future helpers
 
 // mustDeployPrefixTemplate panics if the literal raw cannot be parsed.
 // Test-only helper — production wiring uses NewDeployPrefixTemplate
