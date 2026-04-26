@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -28,10 +30,39 @@ func TestSignAndVerify_Roundtrip(t *testing.T) {
 
 	claims, err := s.Verify(tok)
 	require.NoError(t, err)
-	assert.Equal(t, "alice", claims.Login)
+	assert.Equal(t, "alice", claims.Subject)
 	assert.Equal(t, "www", claims.Site)
 	assert.Equal(t, "20260420-141522-abc1234", claims.DeployID)
 	assert.Equal(t, "artemis", claims.Issuer)
+}
+
+// TestSign_PayloadHasNoShadowedClaims — B14: outer Login/Issuer were
+// shadowing embedded RegisteredClaims.Subject/Issuer. Both emit
+// `json:"sub"` / `json:"iss"`; per Go json field-resolution rule the
+// outer wins on marshal. Post-fix the struct holds no shadow fields,
+// and the encoded payload contains exactly one "sub" + one "iss".
+func TestSign_PayloadHasNoShadowedClaims(t *testing.T) {
+	s := newSigner(t)
+	tok, _, err := s.Sign("alice", "www", "d-1")
+	require.NoError(t, err)
+
+	parts := strings.Split(tok, ".")
+	require.Len(t, parts, 3)
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+
+	// Count occurrences of `"sub"` and `"iss"` in the literal payload —
+	// shadowed fields would emit two of each at marshal time.
+	subCount := strings.Count(string(raw), `"sub"`)
+	issCount := strings.Count(string(raw), `"iss"`)
+	assert.Equal(t, 1, subCount, "exactly one sub claim; got payload: %s", raw)
+	assert.Equal(t, 1, issCount, "exactly one iss claim; got payload: %s", raw)
+
+	// Round-trip through generic map to reach final claim values.
+	var generic map[string]any
+	require.NoError(t, json.Unmarshal(raw, &generic))
+	assert.Equal(t, "alice", generic["sub"])
+	assert.Equal(t, "artemis", generic["iss"])
 }
 
 func TestVerify_RejectsExpired(t *testing.T) {
