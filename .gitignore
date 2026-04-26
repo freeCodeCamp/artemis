@@ -22,3 +22,6 @@ config/sites.yaml
 
 # Vendored deps (we use modules)
 vendor/
+
+# dossier: internal scratchpad theater tooling
+.scratchpad/
