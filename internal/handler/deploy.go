@@ -110,7 +110,18 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		contentType = mime.TypeByExtension(path.Ext(relPath))
 	}
 
-	if err := h.R2.PutObject(r.Context(), key, r.Body, contentType); err != nil {
+	body := r.Body
+	if h.UploadMaxBytes > 0 {
+		body = http.MaxBytesReader(w, r.Body, h.UploadMaxBytes)
+	}
+
+	if err := h.R2.PutObject(r.Context(), key, body, contentType); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large",
+				"upload body exceeds configured limit")
+			return
+		}
 		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
 		return
 	}

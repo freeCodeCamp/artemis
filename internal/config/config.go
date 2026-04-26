@@ -26,6 +26,7 @@ type Config struct {
 	JWT                JWTConfig
 	Aliases            AliasConfig
 	DeployPrefixFormat string
+	UploadMaxBytes     int64 // single PUT /upload body cap; default 100 MiB
 	LogLevel           string
 }
 
@@ -92,6 +93,7 @@ func Load() (*Config, error) {
 			PreviewKeyFormat:    "<site>/preview",
 		},
 		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
+		UploadMaxBytes:     100 * 1024 * 1024, // 100 MiB
 		LogLevel:           "info",
 	}
 
@@ -146,6 +148,13 @@ func Load() (*Config, error) {
 	}
 	if v, ok := os.LookupEnv("DEPLOY_PREFIX_FORMAT"); ok && v != "" {
 		cfg.DeployPrefixFormat = v
+	}
+	if v, ok := os.LookupEnv("UPLOAD_MAX_BYTES"); ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("invalid UPLOAD_MAX_BYTES %q: must be positive integer (bytes)", v)
+		}
+		cfg.UploadMaxBytes = n
 	}
 
 	if v, ok := os.LookupEnv("LOG_LEVEL"); ok && v != "" {

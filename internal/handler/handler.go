@@ -55,7 +55,11 @@ type Handlers struct {
 	AliasPreviewFmt    string // e.g. "<site>/preview"
 	// DeployPrefix is the parsed deploy-key template. Replaces the
 	// raw string + brittle stripDeployIDFromFmt surgery (B7).
-	DeployPrefix     DeployPrefixTemplate
+	DeployPrefix DeployPrefixTemplate
+	// UploadMaxBytes caps a single PUT /upload body size (B4). 0 or
+	// negative means uncapped — production wiring sets a finite default
+	// (UPLOAD_MAX_BYTES env, 100 MiB by default).
+	UploadMaxBytes   int64
 	NewDeployID      func(sha string) string
 	Now              func() time.Time
 	PublicURLForSite func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"

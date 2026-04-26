@@ -92,6 +92,7 @@ func run() error {
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
 		DeployPrefix:       deployPrefix,
+		UploadMaxBytes:     cfg.UploadMaxBytes,
 		NewDeployID:        r2.NewDeployID,
 		Now:                time.Now,
 	}
