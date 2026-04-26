@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -184,6 +185,39 @@ func TestGitHubClient_AuthorizeForSite_AnyTeamGrants(t *testing.T) {
 	ok, err := c.AuthorizeForSite(context.Background(), "ghp_test", "alice", []string{"team-other", "team-eng"})
 	require.NoError(t, err)
 	assert.True(t, ok)
+}
+
+// TestCacheKey_NotRawToken — B3: raw bearer tokens must never appear as
+// map keys. Heap dumps, debuggers, or future code paths that range over
+// the cache must not leak credential material.
+//
+// Invariant: the userCache key is the sha256 of the raw token, truncated
+// to 16 bytes and hex-encoded (32 hex chars).
+func TestCacheKey_NotRawToken(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:  gh.server.URL,
+		Org:      "freeCodeCamp",
+		CacheTTL: time.Minute,
+	})
+
+	raw := "ghp_super_secret_xxxxxxxxxxxxxxxxxxxx"
+	_, err := c.ValidateToken(context.Background(), raw)
+	require.NoError(t, err)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	require.Len(t, c.userCache, 1, "ValidateToken should cache one entry")
+
+	hexRe := regexp.MustCompile(`^[0-9a-f]{32}$`)
+	for k := range c.userCache {
+		assert.NotEqual(t, raw, k, "cache key must not be raw bearer token")
+		assert.NotContains(t, k, "ghp_", "cache key must not contain raw-token prefix")
+		assert.True(t, hexRe.MatchString(k),
+			"cache key must be 32-char hex (sha256 truncated 16 bytes); got %q", k)
+	}
 }
 
 func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {

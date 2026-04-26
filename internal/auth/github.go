@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +33,7 @@ type GitHubClient struct {
 	now        func() time.Time
 
 	mu        sync.Mutex
-	userCache map[string]userCacheEntry // token → cached login
+	userCache map[string]userCacheEntry // hashToken(raw) → cached login
 	teamCache map[teamCacheKey]teamCacheEntry
 }
 
@@ -75,12 +77,15 @@ func NewGitHubClient(cfg GitHubClientConfig) *GitHubClient {
 }
 
 // ValidateToken calls GET /user with the supplied bearer and returns the
-// resolved login. Successful results are cached for CacheTTL keyed by
-// raw token. Rate-limit and 5xx responses are surfaced via typed errors
+// resolved login. Successful results are cached for CacheTTL keyed by a
+// sha256 prefix of the raw token (16 bytes hex), never the token itself.
+// Rate-limit and 5xx responses are surfaced via typed errors
 // (IsGitHubRateLimited / IsGitHubUnavailable).
 func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string, error) {
+	cacheKey := hashToken(token)
+
 	c.mu.Lock()
-	if entry, ok := c.userCache[token]; ok && entry.expires.After(c.now()) {
+	if entry, ok := c.userCache[cacheKey]; ok && entry.expires.After(c.now()) {
 		c.mu.Unlock()
 		return entry.login, nil
 	}
@@ -128,13 +133,21 @@ func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string,
 	}
 
 	c.mu.Lock()
-	c.userCache[token] = userCacheEntry{
+	c.userCache[cacheKey] = userCacheEntry{
 		login:   u.Login,
 		expires: c.now().Add(c.cfg.CacheTTL),
 	}
 	c.mu.Unlock()
 
 	return u.Login, nil
+}
+
+// hashToken returns a 32-char hex digest of token (sha256, truncated to
+// 16 bytes). Used as the userCache map key so raw bearer credentials
+// never appear in process memory beyond the live request span.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:16])
 }
 
 // IsTeamMember returns true if `user` has an active membership on
