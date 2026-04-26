@@ -71,7 +71,13 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 }
 
 // PutObject streams body into <bucket>/<key>.
-func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, contentType string) error {
+//
+// contentLength: pass the body size in bytes when known (Content-Length
+// from the originating HTTP request, len() of an in-memory buffer).
+// Pass 0 when unknown — the SDK negotiates chunked transfer-encoding
+// in that case. Setting ContentLength when known skips that round
+// trip and lets R2 short-circuit on small uploads (B18).
+func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error {
 	in := &s3.PutObjectInput{
 		Bucket: awsv2.String(c.bucket),
 		Key:    awsv2.String(key),
@@ -79,6 +85,9 @@ func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, cont
 	}
 	if contentType != "" {
 		in.ContentType = awsv2.String(contentType)
+	}
+	if contentLength > 0 {
+		in.ContentLength = awsv2.Int64(contentLength)
 	}
 	_, err := c.s3.PutObject(ctx, in)
 	if err != nil {
@@ -90,7 +99,7 @@ func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, cont
 // PutAlias writes a small text body (the deploy id pointer) to the alias
 // key. Single PUT is atomic per-key in R2.
 func (c *Client) PutAlias(ctx context.Context, aliasKey, deployID string) error {
-	return c.PutObject(ctx, aliasKey, strings.NewReader(deployID), "text/plain")
+	return c.PutObject(ctx, aliasKey, strings.NewReader(deployID), "text/plain", int64(len(deployID)))
 }
 
 // GetAlias returns the body of the alias key — i.e. the deploy id it

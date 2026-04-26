@@ -150,7 +150,7 @@ func newFakeR2() *fakeR2 {
 	}
 }
 
-func (f *fakeR2) PutObject(_ context.Context, key string, body io.Reader, _ string) error {
+func (f *fakeR2) PutObject(_ context.Context, key string, body io.Reader, _ string, _ int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.putErr != nil {
