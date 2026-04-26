@@ -6,26 +6,43 @@ import (
 )
 
 // WhoAmI implements GET /api/whoami. Returns the resolved login plus the
-// list of sites the caller is authorized to deploy to. The list is
-// computed by intersecting sites.yaml with the caller's team memberships.
+// list of sites the caller is authorized to deploy to.
+//
+// Pre-B9 this looped sites.yaml × per-site teams and made one
+// AuthorizeForSite (→ N IsTeamMember) call per site. With S sites and
+// T teams each, cold-cache cost was up to S×T sequential GitHub round
+// trips, all serialized on a single mutex.
+//
+// Post-B9: a single GET /user/teams returns every team the token is
+// on; intersection with sites.yaml is local. Authorization-side check
+// for individual deploys still uses AuthorizeForSite — that's a
+// per-deploy hot path with its own team cache.
 func (h *Handlers) WhoAmI(w http.ResponseWriter, r *http.Request) {
 	login := LoginFromContext(r.Context())
 	token := GitHubTokenFromContext(r.Context())
 
+	teams, err := h.GH.UserTeams(r.Context(), token)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		return
+	}
+	userTeams := make(map[string]struct{}, len(teams))
+	for _, t := range teams {
+		userTeams[t] = struct{}{}
+	}
+
 	authorized := []string{}
 	snap := h.Sites.Snapshot()
 	for _, site := range snap.Sites() {
-		teams := snap.TeamsForSite(site)
-		if len(teams) == 0 {
+		siteTeams := snap.TeamsForSite(site)
+		if len(siteTeams) == 0 {
 			continue
 		}
-		ok, err := h.GH.AuthorizeForSite(r.Context(), token, login, teams)
-		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
-			return
-		}
-		if ok {
-			authorized = append(authorized, site)
+		for _, st := range siteTeams {
+			if _, ok := userTeams[st]; ok {
+				authorized = append(authorized, site)
+				break
+			}
 		}
 	}
 	sort.Strings(authorized)

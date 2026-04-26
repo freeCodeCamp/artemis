@@ -34,12 +34,19 @@ type GitHubClient struct {
 	httpClient *http.Client
 	now        func() time.Time
 
-	mu        sync.Mutex
-	userCache map[string]userCacheEntry // hashToken(raw) → cached login
-	teamCache map[teamCacheKey]teamCacheEntry
+	mu             sync.Mutex
+	userCache      map[string]userCacheEntry // hashToken(raw) → cached login
+	teamCache      map[teamCacheKey]teamCacheEntry
+	userTeamsCache map[string]userTeamsCacheEntry // hashToken(raw) → user's team slug list
 
-	sfUser singleflight.Group // dedupes concurrent /user misses by hashed token
-	sfTeam singleflight.Group // dedupes concurrent team-membership misses by (login, team)
+	sfUser      singleflight.Group // dedupes concurrent /user misses by hashed token
+	sfTeam      singleflight.Group // dedupes concurrent team-membership misses by (login, team)
+	sfUserTeams singleflight.Group // dedupes concurrent /user/teams misses by hashed token
+}
+
+type userTeamsCacheEntry struct {
+	teams   []string
+	expires time.Time
 }
 
 type userCacheEntry struct {
@@ -74,11 +81,12 @@ func NewGitHubClient(cfg GitHubClientConfig) *GitHubClient {
 		cfg.Now = time.Now
 	}
 	return &GitHubClient{
-		cfg:        cfg,
-		httpClient: cfg.HTTPClient,
-		now:        cfg.Now,
-		userCache:  make(map[string]userCacheEntry),
-		teamCache:  make(map[teamCacheKey]teamCacheEntry),
+		cfg:            cfg,
+		httpClient:     cfg.HTTPClient,
+		now:            cfg.Now,
+		userCache:      make(map[string]userCacheEntry),
+		teamCache:      make(map[teamCacheKey]teamCacheEntry),
+		userTeamsCache: make(map[string]userTeamsCacheEntry),
 	}
 }
 
@@ -285,6 +293,108 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 	c.mu.Unlock()
 
 	return member, nil
+}
+
+// UserTeams returns the slugs of every team in cfg.Org that `token` is a
+// member of. Paginates GET /user/teams with per_page=100. Cached for
+// CacheTTL keyed on hashed token. Concurrent cold-cache calls coalesce
+// via singleflight (B9).
+//
+// Used by WhoAmI to replace the N×M per-site fan-out with a single
+// upstream probe.
+func (c *GitHubClient) UserTeams(ctx context.Context, token string) ([]string, error) {
+	cacheKey := hashToken(token)
+
+	c.mu.Lock()
+	if entry, ok := c.userTeamsCache[cacheKey]; ok && entry.expires.After(c.now()) {
+		c.mu.Unlock()
+		return append([]string(nil), entry.teams...), nil
+	}
+	c.mu.Unlock()
+
+	v, err, _ := c.sfUserTeams.Do(cacheKey, func() (any, error) {
+		c.mu.Lock()
+		if entry, ok := c.userTeamsCache[cacheKey]; ok && entry.expires.After(c.now()) {
+			c.mu.Unlock()
+			return append([]string(nil), entry.teams...), nil
+		}
+		c.mu.Unlock()
+		return c.fetchUserTeams(ctx, cacheKey, token)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]string), nil
+}
+
+func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token string) ([]string, error) {
+	var teams []string
+	page := 1
+	for {
+		url := fmt.Sprintf("%s/user/teams?per_page=100&page=%d", c.cfg.APIBase, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("github: build request: %w", err)
+		}
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("github: %w", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+
+		switch {
+		case resp.StatusCode == http.StatusOK:
+			// fall through
+		case resp.StatusCode == http.StatusUnauthorized:
+			return nil, ErrGitHubUnauthenticated
+		case resp.StatusCode == http.StatusForbidden && bodyMentionsRateLimit(body):
+			return nil, ErrGitHubRateLimited
+		case resp.StatusCode == http.StatusForbidden:
+			return nil, ErrGitHubUnauthenticated
+		case resp.StatusCode >= 500:
+			return nil, ErrGitHubUnavailable
+		default:
+			return nil, fmt.Errorf("github /user/teams: unexpected status %d: %s", resp.StatusCode, string(body))
+		}
+
+		var pageTeams []struct {
+			Slug         string `json:"slug"`
+			Organization struct {
+				Login string `json:"login"`
+			} `json:"organization"`
+		}
+		if err := json.Unmarshal(body, &pageTeams); err != nil {
+			return nil, fmt.Errorf("github /user/teams: parse: %w", err)
+		}
+		if len(pageTeams) == 0 {
+			break
+		}
+		for _, t := range pageTeams {
+			// Only include teams in the configured org.
+			if c.cfg.Org == "" || strings.EqualFold(t.Organization.Login, c.cfg.Org) {
+				teams = append(teams, t.Slug)
+			}
+		}
+		// Less than full page → last page.
+		if len(pageTeams) < 100 {
+			break
+		}
+		page++
+	}
+
+	c.mu.Lock()
+	c.userTeamsCache[cacheKey] = userTeamsCacheEntry{
+		teams:   append([]string(nil), teams...),
+		expires: c.now().Add(c.cfg.CacheTTL),
+	}
+	c.mu.Unlock()
+
+	return teams, nil
 }
 
 // AuthorizeForSite returns true iff `user` is an active member of any

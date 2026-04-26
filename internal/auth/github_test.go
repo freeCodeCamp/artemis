@@ -334,6 +334,83 @@ func TestValidateToken_SingleflightOnConcurrentMiss(t *testing.T) {
 		"expected singleflight to coalesce N concurrent misses into 1 upstream call")
 }
 
+// TestUserTeams_PaginatesAndFiltersByOrg — B9: returns slugs across
+// pages, scoped to cfg.Org. Out-of-org memberships must be dropped.
+func TestUserTeams_PaginatesAndFiltersByOrg(t *testing.T) {
+	mux := http.NewServeMux()
+	calls := atomic.Int32{}
+	mux.HandleFunc("/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		page := r.URL.Query().Get("page")
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "1":
+			// 100 entries → forces another page request.
+			out := `[`
+			for i := 0; i < 100; i++ {
+				if i > 0 {
+					out += ","
+				}
+				out += `{"slug":"team-eng","organization":{"login":"freeCodeCamp"}}`
+			}
+			out += `]`
+			_, _ = w.Write([]byte(out))
+		case "2":
+			_, _ = w.Write([]byte(`[
+				{"slug":"team-content","organization":{"login":"freeCodeCamp"}},
+				{"slug":"team-other-org","organization":{"login":"someOtherOrg"}}
+			]`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:  server.URL,
+		Org:      "freeCodeCamp",
+		CacheTTL: time.Minute,
+	})
+
+	teams, err := c.UserTeams(context.Background(), "ghp_x")
+	require.NoError(t, err)
+	// Page 1 yielded 100× team-eng (deduped is the caller's job; here we
+	// just check filter + pagination), page 2 yielded team-content + one
+	// out-of-org entry that must be dropped.
+	assert.Contains(t, teams, "team-content")
+	assert.NotContains(t, teams, "team-other-org",
+		"out-of-org team must be filtered")
+	assert.GreaterOrEqual(t, calls.Load(), int32(2),
+		"must paginate past page 1")
+}
+
+// TestUserTeams_CachesByHashedToken — second call within TTL must NOT
+// hit upstream. Inherits the hashToken cache key from B3.
+func TestUserTeams_CachesByHashedToken(t *testing.T) {
+	mux := http.NewServeMux()
+	calls := atomic.Int32{}
+	mux.HandleFunc("/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`[{"slug":"team-eng","organization":{"login":"freeCodeCamp"}}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:  server.URL,
+		Org:      "freeCodeCamp",
+		CacheTTL: time.Minute,
+	})
+
+	for i := 0; i < 3; i++ {
+		_, err := c.UserTeams(context.Background(), "ghp_same")
+		require.NoError(t, err)
+	}
+	assert.EqualValues(t, 1, calls.Load(),
+		"second/third UserTeams call must hit cache")
+}
+
 func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {
 	gh := newFakeGH()
 	defer gh.Close()

@@ -22,6 +22,10 @@ import (
 type GitHubAuthenticator interface {
 	ValidateToken(ctx context.Context, token string) (string, error)
 	AuthorizeForSite(ctx context.Context, token, login string, teams []string) (bool, error)
+	// UserTeams returns the slugs of every team in the configured org
+	// that `token` is a member of. One paginated call replaces N×M
+	// per-site IsTeamMember probes in WhoAmI (B9).
+	UserTeams(ctx context.Context, token string) ([]string, error)
 }
 
 // DeployJWTSigner is the subset of *auth.DeploySessionSigner used by the
