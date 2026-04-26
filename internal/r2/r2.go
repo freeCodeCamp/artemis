@@ -105,6 +105,13 @@ func (c *Client) PutAlias(ctx context.Context, aliasKey, deployID string) error 
 // GetAlias returns the body of the alias key — i.e. the deploy id it
 // currently points at. Returns ErrNotFound if the alias hasn't been
 // written yet.
+//
+// aws-sdk-go-v2 surfaces R2's 404 as a typed APIError with code
+// NoSuchKey or NotFound; we map both to ErrNotFound. Pre-B24 a
+// belt-and-suspenders string fallback (`strings.Contains(err.Error(),
+// "404")`) was kept against a hypothetical SDK quirk. With nothing
+// deployed yet, removing the fallback simplifies the call site;
+// re-evaluate at the next aws-sdk-go-v2 minor bump if needed.
 func (c *Client) GetAlias(ctx context.Context, aliasKey string) (string, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: awsv2.String(c.bucket),
@@ -117,10 +124,6 @@ func (c *Client) GetAlias(ctx context.Context, aliasKey string) (string, error) 
 			case "NoSuchKey", "NotFound":
 				return "", ErrNotFound
 			}
-		}
-		// Fallback: look at status hints embedded in the error string.
-		if strings.Contains(err.Error(), "404") || strings.Contains(strings.ToLower(err.Error()), "not found") {
-			return "", ErrNotFound
 		}
 		return "", fmt.Errorf("r2 get %s: %w", aliasKey, err)
 	}
