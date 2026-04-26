@@ -53,16 +53,23 @@ func RequestIDFromContext(ctx context.Context) string {
 
 // extractBearer returns the token portion of an "Authorization: Bearer X"
 // header, or "" if missing/malformed.
+//
+// RFC 6750 strict: exactly one space between "Bearer" and the token,
+// no leading/trailing/internal whitespace in the token.
 func extractBearer(r *http.Request) string {
 	h := r.Header.Get("Authorization")
-	if h == "" {
-		return ""
-	}
 	const prefix = "Bearer "
 	if !strings.HasPrefix(h, prefix) {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(h, prefix))
+	tok := h[len(prefix):]
+	if tok == "" {
+		return ""
+	}
+	if strings.ContainsAny(tok, " \t\r\n") {
+		return ""
+	}
+	return tok
 }
 
 // RequireGitHubBearer validates an incoming GitHub PAT/OIDC token via
