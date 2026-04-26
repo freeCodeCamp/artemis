@@ -107,6 +107,11 @@ type fakeR2 struct {
 	listErr   error
 	putErr    error
 	verifyErr error
+
+	// hasPrefixCalls and listPrefixCalls let SiteRollback tests assert
+	// the cheaper probe was used (B6).
+	hasPrefixCalls  int
+	listPrefixCalls int
 }
 
 func newFakeR2() *fakeR2 {
@@ -153,6 +158,7 @@ func (f *fakeR2) GetAlias(_ context.Context, aliasKey string) (string, error) {
 func (f *fakeR2) ListPrefix(_ context.Context, prefix string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listPrefixCalls++
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -163,6 +169,21 @@ func (f *fakeR2) ListPrefix(_ context.Context, prefix string) ([]string, error) 
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeR2) HasPrefix(_ context.Context, prefix string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hasPrefixCalls++
+	if f.listErr != nil {
+		return false, f.listErr
+	}
+	for k := range f.objects {
+		if hasPrefix(k, prefix) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeR2) VerifyDeployComplete(_ context.Context, prefix string, expected []string) error {

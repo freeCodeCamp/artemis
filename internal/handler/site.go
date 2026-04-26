@@ -71,12 +71,12 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.deployPrefix(site, req.To)
-	keys, err := h.R2.ListPrefix(r.Context(), prefix)
+	exists, err := h.R2.HasPrefix(r.Context(), prefix)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "r2_list_failed", err.Error())
 		return
 	}
-	if len(keys) == 0 {
+	if !exists {
 		writeError(w, http.StatusUnprocessableEntity, "deploy_missing", "target deploy no longer exists in r2")
 		return
 	}

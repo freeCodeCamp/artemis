@@ -130,6 +130,32 @@ func TestSiteRollback_RejectsMissingTarget(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 }
 
+// TestSiteRollback_UsesHasPrefix — B6: existence probe must go through
+// HasPrefix (one MaxKeys=1 list), not ListPrefix (full pagination).
+func TestSiteRollback_UsesHasPrefix(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.objects["www/deploys/old-deploy/index.html"] = []byte("a")
+	store.objects["www/deploys/old-deploy/page.html"] = []byte("b")
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "old-deploy"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, 1, store.hasPrefixCalls, "rollback should probe via HasPrefix")
+	assert.Equal(t, 0, store.listPrefixCalls, "rollback should not paginate ListPrefix")
+}
+
 func TestSiteRollback_BadJSON(t *testing.T) {
 	gh := &fakeGH{
 		tokenLogins: map[string]string{"tok": "alice"},
