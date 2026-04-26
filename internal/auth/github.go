@@ -39,6 +39,7 @@ type GitHubClient struct {
 
 type userCacheEntry struct {
 	login   string
+	err     error // non-nil → cached negative (401/403/404 only)
 	expires time.Time
 }
 
@@ -87,6 +88,9 @@ func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string,
 	c.mu.Lock()
 	if entry, ok := c.userCache[cacheKey]; ok && entry.expires.After(c.now()) {
 		c.mu.Unlock()
+		if entry.err != nil {
+			return "", entry.err
+		}
 		return entry.login, nil
 	}
 	c.mu.Unlock()
@@ -111,12 +115,19 @@ func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string,
 	case resp.StatusCode == http.StatusOK:
 		// fall through
 	case resp.StatusCode == http.StatusUnauthorized:
+		c.cacheNegative(cacheKey, ErrGitHubUnauthenticated)
 		return "", ErrGitHubUnauthenticated
 	case resp.StatusCode == http.StatusForbidden && bodyMentionsRateLimit(body):
+		// transient — DO NOT cache.
 		return "", ErrGitHubRateLimited
 	case resp.StatusCode == http.StatusForbidden:
+		c.cacheNegative(cacheKey, ErrGitHubUnauthenticated)
+		return "", ErrGitHubUnauthenticated
+	case resp.StatusCode == http.StatusNotFound:
+		c.cacheNegative(cacheKey, ErrGitHubUnauthenticated)
 		return "", ErrGitHubUnauthenticated
 	case resp.StatusCode >= 500:
+		// transient — DO NOT cache.
 		return "", ErrGitHubUnavailable
 	default:
 		return "", fmt.Errorf("github /user: unexpected status %d: %s", resp.StatusCode, string(body))
@@ -148,6 +159,24 @@ func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string,
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:16])
+}
+
+// negCacheTTL caps negative-cache lifetime: a revoked-then-reissued
+// token must rejoin the happy path quickly. Capped at the lower of
+// configured TTL and 30s.
+const negCacheCap = 30 * time.Second
+
+func (c *GitHubClient) cacheNegative(key string, err error) {
+	ttl := c.cfg.CacheTTL
+	if ttl > negCacheCap {
+		ttl = negCacheCap
+	}
+	c.mu.Lock()
+	c.userCache[key] = userCacheEntry{
+		err:     err,
+		expires: c.now().Add(ttl),
+	}
+	c.mu.Unlock()
 }
 
 // IsTeamMember returns true if `user` has an active membership on
