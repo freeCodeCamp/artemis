@@ -122,10 +122,10 @@ func (l *Loader) run(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if filepath.Clean(ev.Name) != filepath.Clean(l.path) {
+			if !l.eventMatches(ev) {
 				continue
 			}
-			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename|fsnotify.Remove) == 0 {
 				continue
 			}
 			l.tryReload()
@@ -136,6 +136,26 @@ func (l *Loader) run(ctx context.Context) {
 			slog.Warn("sites watcher error", "err", err)
 		}
 	}
+}
+
+// eventMatches reports whether an fsnotify event should trigger a
+// reload. Two cases:
+//
+//  1. Event on the watched path itself (direct in-place edit / rename).
+//  2. Event on `..data` in the same directory — Kubernetes ConfigMap
+//     projection convention. The `..data` symlink is atomically
+//     renamed when the ConfigMap rotates; sites.yaml is a downstream
+//     symlink and never gets a direct event of its own.
+func (l *Loader) eventMatches(ev fsnotify.Event) bool {
+	cleanedName := filepath.Clean(ev.Name)
+	if cleanedName == filepath.Clean(l.path) {
+		return true
+	}
+	dir := filepath.Dir(l.path)
+	if filepath.Dir(cleanedName) == filepath.Clean(dir) && filepath.Base(cleanedName) == "..data" {
+		return true
+	}
+	return false
 }
 
 func (l *Loader) tryReload() {
