@@ -13,13 +13,21 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/auth"
 )
 
-type ctxKey string
+// Per-key unexported struct{} types are the idiomatic Go pattern for
+// context keys (see Go Code Review Comments §"Contexts"): zero
+// allocation, type-safe, and impossible to collide across packages.
+type (
+	loginCtxKey     struct{}
+	jwtClaimsCtxKey struct{}
+	ghTokenCtxKey   struct{}
+	reqIDCtxKey     struct{}
+)
 
-const (
-	ctxKeyLogin ctxKey = "login"
-	ctxKeyJWT   ctxKey = "jwtClaims"
-	ctxKeyToken ctxKey = "ghToken"
-	ctxKeyReqID ctxKey = "reqID"
+var (
+	ctxKeyLogin = loginCtxKey{}
+	ctxKeyJWT   = jwtClaimsCtxKey{}
+	ctxKeyToken = ghTokenCtxKey{}
+	ctxKeyReqID = reqIDCtxKey{}
 )
 
 // LoginFromContext returns the GitHub login resolved by the GitHub-bearer
