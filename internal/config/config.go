@@ -104,14 +104,14 @@ func Load() (*Config, error) {
 		cfg.Port = port
 	}
 
-	cfg.R2.Endpoint = mustEnv("R2_ENDPOINT")
-	cfg.R2.AccessKeyID = mustEnv("R2_ACCESS_KEY_ID")
-	cfg.R2.SecretAccessKey = mustEnv("R2_SECRET_ACCESS_KEY")
+	cfg.R2.Endpoint = getEnv("R2_ENDPOINT")
+	cfg.R2.AccessKeyID = getEnv("R2_ACCESS_KEY_ID")
+	cfg.R2.SecretAccessKey = getEnv("R2_SECRET_ACCESS_KEY")
 	if v, ok := os.LookupEnv("R2_BUCKET"); ok && v != "" {
 		cfg.R2.Bucket = v
 	}
 
-	cfg.GitHub.ClientID = mustEnv("GH_CLIENT_ID")
+	cfg.GitHub.ClientID = getEnv("GH_CLIENT_ID")
 	if v, ok := os.LookupEnv("GH_ORG"); ok && v != "" {
 		cfg.GitHub.Org = v
 	}
@@ -130,7 +130,7 @@ func Load() (*Config, error) {
 		cfg.SitesYAMLPath = v
 	}
 
-	cfg.JWT.SigningKey = mustEnv("JWT_SIGNING_KEY")
+	cfg.JWT.SigningKey = getEnv("JWT_SIGNING_KEY")
 	if v, ok := os.LookupEnv("JWT_TTL_SECONDS"); ok {
 		ttl, err := strconv.Atoi(v)
 		if err != nil || ttl <= 0 {
@@ -216,11 +216,12 @@ func validateDeployPrefixFormat(fmtStr string) error {
 	return nil
 }
 
-// mustEnv returns the env var value or empty string. validate() then
-// surfaces any missing required vars with a uniform error message; using
-// empty string here lets validate() be the single source of truth for
-// "missing var" errors rather than scattering os.Getenv checks.
-func mustEnv(name string) string {
-	v := os.Getenv(name)
-	return v
+// getEnv returns the env var value or empty string. validate() then
+// surfaces any missing required vars with a uniform error message;
+// using empty string here lets validate() be the single source of
+// truth for "missing var" errors rather than scattering os.Getenv
+// checks. Renamed from `mustEnv` (B21) — this function does not
+// panic, so the previous name was misleading.
+func getEnv(name string) string {
+	return os.Getenv(name)
 }
