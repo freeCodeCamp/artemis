@@ -202,15 +202,22 @@ func (c *Client) VerifyDeployComplete(ctx context.Context, prefix string, expect
 	return nil
 }
 
-// NewDeployID builds a deploy id of the form <yyyymmdd-hhmmss>-<sha7>.
-// The short sha is the first 7 characters of the input commit sha.
+// NewDeployID builds a deploy id of the form <yyyymmdd-hhmmss>-<sha7>
+// using time.Now() as the clock source.
+//
+// For deterministic output (tests, replays) use NewDeployIDWithClock.
 func NewDeployID(commitSHA string) string {
-	now := time.Now().UTC()
+	return NewDeployIDWithClock(time.Now, commitSHA)
+}
+
+// NewDeployIDWithClock is NewDeployID with an injectable clock. Pass
+// time.Now in production; pass a fixed-time func in tests.
+func NewDeployIDWithClock(now func() time.Time, commitSHA string) string {
 	short := commitSHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	return fmt.Sprintf("%s-%s", now.Format("20060102-150405"), short)
+	return fmt.Sprintf("%s-%s", now().UTC().Format("20060102-150405"), short)
 }
 
 // ErrNotFound is returned by GetAlias when the alias key doesn't exist.
