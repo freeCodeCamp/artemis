@@ -48,6 +48,7 @@ func newFakeGH() *fakeGH {
 			return
 		}
 		if f.rateLimitOnce.CompareAndSwap(true, false) {
+			w.Header().Set("X-RateLimit-Remaining", "0")
 			http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
 			return
 		}
@@ -257,6 +258,7 @@ func TestValidateToken_NegativeCache_NotForRateLimit(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		w.Header().Set("X-RateLimit-Remaining", "0")
 		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
 	})
 	gh.server.Close()
@@ -409,6 +411,50 @@ func TestUserTeams_CachesByHashedToken(t *testing.T) {
 	}
 	assert.EqualValues(t, 1, calls.Load(),
 		"second/third UserTeams call must hit cache")
+}
+
+// TestValidateToken_RateLimitedByHeader — B16: rate-limit detection
+// must use `X-RateLimit-Remaining: 0` header (GitHub's authoritative
+// signal) rather than substring-matching the response body. Server
+// here returns 403 with the header set but a body that does NOT
+// contain "rate limit" — pre-B16 detection would mis-classify as
+// plain unauthenticated.
+func TestValidateToken_RateLimitedByHeader(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1234567890")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"some other reason"}`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{APIBase: server.URL, Org: "x", CacheTTL: time.Minute})
+	_, err := c.ValidateToken(context.Background(), "ghp_x")
+	require.Error(t, err)
+	assert.True(t, IsGitHubRateLimited(err),
+		"403 with X-RateLimit-Remaining: 0 must surface as rate-limit, got %v", err)
+}
+
+// TestValidateToken_403WithoutRateLimitHeader — bare 403 without the
+// rate-limit header must surface as plain unauthenticated, not
+// rate-limit. Pre-B16 the body-grep would still classify as
+// rate-limit if the body coincidentally contained the substring.
+func TestValidateToken_403WithoutRateLimitHeader(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{APIBase: server.URL, Org: "x", CacheTTL: time.Minute})
+	_, err := c.ValidateToken(context.Background(), "ghp_x")
+	require.Error(t, err)
+	assert.True(t, IsGitHubUnauthenticated(err))
+	assert.False(t, IsGitHubRateLimited(err))
 }
 
 func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {

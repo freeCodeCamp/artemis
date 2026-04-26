@@ -155,7 +155,7 @@ func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (s
 	case resp.StatusCode == http.StatusUnauthorized:
 		c.cacheNegative(cacheKey, ErrGitHubUnauthenticated)
 		return "", ErrGitHubUnauthenticated
-	case resp.StatusCode == http.StatusForbidden && bodyMentionsRateLimit(body):
+	case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
 		// transient — DO NOT cache.
 		return "", ErrGitHubRateLimited
 	case resp.StatusCode == http.StatusForbidden:
@@ -277,7 +277,7 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 		}
 	case resp.StatusCode == http.StatusNotFound:
 		member = false
-	case resp.StatusCode == http.StatusForbidden && bodyMentionsRateLimit(body):
+	case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
 		return false, ErrGitHubRateLimited
 	case resp.StatusCode >= 500:
 		return false, ErrGitHubUnavailable
@@ -352,7 +352,7 @@ func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token strin
 			// fall through
 		case resp.StatusCode == http.StatusUnauthorized:
 			return nil, ErrGitHubUnauthenticated
-		case resp.StatusCode == http.StatusForbidden && bodyMentionsRateLimit(body):
+		case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
 			return nil, ErrGitHubRateLimited
 		case resp.StatusCode == http.StatusForbidden:
 			return nil, ErrGitHubUnauthenticated
@@ -431,6 +431,10 @@ func IsGitHubUnavailable(err error) bool { return errors.Is(err, ErrGitHubUnavai
 // (non-rate-limited) response.
 func IsGitHubUnauthenticated(err error) bool { return errors.Is(err, ErrGitHubUnauthenticated) }
 
-func bodyMentionsRateLimit(body []byte) bool {
-	return strings.Contains(strings.ToLower(string(body)), "rate limit")
+// isRateLimited reports whether resp is a GitHub primary-rate-limit
+// response. Authoritative signal is the `X-RateLimit-Remaining: 0`
+// header (RFC 6585 §4 + GitHub REST docs). Body-substring detection
+// (pre-B16) was fragile against changes to GitHub's error wording.
+func isRateLimited(resp *http.Response) bool {
+	return resp.Header.Get("X-RateLimit-Remaining") == "0"
 }
