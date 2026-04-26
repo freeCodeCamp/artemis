@@ -220,6 +220,75 @@ func TestCacheKey_NotRawToken(t *testing.T) {
 	}
 }
 
+// TestValidateToken_NegativeCacheAbsorbsRetry — B1: repeated requests
+// with the same invalid token must NOT hammer GitHub. After the first
+// 401, subsequent calls within negative-TTL must short-circuit with the
+// cached error.
+func TestValidateToken_NegativeCacheAbsorbsRetry(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+	gh.userStatus = 401
+	gh.userBody = `{"message":"Bad credentials"}`
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:  gh.server.URL,
+		Org:      "freeCodeCamp",
+		CacheTTL: time.Minute,
+	})
+
+	for i := 0; i < 5; i++ {
+		_, err := c.ValidateToken(context.Background(), "ghp_revoked")
+		require.Error(t, err)
+		assert.True(t, IsGitHubUnauthenticated(err), "expected 401 mapped to unauthenticated")
+	}
+	assert.EqualValues(t, 1, gh.userCalls.Load(),
+		"negative result must be cached after first 401, not refetched")
+}
+
+// TestValidateToken_NegativeCache_NotForRateLimit — rate-limit/5xx are
+// transient; caching them would extend the outage. Only steady 401/403
+// (non-rate-limit) and 404 are cacheable negatives.
+func TestValidateToken_NegativeCache_NotForRateLimit(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+
+	calls := atomic.Int32{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+	})
+	gh.server.Close()
+	gh.server = httptest.NewServer(mux)
+
+	c := NewGitHubClient(GitHubClientConfig{APIBase: gh.server.URL, Org: "x", CacheTTL: time.Minute})
+
+	for i := 0; i < 3; i++ {
+		_, err := c.ValidateToken(context.Background(), "ghp_x")
+		require.Error(t, err)
+		assert.True(t, IsGitHubRateLimited(err))
+	}
+	assert.EqualValues(t, 3, calls.Load(),
+		"rate-limit must NOT be cached (transient); 5xx same rule")
+}
+
+// TestValidateToken_NegativeCache_NotFor5xx — same rule for upstream
+// 5xx; caching a 503 freezes recovery for the negative-TTL window.
+func TestValidateToken_NegativeCache_NotFor5xx(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+	gh.transient5xx.Store(true)
+
+	c := NewGitHubClient(GitHubClientConfig{APIBase: gh.server.URL, Org: "x", CacheTTL: time.Minute})
+
+	for i := 0; i < 3; i++ {
+		_, err := c.ValidateToken(context.Background(), "ghp_x")
+		require.Error(t, err)
+		assert.True(t, IsGitHubUnavailable(err))
+	}
+	assert.EqualValues(t, 3, gh.userCalls.Load(), "5xx must NOT be cached")
+}
+
 func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {
 	gh := newFakeGH()
 	defer gh.Close()
