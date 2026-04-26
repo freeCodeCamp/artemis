@@ -164,6 +164,18 @@ func (f *fakeR2) PutObject(_ context.Context, key string, body io.Reader, _ stri
 	return nil
 }
 
+// recordingFakeR2 captures the Content-Type passed to PutObject for
+// B23 assertions. Reuses fakeR2 storage semantics.
+type recordingFakeR2 struct {
+	*fakeR2
+	lastContentType string
+}
+
+func (f *recordingFakeR2) PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error {
+	f.lastContentType = contentType
+	return f.fakeR2.PutObject(ctx, key, body, contentType, contentLength)
+}
+
 func (f *fakeR2) PutAlias(_ context.Context, aliasKey, deployID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -255,7 +267,7 @@ func trimPrefix(s, p string) string {
 
 // newTestHandlers wires a Handlers struct with the fakes plus sensible
 // alias/prefix templates.
-func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store *fakeR2) (*Handlers, *fakeJWT) {
+func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store R2Store) (*Handlers, *fakeJWT) {
 	t.Helper()
 	jwt := newFakeJWT(t)
 	h := &Handlers{

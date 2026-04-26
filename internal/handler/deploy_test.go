@@ -154,6 +154,29 @@ func TestDeployUpload_StoresInR2(t *testing.T) {
 	assert.Equal(t, "<h1>hi</h1>", string(got))
 }
 
+// TestDeployUpload_FallsBackToOctetStream — B23: when the request has
+// no Content-Type and the path extension is unknown to mime.TypeByExtension,
+// the upload still lands in R2 with `application/octet-stream`.
+func TestDeployUpload_FallsBackToOctetStream(t *testing.T) {
+	store := &recordingFakeR2{fakeR2: newFakeR2()}
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
+
+	deployID := "20260420-141522-abc1234"
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+
+	w := withChiRoute(http.MethodPut, "/api/deploy/{deployId}/upload",
+		"/api/deploy/"+deployID+"/upload?path=blob.unknownext",
+		[]byte("opaque-bytes"),
+		// no Content-Type header
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployUpload)).ServeHTTP,
+		context.Background(),
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "application/octet-stream", store.lastContentType)
+}
+
 // TestIsCleanRelPath — B22 anchor + tightening: reject ".", absolute,
 // traversal, and empty paths. "." passing pre-B22 stored a malformed
 // `<deploy-prefix>.` key on R2 (harmless but never spec'd as legal).

@@ -109,6 +109,13 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = mime.TypeByExtension(path.Ext(relPath))
 	}
+	if contentType == "" {
+		// B23: explicit fallback so every R2 object stores a
+		// Content-Type. Browser default is `application/octet-stream`
+		// anyway; setting it explicitly avoids R2's missing-header
+		// behavior and makes object metadata complete.
+		contentType = "application/octet-stream"
+	}
 
 	body := r.Body
 	if h.UploadMaxBytes > 0 {
