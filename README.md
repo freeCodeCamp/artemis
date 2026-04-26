@@ -4,8 +4,6 @@ Static-apps deploy proxy for the freeCodeCamp Universe platform. Public hostname
 
 Staff devs and CI run `universe deploy` and the artifact lands on R2 behind a Caddy `r2_alias` upstream. Zero R2 tokens leak into staff hands or CI secrets — Artemis is the sole holder of the admin S3 token. Identity is GitHub team membership.
 
-Spec: [`Universe/decisions/016-deploy-proxy.md`](https://github.com/freeCodeCamp/Universe/blob/main/decisions/016-deploy-proxy.md) (ADR-016).
-
 ## API
 
 ```
