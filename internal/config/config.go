@@ -9,7 +9,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -225,6 +224,3 @@ func mustEnv(name string) string {
 	v := os.Getenv(name)
 	return v
 }
-
-// ensure errors package isn't dropped if future refactors lean on it.
-var _ = errors.New
