@@ -166,6 +166,11 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if len(req.Files) == 0 {
+		writeError(w, http.StatusBadRequest, "manifest_required",
+			"files manifest is required and must list at least one path")
+		return
+	}
 
 	prefix := h.deployPrefix(claims.Site, deployID)
 	if err := h.R2.VerifyDeployComplete(r.Context(), prefix, req.Files); err != nil {
