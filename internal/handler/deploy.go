@@ -115,7 +115,15 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		body = http.MaxBytesReader(w, r.Body, h.UploadMaxBytes)
 	}
 
-	if err := h.R2.PutObject(r.Context(), key, body, contentType); err != nil {
+	// Propagate ContentLength when the client sent one (B18). Avoids
+	// chunked transfer-encoding negotiation on small uploads. Zero or
+	// negative → unknown; SDK falls back to its default behavior.
+	contentLength := r.ContentLength
+	if contentLength < 0 {
+		contentLength = 0
+	}
+
+	if err := h.R2.PutObject(r.Context(), key, body, contentType, contentLength); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large",

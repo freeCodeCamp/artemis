@@ -42,7 +42,7 @@ type SitesProvider interface {
 
 // R2Store is the subset of *r2.Client used here.
 type R2Store interface {
-	PutObject(ctx context.Context, key string, body io.Reader, contentType string) error
+	PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error
 	PutAlias(ctx context.Context, aliasKey, deployID string) error
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)

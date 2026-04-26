@@ -35,6 +35,13 @@ type fakeS3 struct {
 	// query param on a ListObjectsV2 request — used by HasPrefix tests
 	// to assert R2 cost bound.
 	lastListMaxKeys string
+
+	// lastPutContentLength captures the most recent value of the
+	// `Content-Length` header on a PutObject — used by B18 tests.
+	lastPutContentLength int64
+	// lastPutTransferEncoding captures the Transfer-Encoding header.
+	// Aws-sdk-go-v2 sends "chunked" when ContentLength is unknown.
+	lastPutTransferEncoding string
 }
 
 func newFakeS3(t *testing.T, bucket string) *fakeS3 {
@@ -75,6 +82,11 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
 		f.objects[f.bucket+"/"+key] = body
+		f.lastPutContentLength = r.ContentLength
+		f.lastPutTransferEncoding = ""
+		if len(r.TransferEncoding) > 0 {
+			f.lastPutTransferEncoding = r.TransferEncoding[0]
+		}
 		f.mu.Unlock()
 		w.Header().Set("ETag", `"deadbeef"`)
 		w.WriteHeader(http.StatusOK)
@@ -159,15 +171,52 @@ func TestPutObject_StoresBytes(t *testing.T) {
 	fake := newFakeS3(t, "universe-static-apps-01")
 	c := newClient(t, fake)
 
+	body := []byte("<h1>hello</h1>")
 	require.NoError(t, c.PutObject(context.Background(),
 		"www/deploys/d1/index.html",
-		bytes.NewReader([]byte("<h1>hello</h1>")),
-		"text/html"))
+		bytes.NewReader(body),
+		"text/html",
+		int64(len(body))))
 
 	fake.mu.Lock()
-	body := fake.objects[fake.bucket+"/www/deploys/d1/index.html"]
+	stored := fake.objects[fake.bucket+"/www/deploys/d1/index.html"]
 	fake.mu.Unlock()
-	assert.Equal(t, "<h1>hello</h1>", string(body))
+	assert.Equal(t, "<h1>hello</h1>", string(stored))
+}
+
+// TestPutObject_PropagatesContentLength — B18: when caller knows the
+// body size up-front (HTTP request with a Content-Length header), the
+// upstream R2 PUT must include it. Avoids aws-sdk-go-v2 negotiating
+// chunked transfer-encoding on every small upload.
+func TestPutObject_PropagatesContentLength(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	body := []byte("twelve-bytes")
+	require.NoError(t, c.PutObject(context.Background(),
+		"k", bytes.NewReader(body), "application/octet-stream", int64(len(body))))
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	assert.EqualValues(t, len(body), fake.lastPutContentLength,
+		"expected Content-Length to propagate to R2 PUT")
+	assert.NotEqual(t, "chunked", fake.lastPutTransferEncoding,
+		"with known length the SDK should NOT use chunked encoding")
+}
+
+// TestPutObject_UnknownLengthOk — caller passes 0 (unknown). PUT still
+// succeeds; SDK falls back to its default behavior (typically chunked).
+func TestPutObject_UnknownLengthOk(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	body := []byte("hello")
+	require.NoError(t, c.PutObject(context.Background(),
+		"k", bytes.NewReader(body), "text/plain", 0))
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	assert.Equal(t, "hello", string(fake.objects[fake.bucket+"/k"]))
 }
 
 func TestPutAlias_AtomicSinglePut(t *testing.T) {
@@ -191,7 +240,7 @@ func TestListPrefix_ReturnsKeysUnderPrefix(t *testing.T) {
 		"www/deploys/d1/assets/app.js",
 		"www/deploys/d2/index.html",
 	} {
-		require.NoError(t, c.PutObject(context.Background(), key, bytes.NewReader([]byte("x")), "text/plain"))
+		require.NoError(t, c.PutObject(context.Background(), key, bytes.NewReader([]byte("x")), "text/plain", 1))
 	}
 
 	keys, err := c.ListPrefix(context.Background(), "www/deploys/d1/")
@@ -248,7 +297,7 @@ func TestHasPrefix_TrueWhenObjectsExist(t *testing.T) {
 
 	require.NoError(t, c.PutObject(context.Background(),
 		"www/deploys/d1/index.html",
-		bytes.NewReader([]byte("x")), "text/plain"))
+		bytes.NewReader([]byte("x")), "text/plain", 1))
 
 	ok, err := c.HasPrefix(context.Background(), "www/deploys/d1/")
 	require.NoError(t, err)
@@ -277,7 +326,7 @@ func TestHasPrefix_RequestsMaxKeysOne(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		require.NoError(t, c.PutObject(context.Background(),
 			fmtKey("www/deploys/d1/file%02d.html", i),
-			bytes.NewReader([]byte("x")), "text/plain"))
+			bytes.NewReader([]byte("x")), "text/plain", 1))
 	}
 
 	fake.lastListMaxKeys = ""
@@ -296,7 +345,7 @@ func TestVerifyDeployComplete_PassFail(t *testing.T) {
 		"www/deploys/d1/index.html",
 		"www/deploys/d1/assets/app.js",
 	} {
-		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("x")), "text/plain"))
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("x")), "text/plain", 1))
 	}
 
 	require.NoError(t, c.VerifyDeployComplete(context.Background(),
