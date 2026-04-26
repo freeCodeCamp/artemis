@@ -108,6 +108,45 @@ func TestWhoAmI_NoAuthorizedSites(t *testing.T) {
 	assert.Empty(t, got.AuthorizedSites)
 }
 
+// TestWhoAmI_OneGitHubCallPerCold — B9: one cold-cache /user/teams call
+// must replace the previous N×M AuthorizeForSite fan-out. This test
+// uses 5 sites × 3 teams; pre-B9 WhoAmI made 5 AuthorizeForSite calls
+// (each potentially 3 IsTeamMember calls inside).
+func TestWhoAmI_OneGitHubCallPerCold(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"good": "alice"},
+		userTeams: map[string]map[string]bool{
+			"alice": {"team-eng": true, "team-platform": true},
+		},
+	}
+	st := &fakeSites{bySite: map[string][]string{
+		"www":   {"team-eng", "team-platform", "team-content"},
+		"learn": {"team-eng", "team-research", "team-platform"},
+		"news":  {"team-content", "team-platform", "team-eng"},
+		"blog":  {"team-eng", "team-marketing", "team-content"},
+		"docs":  {"team-platform", "team-eng", "team-research"},
+	}}
+	h, _ := newTestHandlers(t, gh, st, newFakeR2())
+
+	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "good"))
+	w := httptest.NewRecorder()
+	h.WhoAmI(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, gh.userTeamsCalls,
+		"expected exactly 1 /user/teams call regardless of site count")
+	assert.Equal(t, 0, gh.authorizeCalls,
+		"WhoAmI must intersect locally, not call AuthorizeForSite")
+
+	var got struct {
+		AuthorizedSites []string `json:"authorizedSites"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	// alice is on team-eng + team-platform → all 5 sites match.
+	assert.ElementsMatch(t, []string{"www", "learn", "news", "blog", "docs"}, got.AuthorizedSites)
+}
+
 // contextWithLogin returns a context with both login + token attached, as
 // the auth middleware would.
 func contextWithLogin(parent context.Context, login, token string) context.Context {

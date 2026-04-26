@@ -25,6 +25,14 @@ type fakeGH struct {
 	tokenLogins map[string]string
 	userTeams   map[string]map[string]bool
 	upstreamErr error
+
+	// userTeamsCalls counts batched /user/teams probes (B9). WhoAmI
+	// must hit this at most once per cold cache, never N×.
+	userTeamsCalls int
+	// authorizeCalls counts AuthorizeForSite invocations. Post-B9 the
+	// WhoAmI handler must NOT call AuthorizeForSite at all (intersect
+	// locally instead).
+	authorizeCalls int
 }
 
 func (f *fakeGH) ValidateToken(_ context.Context, token string) (string, error) {
@@ -38,6 +46,7 @@ func (f *fakeGH) ValidateToken(_ context.Context, token string) (string, error) 
 }
 
 func (f *fakeGH) AuthorizeForSite(_ context.Context, _ string, login string, teams []string) (bool, error) {
+	f.authorizeCalls++
 	if f.upstreamErr != nil {
 		return false, f.upstreamErr
 	}
@@ -48,6 +57,27 @@ func (f *fakeGH) AuthorizeForSite(_ context.Context, _ string, login string, tea
 		}
 	}
 	return false, nil
+}
+
+// UserTeams returns the slugs the resolved login belongs to. Tracked by
+// userTeamsCalls so B9 tests can assert one cold-cache call per request.
+func (f *fakeGH) UserTeams(_ context.Context, token string) ([]string, error) {
+	f.userTeamsCalls++
+	if f.upstreamErr != nil {
+		return nil, f.upstreamErr
+	}
+	login, ok := f.tokenLogins[token]
+	if !ok {
+		return nil, auth.ErrGitHubUnauthenticated
+	}
+	mem := f.userTeams[login]
+	out := make([]string, 0, len(mem))
+	for slug, member := range mem {
+		if member {
+			out = append(out, slug)
+		}
+	}
+	return out, nil
 }
 
 // fakeJWT implements DeployJWTSigner with a real signer wrapped to keep
