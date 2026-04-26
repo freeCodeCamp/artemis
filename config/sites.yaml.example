@@ -1,0 +1,21 @@
+# sites.yaml — site→teams authorization map for Artemis.
+#
+# Each top-level key under `sites:` is a site slug (matches the sub-domain
+# served by Caddy on cassiopeia, e.g. `<site>.freecode.camp`). The
+# `teams:` list enumerates GitHub team slugs (within the configured
+# GH_ORG) whose members are authorized to deploy to that site.
+#
+# Hot-reloaded by Artemis via fsnotify; on schema error the pod retains
+# the last-good config.
+
+sites:
+  www:
+    teams:
+      - team-eng
+      - team-platform
+  learn:
+    teams:
+      - team-eng
+  news:
+    teams:
+      - team-content

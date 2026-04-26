@@ -1,0 +1,24 @@
+# Binaries
+/bin/
+/artemis
+*.exe
+*.test
+*.out
+
+# Go build cache / coverage
+*.cover
+coverage.out
+coverage.html
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local env / runtime
+.env
+.envrc
+config/sites.yaml
+
+# Vendored deps (we use modules)
+vendor/
