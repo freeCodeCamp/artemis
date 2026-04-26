@@ -189,12 +189,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 // deployPrefix returns the R2 key prefix for one deploy, e.g.
 // "www/deploys/20260420-141522-abc1234/".
 func (h *Handlers) deployPrefix(site, deployID string) string {
-	p := strings.ReplaceAll(h.DeployPrefixFmt, "<site>", site)
-	p = strings.ReplaceAll(p, "<ts>-<sha>", deployID)
-	if !strings.HasSuffix(p, "/") {
-		p += "/"
-	}
-	return p
+	return h.DeployPrefix.DeployPrefix(site, deployID)
 }
 
 // aliasKey returns the R2 alias key for `mode` ("preview"/"production").

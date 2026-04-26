@@ -215,7 +215,7 @@ func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store *fakeR2) (*H
 		R2:                 store,
 		AliasProductionFmt: "<site>/production",
 		AliasPreviewFmt:    "<site>/preview",
-		DeployPrefixFmt:    "<site>/deploys/<ts>-<sha>/",
+		DeployPrefix:       mustDeployPrefixTemplate("<site>/deploys/<ts>-<sha>/"),
 		NewDeployID: func(sha string) string {
 			return "20260420-141522-" + sha[:min(7, len(sha))]
 		},
@@ -238,3 +238,14 @@ func min(a, b int) int {
 }
 
 var _ = errors.New // keep errors imported for future helpers
+
+// mustDeployPrefixTemplate panics if the literal raw cannot be parsed.
+// Test-only helper — production wiring uses NewDeployPrefixTemplate
+// with explicit error handling.
+func mustDeployPrefixTemplate(raw string) DeployPrefixTemplate {
+	tpl, err := NewDeployPrefixTemplate(raw)
+	if err != nil {
+		panic(err)
+	}
+	return tpl
+}

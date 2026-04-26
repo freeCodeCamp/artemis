@@ -53,10 +53,12 @@ type Handlers struct {
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
-	DeployPrefixFmt    string // e.g. "<site>/deploys/<ts>-<sha>/" — the literal "<ts>-<sha>" segment is replaced by the deploy id
-	NewDeployID        func(sha string) string
-	Now                func() time.Time
-	PublicURLForSite   func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
+	// DeployPrefix is the parsed deploy-key template. Replaces the
+	// raw string + brittle stripDeployIDFromFmt surgery (B7).
+	DeployPrefix     DeployPrefixTemplate
+	NewDeployID      func(sha string) string
+	Now              func() time.Time
+	PublicURLForSite func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.
