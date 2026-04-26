@@ -292,6 +292,39 @@ func TestDeployFinalize_VerifyMissing_DoesNotWriteAlias(t *testing.T) {
 	assert.False(t, hasAlias, "alias must NOT be written on verify failure")
 }
 
+// TestDeployFinalize_RequiresFiles — B5: a finalize body with no files
+// manifest must NOT flip the alias (today VerifyDeployComplete returns
+// nil for an empty expected list, which silently promotes a possibly
+// empty deploy and breaks ADR-016's atomic-never-partial invariant).
+func TestDeployFinalize_RequiresFiles(t *testing.T) {
+	st := standardSites()
+	store := newFakeR2()
+	h, jwt := newTestHandlers(t, &fakeGH{}, st, store)
+
+	deployID := "20260420-141522-abc1234"
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(DeployFinalizeRequest{Mode: "preview"}) // no Files
+
+	w := withChiRoute(http.MethodPost, "/api/deploy/{deployId}/finalize",
+		"/api/deploy/"+deployID+"/finalize",
+		body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployFinalize)).ServeHTTP,
+		context.Background(),
+	)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "manifest_required")
+
+	// Alias must NOT have been written.
+	store.mu.Lock()
+	_, exists := store.aliases["www/preview"]
+	store.mu.Unlock()
+	assert.False(t, exists, "alias must not flip on empty manifest")
+}
+
 func TestDeployFinalize_RejectsExpiredJWT(t *testing.T) {
 	// Build a real signer with 1ms TTL so the JWT is already expired.
 	st := standardSites()
