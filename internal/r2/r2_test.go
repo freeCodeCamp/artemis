@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,6 +226,18 @@ func TestDeployIDFormat_TimestampPlusShortSha(t *testing.T) {
 	id := NewDeployID("abc1234567890")
 	// Format: <yyyymmdd-hhmmss>-<sha7>
 	assert.Regexp(t, `^\d{8}-\d{6}-abc1234$`, id)
+}
+
+// TestNewDeployIDWithClock_Deterministic — B17: NewDeployIDWithClock
+// accepts an injectable clock so tests can assert the literal output
+// without race-prone wallclock comparisons. Required for any caller
+// that wants to verify the encoded timestamp.
+func TestNewDeployIDWithClock_Deterministic(t *testing.T) {
+	fixed := func() time.Time {
+		return time.Date(2026, 4, 20, 14, 15, 22, 0, time.UTC)
+	}
+	id := NewDeployIDWithClock(fixed, "deadbeef0000")
+	assert.Equal(t, "20260420-141522-deadbee", id)
 }
 
 // TestHasPrefix_TrueWhenObjectsExist — B6: existence probe must return
