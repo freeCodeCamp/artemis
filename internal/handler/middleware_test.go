@@ -182,11 +182,34 @@ func TestRequireGitHubBearer_BadToken_Returns401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
+// TestExtractBearer_MalformedHeader — B15: extractBearer must conform
+// to RFC 6750 — exactly one space between "Bearer" and the token, no
+// leading/trailing/internal whitespace in the token. Pre-B15 we
+// tolerated double-space and trimmed surrounding whitespace, which
+// silently accepted malformed clients.
 func TestExtractBearer_MalformedHeader(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/x", nil)
-	assert.Equal(t, "", extractBearer(r))
-	r.Header.Set("Authorization", "Basic abcd")
-	assert.Equal(t, "", extractBearer(r))
-	r.Header.Set("Authorization", "Bearer  trimmed-spaces")
-	assert.Equal(t, "trimmed-spaces", extractBearer(r))
+	cases := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{"absent", "", ""},
+		{"wrong-scheme", "Basic abcd", ""},
+		{"missing-space", "Bearertok", ""},
+		{"empty-token", "Bearer ", ""},
+		{"happy-path", "Bearer ghp_validtoken", "ghp_validtoken"},
+		{"double-space-leading", "Bearer  trimmed-spaces", ""},
+		{"trailing-whitespace", "Bearer tok ", ""},
+		{"internal-whitespace", "Bearer to k", ""},
+		{"tab-after-scheme", "Bearer\ttok", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/x", nil)
+			if tc.header != "" {
+				r.Header.Set("Authorization", tc.header)
+			}
+			assert.Equal(t, tc.want, extractBearer(r))
+		})
+	}
 }
