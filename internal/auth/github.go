@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // GitHubClientConfig configures the GitHub REST client used for identity
@@ -35,6 +37,9 @@ type GitHubClient struct {
 	mu        sync.Mutex
 	userCache map[string]userCacheEntry // hashToken(raw) → cached login
 	teamCache map[teamCacheKey]teamCacheEntry
+
+	sfUser singleflight.Group // dedupes concurrent /user misses by hashed token
+	sfTeam singleflight.Group // dedupes concurrent team-membership misses by (login, team)
 }
 
 type userCacheEntry struct {
@@ -80,8 +85,9 @@ func NewGitHubClient(cfg GitHubClientConfig) *GitHubClient {
 // ValidateToken calls GET /user with the supplied bearer and returns the
 // resolved login. Successful results are cached for CacheTTL keyed by a
 // sha256 prefix of the raw token (16 bytes hex), never the token itself.
-// Rate-limit and 5xx responses are surfaced via typed errors
-// (IsGitHubRateLimited / IsGitHubUnavailable).
+// Concurrent cold-cache requests for the same token are coalesced via
+// singleflight into ONE upstream call. Rate-limit and 5xx responses are
+// surfaced via typed errors (IsGitHubRateLimited / IsGitHubUnavailable).
 func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string, error) {
 	cacheKey := hashToken(token)
 
@@ -95,6 +101,30 @@ func (c *GitHubClient) ValidateToken(ctx context.Context, token string) (string,
 	}
 	c.mu.Unlock()
 
+	v, err, _ := c.sfUser.Do(cacheKey, func() (any, error) {
+		// Re-check cache inside the singleflight critical section: an
+		// earlier flight that raced may have populated it.
+		c.mu.Lock()
+		if entry, ok := c.userCache[cacheKey]; ok && entry.expires.After(c.now()) {
+			c.mu.Unlock()
+			if entry.err != nil {
+				return "", entry.err
+			}
+			return entry.login, nil
+		}
+		c.mu.Unlock()
+		return c.fetchUser(ctx, cacheKey, token)
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
+
+// fetchUser performs the actual GET /user round-trip and writes the
+// outcome (positive or cacheable-negative) into userCache. Rate-limit
+// and 5xx are returned without caching (transient).
+func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.APIBase+"/user", nil)
 	if err != nil {
 		return "", fmt.Errorf("github: build request: %w", err)
@@ -180,7 +210,9 @@ func (c *GitHubClient) cacheNegative(key string, err error) {
 }
 
 // IsTeamMember returns true if `user` has an active membership on
-// `<org>/<team>`. Cached for CacheTTL keyed by (user, team).
+// `<org>/<team>`. Cached for CacheTTL keyed by (user, team). Concurrent
+// cold-cache calls for the same (user, team) pair are coalesced via
+// singleflight.
 func (c *GitHubClient) IsTeamMember(ctx context.Context, token, user, teamSlug string) (bool, error) {
 	key := teamCacheKey{user: user, team: teamSlug}
 
@@ -191,6 +223,23 @@ func (c *GitHubClient) IsTeamMember(ctx context.Context, token, user, teamSlug s
 	}
 	c.mu.Unlock()
 
+	sfKey := user + "\x00" + teamSlug
+	v, err, _ := c.sfTeam.Do(sfKey, func() (any, error) {
+		c.mu.Lock()
+		if entry, ok := c.teamCache[key]; ok && entry.expires.After(c.now()) {
+			c.mu.Unlock()
+			return entry.member, nil
+		}
+		c.mu.Unlock()
+		return c.fetchTeamMembership(ctx, token, user, teamSlug, key)
+	})
+	if err != nil {
+		return false, err
+	}
+	return v.(bool), nil
+}
+
+func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, teamSlug string, key teamCacheKey) (bool, error) {
 	url := fmt.Sprintf("%s/orgs/%s/teams/%s/memberships/%s",
 		c.cfg.APIBase, c.cfg.Org, teamSlug, user)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
