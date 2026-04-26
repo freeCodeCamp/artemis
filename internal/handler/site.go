@@ -102,7 +102,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deploysPrefix := strings.ReplaceAll(stripDeployIDFromFmt(h.DeployPrefixFmt), "<site>", site)
+	deploysPrefix := h.DeployPrefix.SitePrefix(site)
 	keys, err := h.R2.ListPrefix(r.Context(), deploysPrefix)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "r2_list_failed", err.Error())
@@ -150,17 +150,4 @@ func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site
 		return errBadRequest
 	}
 	return nil
-}
-
-// stripDeployIDFromFmt returns the deploy-prefix template with the
-// "<ts>-<sha>/" tail removed, leaving just "<site>/deploys/" so we can
-// list every deploy under the site.
-func stripDeployIDFromFmt(fmtStr string) string {
-	out := fmtStr
-	out = strings.ReplaceAll(out, "<ts>-<sha>/", "")
-	out = strings.ReplaceAll(out, "<ts>-<sha>", "")
-	if !strings.HasSuffix(out, "/") {
-		out += "/"
-	}
-	return out
 }

@@ -79,6 +79,11 @@ func run() error {
 		return fmt.Errorf("init jwt signer: %w", err)
 	}
 
+	deployPrefix, err := handler.NewDeployPrefixTemplate(cfg.DeployPrefixFormat)
+	if err != nil {
+		return fmt.Errorf("parse deploy prefix template: %w", err)
+	}
+
 	h := &handler.Handlers{
 		GH:                 ghClient,
 		JWT:                signer,
@@ -86,7 +91,7 @@ func run() error {
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
-		DeployPrefixFmt:    cfg.DeployPrefixFormat,
+		DeployPrefix:       deployPrefix,
 		NewDeployID:        r2.NewDeployID,
 		Now:                time.Now,
 	}
