@@ -24,19 +24,22 @@ const (
 
 // DeploySessionClaims are the custom claims carried in a deploy-session
 // JWT. See ADR-016 amendment §JWT scope clarification.
+//
+// `sub` (login) and `iss` come from the embedded RegisteredClaims so
+// there is exactly one source of each on the wire. Pre-B14 outer
+// Login/Issuer fields shadowed the embedded ones at marshal time and
+// silently dropped the embedded values on the wire.
 type DeploySessionClaims struct {
-	Login    string `json:"sub"`
 	Site     string `json:"site"`
 	DeployID string `json:"deployId"`
-	Issuer   string `json:"iss"`
 	jwt.RegisteredClaims
 }
 
 // RequireScope verifies that the JWT was issued for exactly this
 // (login, site, deployId) triple. Returns an error otherwise.
 func (c DeploySessionClaims) RequireScope(login, site, deployID string) error {
-	if c.Login != login {
-		return fmt.Errorf("auth: jwt sub %q != expected %q", c.Login, login)
+	if c.Subject != login {
+		return fmt.Errorf("auth: jwt sub %q != expected %q", c.Subject, login)
 	}
 	if c.Site != site {
 		return fmt.Errorf("auth: jwt site %q != expected %q", c.Site, site)
@@ -74,10 +77,8 @@ func (s *DeploySessionSigner) Sign(login, site, deployID string) (string, time.T
 	now := time.Now()
 	exp := now.Add(s.ttl)
 	claims := DeploySessionClaims{
-		Login:    login,
 		Site:     site,
 		DeployID: deployID,
-		Issuer:   jwtIssuer,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   login,
 			Issuer:    jwtIssuer,
