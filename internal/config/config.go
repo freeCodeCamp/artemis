@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -182,6 +183,27 @@ func (c *Config) validate() error {
 	}
 	if _, ok := validLogLevels[c.LogLevel]; !ok {
 		return fmt.Errorf("invalid LOG_LEVEL %q: must be one of debug, info, warn, error", c.LogLevel)
+	}
+	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateDeployPrefixFormat asserts the deploy-key template contains
+// both required placeholders. Both must be present so the per-deploy
+// prefix is unambiguous and the site-prefix can be derived for listing.
+func validateDeployPrefixFormat(fmtStr string) error {
+	required := []string{"<site>", "<ts>-<sha>"}
+	var missing []string
+	for _, tok := range required {
+		if !strings.Contains(fmtStr, tok) {
+			missing = append(missing, tok)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: must contain %s",
+			fmtStr, strings.Join(missing, " and "))
 	}
 	return nil
 }
