@@ -87,15 +87,5 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
-// firstNonEmpty returns the first non-empty argument, or "" if none.
-func firstNonEmpty(a ...string) string {
-	for _, s := range a {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
 // errBadRequest is a sentinel for malformed bodies.
 var errBadRequest = errors.New("bad request")
