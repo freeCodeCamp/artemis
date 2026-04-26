@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func fmtKey(format string, args ...any) string { return fmt.Sprintf(format, args...) }
+
 // fakeS3 is a minimal in-memory S3-compatible HTTP backend that the AWS
 // SDK can talk to via endpoint override + path-style addressing.
 type fakeS3 struct {
@@ -25,6 +29,11 @@ type fakeS3 struct {
 	objects map[string][]byte // key = "<bucket>/<key>"
 	server  *httptest.Server
 	bucket  string
+
+	// lastListMaxKeys captures the most recent value of the `max-keys`
+	// query param on a ListObjectsV2 request — used by HasPrefix tests
+	// to assert R2 cost bound.
+	lastListMaxKeys string
 }
 
 func newFakeS3(t *testing.T, bucket string) *fakeS3 {
@@ -102,7 +111,9 @@ type listContent struct {
 
 func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 	prefix := r.URL.Query().Get("prefix")
+	maxKeys := r.URL.Query().Get("max-keys")
 	f.mu.Lock()
+	f.lastListMaxKeys = maxKeys
 	var contents []listContent
 	for k, v := range f.objects {
 		if !strings.HasPrefix(k, f.bucket+"/") {
@@ -115,6 +126,13 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 		contents = append(contents, listContent{Key: key, Size: len(v)})
 	}
 	f.mu.Unlock()
+
+	// Honor max-keys param (string-typed in S3 wire format).
+	if maxKeys != "" {
+		if n, err := strconv.Atoi(maxKeys); err == nil && n >= 0 && n < len(contents) {
+			contents = contents[:n]
+		}
+	}
 
 	res := listResult{Name: f.bucket, Prefix: prefix, KeyCount: len(contents), Contents: contents}
 	w.Header().Set("Content-Type", "application/xml")
@@ -207,6 +225,54 @@ func TestDeployIDFormat_TimestampPlusShortSha(t *testing.T) {
 	id := NewDeployID("abc1234567890")
 	// Format: <yyyymmdd-hhmmss>-<sha7>
 	assert.Regexp(t, `^\d{8}-\d{6}-abc1234$`, id)
+}
+
+// TestHasPrefix_TrueWhenObjectsExist — B6: existence probe must return
+// true on a prefix that has at least one object, without paginating.
+func TestHasPrefix_TrueWhenObjectsExist(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	require.NoError(t, c.PutObject(context.Background(),
+		"www/deploys/d1/index.html",
+		bytes.NewReader([]byte("x")), "text/plain"))
+
+	ok, err := c.HasPrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// TestHasPrefix_FalseWhenEmpty — empty prefix returns false, no error.
+// This is the path SiteRollback uses to refuse rolling back to a swept
+// deploy.
+func TestHasPrefix_FalseWhenEmpty(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	ok, err := c.HasPrefix(context.Background(), "www/deploys/gone/")
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+// TestHasPrefix_RequestsMaxKeysOne — the whole point of HasPrefix vs
+// ListPrefix is to bound the R2 cost: regardless of how many objects
+// live under the prefix, we send max-keys=1 and ask for one page.
+func TestHasPrefix_RequestsMaxKeysOne(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, c.PutObject(context.Background(),
+			fmtKey("www/deploys/d1/file%02d.html", i),
+			bytes.NewReader([]byte("x")), "text/plain"))
+	}
+
+	fake.lastListMaxKeys = ""
+	ok, err := c.HasPrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "1", fake.lastListMaxKeys,
+		"HasPrefix must send max-keys=1 to bound R2 cost")
 }
 
 func TestVerifyDeployComplete_PassFail(t *testing.T) {

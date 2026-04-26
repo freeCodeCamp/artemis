@@ -123,6 +123,22 @@ func (c *Client) GetAlias(ctx context.Context, aliasKey string) (string, error) 
 	return string(body), nil
 }
 
+// HasPrefix reports whether at least one object exists under prefix.
+// Implementation: a single ListObjectsV2 with MaxKeys=1, no pagination.
+// Bounds R2 cost on existence probes (used by SiteRollback) regardless
+// of how many objects share the prefix.
+func (c *Client) HasPrefix(ctx context.Context, prefix string) (bool, error) {
+	page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  awsv2.String(c.bucket),
+		Prefix:  awsv2.String(prefix),
+		MaxKeys: awsv2.Int32(1),
+	})
+	if err != nil {
+		return false, fmt.Errorf("r2 hasprefix %s: %w", prefix, err)
+	}
+	return len(page.Contents) > 0, nil
+}
+
 // ListPrefix returns all keys under the given prefix.
 func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error) {
 	var out []string
