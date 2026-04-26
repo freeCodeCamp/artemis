@@ -63,7 +63,7 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 	t.Setenv("JWT_TTL_SECONDS", "300")
 	t.Setenv("ALIAS_PRODUCTION_KEY_FORMAT", "<site>/prod")
 	t.Setenv("ALIAS_PREVIEW_KEY_FORMAT", "<site>/staging")
-	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/d/<ts>/")
+	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/d/<ts>-<sha>/")
 	t.Setenv("LOG_LEVEL", "debug")
 
 	cfg, err := Load()
@@ -78,7 +78,7 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, cfg.JWT.TTL)
 	assert.Equal(t, "<site>/prod", cfg.Aliases.ProductionKeyFormat)
 	assert.Equal(t, "<site>/staging", cfg.Aliases.PreviewKeyFormat)
-	assert.Equal(t, "<site>/d/<ts>/", cfg.DeployPrefixFormat)
+	assert.Equal(t, "<site>/d/<ts>-<sha>/", cfg.DeployPrefixFormat)
 	assert.Equal(t, "debug", cfg.LogLevel)
 }
 
@@ -136,4 +136,44 @@ func TestLoad_LogLevelValidation(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "LOG_LEVEL")
+}
+
+// TestLoad_RejectsMalformedDeployPrefix — B8: DEPLOY_PREFIX_FORMAT must
+// contain both `<site>` and `<ts>-<sha>` tokens. Operator typos (or env
+// substitution accidents) must fail-fast at boot, not surface later as
+// broken R2 keys on the first deploy attempt.
+func TestLoad_RejectsMalformedDeployPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		fmt     string
+		wantSub []string
+	}{
+		{"missing both", "hello/", []string{"DEPLOY_PREFIX_FORMAT", "<site>", "<ts>-<sha>"}},
+		{"missing site", "deploys/<ts>-<sha>/", []string{"DEPLOY_PREFIX_FORMAT", "<site>"}},
+		{"missing ts-sha", "<site>/deploys/<id>/", []string{"DEPLOY_PREFIX_FORMAT", "<ts>-<sha>"}},
+		{"only ts no sha", "<site>/deploys/<ts>/", []string{"DEPLOY_PREFIX_FORMAT", "<ts>-<sha>"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range requiredEnv() {
+				t.Setenv(k, v)
+			}
+			t.Setenv("DEPLOY_PREFIX_FORMAT", tc.fmt)
+			_, err := Load()
+			require.Error(t, err)
+			for _, sub := range tc.wantSub {
+				assert.Contains(t, err.Error(), sub)
+			}
+		})
+	}
+}
+
+func TestLoad_AcceptsValidDeployPrefix(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/custom/<ts>-<sha>/sub/")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "<site>/custom/<ts>-<sha>/sub/", cfg.DeployPrefixFormat)
 }
