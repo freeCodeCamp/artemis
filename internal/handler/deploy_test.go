@@ -154,6 +154,34 @@ func TestDeployUpload_StoresInR2(t *testing.T) {
 	assert.Equal(t, "<h1>hi</h1>", string(got))
 }
 
+// TestIsCleanRelPath — B22 anchor + tightening: reject ".", absolute,
+// traversal, and empty paths. "." passing pre-B22 stored a malformed
+// `<deploy-prefix>.` key on R2 (harmless but never spec'd as legal).
+func TestIsCleanRelPath(t *testing.T) {
+	cases := []struct {
+		p    string
+		want bool
+	}{
+		{"index.html", true},
+		{"a/b/c.html", true},
+		{"foo.bar.baz", true},
+		// rejects
+		{"", false},
+		{".", false},  // B22: was true pre-fix
+		{"./", false}, // path.Clean("./") == "." which then != p
+		{"..", false},
+		{"../escape.html", false},
+		{"a/../b", false},
+		{"/abs.html", false},
+		{"/", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.p, func(t *testing.T) {
+			assert.Equal(t, tc.want, isCleanRelPath(tc.p))
+		})
+	}
+}
+
 // TestDeployUpload_RejectsOversize — B4: uploads exceeding the
 // configured cap must short-circuit with 413 + the canonical error
 // envelope. Without the cap, an authenticated client can stream

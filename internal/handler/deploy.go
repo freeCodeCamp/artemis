@@ -249,9 +249,11 @@ func normalizeMode(m string) (string, error) {
 	}
 }
 
-// isCleanRelPath rejects empty / absolute / traversal paths.
+// isCleanRelPath rejects empty / absolute / traversal / current-dir
+// paths. The current-dir reject (B22) prevents creating a malformed
+// `<deploy-prefix>.` key on R2 — harmless but never spec'd as legal.
 func isCleanRelPath(p string) bool {
-	if p == "" || strings.HasPrefix(p, "/") {
+	if p == "" || p == "." || strings.HasPrefix(p, "/") {
 		return false
 	}
 	cleaned := path.Clean(p)
