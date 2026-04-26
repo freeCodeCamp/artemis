@@ -46,6 +46,7 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, "<site>/production", cfg.Aliases.ProductionKeyFormat)
 	assert.Equal(t, "<site>/preview", cfg.Aliases.PreviewKeyFormat)
 	assert.Equal(t, "<site>/deploys/<ts>-<sha>/", cfg.DeployPrefixFormat)
+	assert.EqualValues(t, 100*1024*1024, cfg.UploadMaxBytes)
 
 	assert.Equal(t, "info", cfg.LogLevel)
 }
@@ -64,6 +65,7 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 	t.Setenv("ALIAS_PRODUCTION_KEY_FORMAT", "<site>/prod")
 	t.Setenv("ALIAS_PREVIEW_KEY_FORMAT", "<site>/staging")
 	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/d/<ts>-<sha>/")
+	t.Setenv("UPLOAD_MAX_BYTES", "5242880") // 5 MiB
 	t.Setenv("LOG_LEVEL", "debug")
 
 	cfg, err := Load()
@@ -79,7 +81,30 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 	assert.Equal(t, "<site>/prod", cfg.Aliases.ProductionKeyFormat)
 	assert.Equal(t, "<site>/staging", cfg.Aliases.PreviewKeyFormat)
 	assert.Equal(t, "<site>/d/<ts>-<sha>/", cfg.DeployPrefixFormat)
+	assert.EqualValues(t, 5*1024*1024, cfg.UploadMaxBytes)
 	assert.Equal(t, "debug", cfg.LogLevel)
+}
+
+// TestLoad_UploadMaxBytes_RejectsNonPositive — env var is additive but
+// when set must be a positive integer. Empty/absent → default; explicit
+// "0" or negative → boot-time error.
+func TestLoad_UploadMaxBytes_RejectsNonPositive(t *testing.T) {
+	for _, bad := range []string{"0", "-1", "not-a-number", ""} {
+		t.Run("v="+bad, func(t *testing.T) {
+			for k, v := range requiredEnv() {
+				t.Setenv(k, v)
+			}
+			t.Setenv("UPLOAD_MAX_BYTES", bad)
+			_, err := Load()
+			if bad == "" {
+				// empty is treated as set-but-blank; ParseInt on "" → error
+				require.Error(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "UPLOAD_MAX_BYTES")
+		})
+	}
 }
 
 func TestLoad_MissingRequiredFails(t *testing.T) {

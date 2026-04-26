@@ -154,6 +154,62 @@ func TestDeployUpload_StoresInR2(t *testing.T) {
 	assert.Equal(t, "<h1>hi</h1>", string(got))
 }
 
+// TestDeployUpload_RejectsOversize — B4: uploads exceeding the
+// configured cap must short-circuit with 413 + the canonical error
+// envelope. Without the cap, an authenticated client can stream
+// unbounded bytes into R2 (cost + DoS risk).
+func TestDeployUpload_RejectsOversize(t *testing.T) {
+	store := newFakeR2()
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
+	h.UploadMaxBytes = 16 // tiny cap for the test
+
+	deployID := "20260420-141522-abc1234"
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+
+	body := bytes.Repeat([]byte("x"), 1024)
+	w := withChiRoute(http.MethodPut, "/api/deploy/{deployId}/upload",
+		"/api/deploy/"+deployID+"/upload?path=index.html",
+		body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployUpload)).ServeHTTP,
+		context.Background(),
+	)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "too_large")
+
+	// R2 must NOT have stored the object.
+	store.mu.Lock()
+	_, stored := store.objects["www/deploys/"+deployID+"/index.html"]
+	store.mu.Unlock()
+	assert.False(t, stored, "oversize upload must not land in R2")
+}
+
+// TestDeployUpload_AllowsAtLimit — boundary: exactly N bytes with N as
+// the cap must succeed. Off-by-one regressions in MaxBytesReader caps
+// surface here.
+func TestDeployUpload_AllowsAtLimit(t *testing.T) {
+	store := newFakeR2()
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
+	h.UploadMaxBytes = 16
+
+	deployID := "20260420-141522-abc1234"
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+
+	body := bytes.Repeat([]byte("y"), 16) // exactly cap
+	w := withChiRoute(http.MethodPut, "/api/deploy/{deployId}/upload",
+		"/api/deploy/"+deployID+"/upload?path=index.html",
+		body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployUpload)).ServeHTTP,
+		context.Background(),
+	)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
 func TestDeployUpload_RejectsTraversalPath(t *testing.T) {
 	store := newFakeR2()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
