@@ -82,9 +82,45 @@ Hot-reloaded via `fsnotify`. On schema error the pod retains the last-good confi
 ```sh
 cp .env.example .env  # then fill values
 make run              # boots HTTP server on $PORT
-make test             # go test ./... -cover
+make test             # go test ./... -cover (unit only)
 make image            # docker build
 ```
+
+## Integration testing
+
+End-to-end suite under `internal/integration/`. Build-tagged behind
+`integration` so it stays out of `make test`. Hits a live, deployed
+artemis over HTTPS and exercises the full deploy lifecycle:
+
+```
+healthz → whoami → init → upload → finalize(preview) → curl preview
+       → promote → curl production → list deploys → rollback
+```
+
+Plus negative-path coverage (bad token → 401, missing token → 401,
+unknown site → 403, missing required field → 400).
+
+```sh
+ARTEMIS_URL=https://uploads.freecode.camp \
+  GH_TOKEN=$(gh auth token) \
+  SITE=test ROOT_DOMAIN=freecode.camp \
+  make integration
+```
+
+`make integration-help` prints the full env-var reference. The suite
+is **safe to run against production** — it writes only under the `test`
+site (a staff-only smoke target reserved in `config/sites.yaml`) and
+relies on the cleanup cron (T22, 7-day retention) for prefix GC.
+
+| Variable       | Default         | Purpose                                       |
+| -------------- | --------------- | --------------------------------------------- |
+| `ARTEMIS_URL`  | _(required)_    | Live artemis base URL, no trailing slash      |
+| `GH_TOKEN`     | _(required)_    | GitHub bearer authorized for `SITE`           |
+| `SITE`         | `test`          | Site key from `sites.yaml`                    |
+| `ROOT_DOMAIN`  | `freecode.camp` | Root domain for preview/production URL derive |
+| `PROD_SLO`     | `2m`            | Production-alias serve SLO (D38)              |
+| `PREVIEW_SLO`  | `90s`           | Preview-alias serve SLO                       |
+| `HTTP_TIMEOUT` | `30s`           | Per-request HTTP timeout                      |
 
 ## curl examples
 

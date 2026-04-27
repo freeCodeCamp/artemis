@@ -20,14 +20,50 @@ build: ## Build the artemis binary into ./bin/artemis
 		-o $(BIN) ./cmd/artemis
 
 .PHONY: test
-test: ## go test -race -cover all packages
+test: ## go test -race -cover (unit only — integration excluded by build tag)
 	$(GO) test -race -cover $(PKG)
 
 .PHONY: cover
-cover: ## go test with coverage profile + html report
+cover: ## go test with coverage profile + html report (unit only)
 	$(GO) test -race -coverprofile=coverage.out $(PKG)
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "open coverage.html"
+
+# Integration suite — hits a live artemis deployment over HTTPS.
+# Requires env: ARTEMIS_URL, GH_TOKEN. Optional: SITE, ROOT_DOMAIN,
+# PROD_SLO, PREVIEW_SLO, HTTP_TIMEOUT. See `internal/integration/doc.go`.
+.PHONY: integration
+integration: ## go test -tags=integration ./internal/integration/... (live E2E)
+	@if [ -z "$$ARTEMIS_URL" ]; then \
+		echo "ARTEMIS_URL is required. See: make integration-help"; \
+		exit 2; \
+	fi
+	@if [ -z "$$GH_TOKEN" ]; then \
+		echo "GH_TOKEN is required (try: GH_TOKEN=\$$(gh auth token) make integration). See: make integration-help"; \
+		exit 2; \
+	fi
+	$(GO) test -v -tags=integration -count=1 -timeout=10m ./internal/integration/...
+
+.PHONY: integration-help
+integration-help: ## Print integration-suite usage
+	@echo "Integration suite — full E2E against a live artemis deployment."
+	@echo
+	@echo "Required env:"
+	@echo "  ARTEMIS_URL   Base URL of a deployed artemis (no trailing slash)"
+	@echo "  GH_TOKEN      GitHub bearer token authorized for SITE"
+	@echo
+	@echo "Optional env:"
+	@echo "  SITE          Target site key in sites.yaml (default: test)"
+	@echo "  ROOT_DOMAIN   Public root domain        (default: freecode.camp)"
+	@echo "  PROD_SLO      Production-alias SLO      (default: 2m, D38)"
+	@echo "  PREVIEW_SLO   Preview-alias SLO         (default: 90s)"
+	@echo "  HTTP_TIMEOUT  Per-request timeout       (default: 30s)"
+	@echo
+	@echo "Usage:"
+	@echo "  ARTEMIS_URL=https://uploads.freecode.camp \\"
+	@echo "    GH_TOKEN=\$$(gh auth token) \\"
+	@echo "    SITE=test ROOT_DOMAIN=freecode.camp \\"
+	@echo "    make integration"
 
 .PHONY: lint
 lint: ## go vet (CI also runs golangci-lint)
