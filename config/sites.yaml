@@ -47,3 +47,7 @@ sites:
   test:
     teams:
       - staff
+  hello-universe:
+    teams:
+      - bots
+      - staff
