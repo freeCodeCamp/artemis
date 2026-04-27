@@ -18,7 +18,8 @@ coverage.html
 # Local env / runtime
 .env
 .envrc
-config/sites.yaml
+# config/sites.yaml is the canonical PR-reviewed source of truth per
+# ADR-016 §sites.yaml lifecycle (line 178); committed + PR-reviewed.
 
 # Vendored deps (we use modules)
 vendor/
