@@ -391,6 +391,7 @@ func TestDeployFlow(t *testing.T) {
 		t.Fatalf("init returned empty deployId or jwt: %+v", initResp)
 	}
 	t.Logf("       deployId=%s expires=%s", initResp.DeployID, initResp.ExpiresAt)
+	registerDeployCleanup(t, initResp.DeployID)
 
 	// 2. upload
 	t.Logf("[2/7] PUT  /api/deploy/%s/upload?path=index.html (%d bytes)",
@@ -522,12 +523,7 @@ func TestRollback(t *testing.T) {
 	if resp.DeployID != target {
 		t.Fatalf("rollback: deployId=%q want %q", resp.DeployID, target)
 	}
-
-	// Restore: roll forward to the most-recent deploy so the next
-	// integration run starts from a known-current state. This is best
-	// effort; failure here does not fail the test.
-	_ = c.doJSON(ctx, http.MethodPost,
-		fmt.Sprintf("/api/site/%s/rollback", c.Site),
-		c.GHToken, map[string]any{"to": deploys[0].DeployID}, &resp)
-	t.Logf("[rollback] restored prod to head=%s", deploys[0].DeployID)
+	// Suite-level teardown (TestMain) restores prod alias to the
+	// baseline deploy captured at setup time. Per-test restore would
+	// race with TestMain on parallel runs and obscures intent.
 }

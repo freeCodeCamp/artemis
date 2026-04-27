@@ -112,6 +112,37 @@ is **safe to run against production** — it writes only under the `test`
 site (a staff-only smoke target reserved in `config/sites.yaml`) and
 relies on the cleanup cron (T22, 7-day retention) for prefix GC.
 
+### Setup / teardown
+
+Suite-level (`TestMain` in `setup_teardown_test.go`):
+
+| Phase    | Action                                                                               |
+| -------- | ------------------------------------------------------------------------------------ |
+| Setup    | Pre-flight `GET /healthz` — abort with exit 2 if artemis unreachable                 |
+| Setup    | Capture **baseline production deploy id** for `SITE` from `/api/site/{site}/deploys` |
+| Run      | `m.Run()` — execute every test in the package                                        |
+| Teardown | Restore production alias to the captured baseline via `/rollback`                    |
+
+Per-test (`t.Cleanup` in tests that mint deploys):
+
+| Test             | Cleanup                                                                                                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestDeployFlow` | Logs the new deploy id at end (success or failure) so the artifact is visible in test output. R2 prefix sweep is owned by the cleanup cron — the suite intentionally does not call a delete API (none exists; immutable-by-design per ADR-016). |
+| `TestRollback`   | None per-test — suite teardown handles prod alias restore                                                                                                                                                                                       |
+
+If teardown's restore call fails, `TestMain` logs the manual fix:
+
+```
+[teardown] WARN: restore prod alias failed: ...
+[teardown]      manual fix: POST /api/site/test/rollback {"to":"<baselineDeployID>"}
+```
+
+Edge cases:
+
+- **Fresh site (no deploys):** baseline capture returns empty; teardown is a no-op.
+- **Env unset:** `TestMain` skips capture/teardown; tests `Skip` themselves.
+- **Healthz down:** `TestMain` aborts before any test runs (exit 2).
+
 | Variable       | Default         | Purpose                                       |
 | -------------- | --------------- | --------------------------------------------- |
 | `ARTEMIS_URL`  | _(required)_    | Live artemis base URL, no trailing slash      |
