@@ -22,7 +22,9 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/sitesyaml"
+	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
 	"github.com/freeCodeCamp/artemis/internal/sites"
 )
@@ -45,15 +47,11 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Sites loader + hot reload.
-	siteLoader, err := sites.New(cfg.SitesYAMLPath)
+	registryReader, registryCleanup, err := openRegistry(rootCtx, cfg)
 	if err != nil {
-		return fmt.Errorf("load sites.yaml: %w", err)
+		return fmt.Errorf("open registry: %w", err)
 	}
-	defer siteLoader.Close()
-	if err := siteLoader.Watch(rootCtx); err != nil {
-		return fmt.Errorf("watch sites.yaml: %w", err)
-	}
+	defer registryCleanup()
 
 	// R2 client.
 	r2Client, err := r2.New(rootCtx, r2.Config{
@@ -88,7 +86,7 @@ func run() error {
 	h := &handler.Handlers{
 		GH:                 ghClient,
 		JWT:                signer,
-		Sites:              sitesyaml.New(siteLoader),
+		Sites:              registryReader,
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
@@ -130,6 +128,41 @@ func run() error {
 	}
 	slog.Info("artemis: shutdown complete")
 	return nil
+}
+
+// openRegistry constructs the registry.Reader implementation selected
+// by cfg.Registry.Backend. Returned cleanup MUST be called on shutdown
+// — it closes the sites loader (sites_yaml backend) or the valkey
+// connection (valkey backend).
+func openRegistry(ctx context.Context, cfg *config.Config) (registry.Reader, func(), error) {
+	switch cfg.Registry.Backend {
+	case config.RegistryBackendValkey:
+		store, err := valkey.New(ctx, valkey.Config{
+			Addr:     cfg.Registry.Valkey.Addr,
+			Password: cfg.Registry.Valkey.Password,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("valkey: %w", err)
+		}
+		reader, err := valkey.NewReader(ctx, store, valkey.DefaultRefreshFallback)
+		if err != nil {
+			_ = store.Close()
+			return nil, nil, fmt.Errorf("valkey reader: %w", err)
+		}
+		return reader, func() { _ = store.Close() }, nil
+	case config.RegistryBackendSitesYAML:
+		fallthrough
+	default:
+		loader, err := sites.New(cfg.SitesYAMLPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load sites.yaml: %w", err)
+		}
+		if err := loader.Watch(ctx); err != nil {
+			_ = loader.Close()
+			return nil, nil, fmt.Errorf("watch sites.yaml: %w", err)
+		}
+		return sitesyaml.New(loader), func() { _ = loader.Close() }, nil
+	}
 }
 
 func configureLogger(level string) {
