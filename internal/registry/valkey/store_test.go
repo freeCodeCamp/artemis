@@ -307,6 +307,62 @@ func TestStore_UpdateTeams_NotFoundOnAbsent(t *testing.T) {
 	require.ErrorIs(t, err, valkey.ErrNotFound)
 }
 
+func TestStore_Delete_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	s, mr, _ := newStore(t)
+	ctx := context.Background()
+
+	_, err := s.Register(ctx, "blog", []string{"staff"}, "alice")
+	require.NoError(t, err)
+
+	require.NoError(t, s.Delete(ctx, "blog"))
+
+	require.False(t, mr.Exists("site:blog"), "hash row must be removed")
+	// Last member removed → Redis auto-deletes the set. miniredis
+	// returns an error from SMembers on the now-missing key while
+	// real Redis returns empty; either is correct, so just assert
+	// the set is gone via Exists.
+	require.False(t, mr.Exists("sites:all"), "empty index set must be gone")
+
+	// Subsequent reads return ErrNotFound.
+	_, err = s.GetSite(ctx, "blog")
+	require.ErrorIs(t, err, valkey.ErrNotFound)
+}
+
+func TestStore_Delete_NotFoundOnAbsent(t *testing.T) {
+	t.Parallel()
+
+	s, _, _ := newStore(t)
+	ctx := context.Background()
+
+	require.ErrorIs(t, s.Delete(ctx, "absent"), valkey.ErrNotFound)
+}
+
+func TestStore_Delete_PublishesRegistryChanged(t *testing.T) {
+	t.Parallel()
+
+	s, mr, _ := newStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := s.Register(ctx, "blog", []string{"staff"}, "alice")
+	require.NoError(t, err)
+
+	sub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = sub.Close() })
+	pub := sub.Subscribe(ctx, valkey.ChannelRegistryChanged)
+	t.Cleanup(func() { _ = pub.Close() })
+	_, err = pub.Receive(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, s.Delete(ctx, "blog"))
+
+	msg, err := pub.ReceiveMessage(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "blog", msg.Payload)
+}
+
 func TestStore_UpdateTeams_PublishesRegistryChanged(t *testing.T) {
 	t.Parallel()
 

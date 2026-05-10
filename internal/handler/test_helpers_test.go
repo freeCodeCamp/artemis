@@ -80,6 +80,17 @@ func (f *fakeRegistry) UpdateTeams(_ context.Context, slug string, teams []strin
 	return updated, nil
 }
 
+func (f *fakeRegistry) Delete(_ context.Context, slug string) error {
+	if f.registerErr != nil {
+		return f.registerErr
+	}
+	if _, ok := f.bySite[slug]; !ok {
+		return registry.ErrNotFound
+	}
+	delete(f.bySite, slug)
+	return nil
+}
+
 func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	out := make([]registry.Site, 0, len(f.bySite))
 	for _, s := range f.bySite {
@@ -102,6 +113,9 @@ func (e *erroringRegistry) Register(_ context.Context, _ string, _ []string, _ s
 }
 func (e *erroringRegistry) UpdateTeams(_ context.Context, _ string, _ []string) (registry.Site, error) {
 	return registry.Site{}, e.err
+}
+func (e *erroringRegistry) Delete(_ context.Context, _ string) error {
+	return e.err
 }
 func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	return nil, e.err
