@@ -47,7 +47,26 @@ sites:
   test:
     teams:
       - staff
+
+  # Smoke
   hello-universe:
     teams:
       - bots
+      - staff
+
+  # TOM
+  gomoku:
+    teams:
+      - staff
+  reversi:
+    teams:
+      - staff
+  checkers:
+    teams:
+      - staff
+  five-dice:
+    teams:
+      - staff
+  number-tiles:
+    teams:
       - staff

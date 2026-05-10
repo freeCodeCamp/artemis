@@ -1,18 +1,11 @@
-name: Docker -- artemis
+name: CD - Docker - GHCR Images
 
-# Manual trigger only — artemis ships with cluster Helm value bumps,
-# not on every commit. Push from any branch via:
-#   gh workflow run docker.yml --ref <branch>
 on:
   workflow_dispatch:
 
 jobs:
-  test:
-    uses: ./.github/workflows/test.yml
-
   build-and-push:
-    name: Build + push image
-    needs: test
+    name: Build & Push Image
     runs-on: ubuntu-latest
     permissions:
       contents: read

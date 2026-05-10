@@ -1,13 +1,14 @@
 name: Test
 
-# Reusable: build, vet, race-test, coverage-gate. Called from `ci.yml`
-# (auto on push/PR) and `docker.yml` (gating manual image roll).
 on:
-  workflow_call:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   test:
-    name: build + test
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
