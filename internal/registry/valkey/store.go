@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
 // ChannelRegistryChanged is the pub-sub channel emitted on every
@@ -35,29 +37,16 @@ const (
 	fieldCreatedBy = "created_by"
 )
 
-// Sentinel errors returned by store operations. Callers compare with
-// errors.Is.
+// Re-exports of the registry sentinel errors and Site type. Callers
+// in this package use the local names so the registry import stays a
+// boundary detail.
 var (
-	// ErrAlreadyExists is returned by Register when the slug is already
-	// in the registry. The caller (HTTP layer) maps this to 409.
-	ErrAlreadyExists = errors.New("registry: site already exists")
-
-	// ErrNotFound is returned when an operation targets a slug that
-	// is not in the registry. The caller maps this to 404.
-	ErrNotFound = errors.New("registry: site not found")
+	ErrAlreadyExists = registry.ErrAlreadyExists
+	ErrNotFound      = registry.ErrNotFound
 )
 
-// Site is the in-memory representation of one registry row. It is
-// the only shape the rest of the codebase sees; the wire encoding
-// (JSON-encoded teams field, RFC3339Nano timestamps) stays inside
-// this package.
-type Site struct {
-	Slug      string
-	Teams     []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	CreatedBy string
-}
+// Site aliases registry.Site for ergonomic in-package use.
+type Site = registry.Site
 
 // Config carries the wire credentials needed to dial Valkey. Address
 // follows the host:port convention (no scheme prefix). Password is

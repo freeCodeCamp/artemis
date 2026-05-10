@@ -44,7 +44,7 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	registryReader, registryCleanup, err := openRegistry(rootCtx, cfg)
+	registryStore, registryReader, registryCleanup, err := openRegistry(rootCtx, cfg)
 	if err != nil {
 		return fmt.Errorf("open registry: %w", err)
 	}
@@ -84,11 +84,13 @@ func run() error {
 		GH:                 ghClient,
 		JWT:                signer,
 		Sites:              registryReader,
+		Registry:           registryStore,
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
 		DeployPrefix:       deployPrefix,
 		UploadMaxBytes:     cfg.UploadMaxBytes,
+		RegistryAuthzTeam:  cfg.Registry.AuthzTeam,
 		NewDeployID:        r2.NewDeployID,
 		Now:                time.Now,
 	}
@@ -127,22 +129,24 @@ func run() error {
 	return nil
 }
 
-// openRegistry constructs the Valkey-backed registry reader. Returned
-// cleanup MUST be called on shutdown to close the underlying connection.
-func openRegistry(ctx context.Context, cfg *config.Config) (*valkey.Reader, func(), error) {
+// openRegistry constructs the Valkey-backed registry store + reader.
+// The store is the Writer surface used by /api/site/{register,update,
+// delete}; the reader is the Reader surface used by every read-side
+// handler. Cleanup MUST be called on shutdown to close the connection.
+func openRegistry(ctx context.Context, cfg *config.Config) (*valkey.Store, *valkey.Reader, func(), error) {
 	store, err := valkey.New(ctx, valkey.Config{
 		Addr:     cfg.Registry.Valkey.Addr,
 		Password: cfg.Registry.Valkey.Password,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("valkey: %w", err)
+		return nil, nil, nil, fmt.Errorf("valkey: %w", err)
 	}
 	reader, err := valkey.NewReader(ctx, store, valkey.DefaultRefreshFallback)
 	if err != nil {
 		_ = store.Close()
-		return nil, nil, fmt.Errorf("valkey reader: %w", err)
+		return nil, nil, nil, fmt.Errorf("valkey reader: %w", err)
 	}
-	return reader, func() { _ = store.Close() }, nil
+	return store, reader, func() { _ = store.Close() }, nil
 }
 
 func configureLogger(level string) {
