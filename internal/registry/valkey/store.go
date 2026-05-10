@@ -109,6 +109,51 @@ func (s *Store) Close() error {
 	return s.client.Close()
 }
 
+// Subscribe returns a channel that receives the slug payload of every
+// registry.changed event delivered to this connection. The channel
+// closes when ctx is canceled or the underlying subscription returns
+// an unrecoverable error. The pub-sub connection is hot when this
+// function returns — calls made after that are guaranteed to be
+// observed by the channel (no startup race).
+//
+// Callers are expected to consume promptly; the internal forwarder
+// uses a small buffer (16). If the buffer fills, messages are
+// dropped silently — pub-sub is fire-and-forget per RFC §B Schema
+// (artemis pairs this with a TTL-fallback cache for missed events).
+func (s *Store) Subscribe(ctx context.Context) (<-chan string, error) {
+	pubsub := s.client.Subscribe(ctx, ChannelRegistryChanged)
+	// Receive blocks until the SUBSCRIBE confirmation arrives, so when
+	// it returns we know the connection is registered with the server
+	// and any subsequent PUBLISH will be delivered.
+	if _, err := pubsub.Receive(ctx); err != nil {
+		_ = pubsub.Close()
+		return nil, fmt.Errorf("subscribe: %w", err)
+	}
+
+	out := make(chan string, 16)
+	go func() {
+		defer close(out)
+		defer func() { _ = pubsub.Close() }()
+		ch := pubsub.Channel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				select {
+				case out <- msg.Payload:
+				default:
+					// buffer full — drop; TTL fallback covers the miss
+				}
+			}
+		}
+	}()
+	return out, nil
+}
+
 // siteKey returns the hash key for a given slug. Defined in one place
 // so the wire format (`site:<slug>`) cannot drift between methods.
 func siteKey(slug string) string {
