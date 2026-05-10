@@ -3,7 +3,7 @@
 // Required vars (no defaults — fail-fast on Load):
 //
 //	R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
-//	GH_CLIENT_ID, JWT_SIGNING_KEY
+//	GH_CLIENT_ID, JWT_SIGNING_KEY, VALKEY_ADDR
 //
 // All other vars have defaults documented on each field.
 package config
@@ -21,57 +21,12 @@ type Config struct {
 	Port               int
 	R2                 R2Config
 	GitHub             GitHubConfig
-	SitesYAMLPath      string
 	JWT                JWTConfig
 	Aliases            AliasConfig
 	DeployPrefixFormat string
 	UploadMaxBytes     int64 // single PUT /upload body cap; default 100 MiB
 	LogLevel           string
 	Registry           RegistryConfig
-}
-
-// RegistryConfig selects which backend artemis reads/writes the
-// site-registry from. The default `sites_yaml` keeps the helm-embedded
-// ConfigMap path live for one release; once operators flip to `valkey`
-// and the soak window passes, the sites_yaml backend is removed in a
-// follow-up sprint.
-type RegistryConfig struct {
-	// Backend is `sites_yaml` (default) or `valkey`.
-	Backend string
-
-	// AuthzTeam is the GitHub team slug that gates state-mutating
-	// /api/site/* endpoints (register/update/delete). Default `staff`.
-	AuthzTeam string
-
-	// Valkey connection details. Required when Backend == "valkey";
-	// ignored otherwise.
-	Valkey ValkeyConfig
-}
-
-// ValkeyConfig holds the connection string + auth password for the
-// Valkey instance backing the registry. Address follows host:port
-// (no scheme). Password is required by the production chart but
-// dev / unauthenticated instances may set it to the empty string.
-type ValkeyConfig struct {
-	Addr     string
-	Password string
-}
-
-const (
-	// RegistryBackendSitesYAML reads the registry from the
-	// helm-embedded sites.yaml ConfigMap (legacy path).
-	RegistryBackendSitesYAML = "sites_yaml"
-
-	// RegistryBackendValkey reads the registry from a Valkey instance
-	// (target path post-cassiopeia-GA).
-	RegistryBackendValkey = "valkey"
-
-	defaultRegistryAuthzTeam = "staff"
-)
-
-var validRegistryBackends = map[string]struct{}{
-	RegistryBackendSitesYAML: {},
-	RegistryBackendValkey:    {},
 }
 
 // R2Config holds the Cloudflare R2 (S3-compatible) credentials and target bucket.
@@ -103,8 +58,30 @@ type AliasConfig struct {
 	PreviewKeyFormat    string
 }
 
+// RegistryConfig holds the Valkey-backed registry settings: connection
+// to the KV store + the GitHub team that gates state-mutating registry
+// endpoints (POST /api/site/register, PATCH, DELETE).
+type RegistryConfig struct {
+	// AuthzTeam is the GitHub team slug that gates state-mutating
+	// /api/site/* endpoints. Default "staff".
+	AuthzTeam string
+
+	// Valkey connection details.
+	Valkey ValkeyConfig
+}
+
+// ValkeyConfig holds the connection string + auth password for the
+// Valkey instance backing the registry. Address follows host:port
+// (no scheme). Password is required by the production chart but
+// dev / unauthenticated instances may set it to the empty string.
+type ValkeyConfig struct {
+	Addr     string
+	Password string
+}
+
 const (
-	minSigningKeyBytes = 32
+	minSigningKeyBytes       = 32
+	defaultRegistryAuthzTeam = "staff"
 )
 
 var validLogLevels = map[string]struct{}{
@@ -128,7 +105,6 @@ func Load() (*Config, error) {
 			APIBase:            "https://api.github.com",
 			MembershipCacheTTL: 5 * time.Minute,
 		},
-		SitesYAMLPath: "/etc/artemis/sites.yaml",
 		JWT: JWTConfig{
 			TTL: 15 * time.Minute,
 		},
@@ -140,7 +116,6 @@ func Load() (*Config, error) {
 		UploadMaxBytes:     100 * 1024 * 1024, // 100 MiB
 		LogLevel:           "info",
 		Registry: RegistryConfig{
-			Backend:   RegistryBackendSitesYAML,
 			AuthzTeam: defaultRegistryAuthzTeam,
 		},
 	}
@@ -175,10 +150,6 @@ func Load() (*Config, error) {
 		cfg.GitHub.MembershipCacheTTL = time.Duration(ttl) * time.Second
 	}
 
-	if v, ok := os.LookupEnv("SITES_YAML_PATH"); ok && v != "" {
-		cfg.SitesYAMLPath = v
-	}
-
 	cfg.JWT.SigningKey = getEnv("JWT_SIGNING_KEY")
 	if v, ok := os.LookupEnv("JWT_TTL_SECONDS"); ok {
 		ttl, err := strconv.Atoi(v)
@@ -209,15 +180,10 @@ func Load() (*Config, error) {
 		cfg.LogLevel = v
 	}
 
-	if v, ok := os.LookupEnv("REGISTRY_BACKEND"); ok && v != "" {
-		cfg.Registry.Backend = v
-	}
 	if v, ok := os.LookupEnv("REGISTRY_AUTHZ_TEAM"); ok && v != "" {
 		cfg.Registry.AuthzTeam = v
 	}
-	if v, ok := os.LookupEnv("VALKEY_ADDR"); ok && v != "" {
-		cfg.Registry.Valkey.Addr = v
-	}
+	cfg.Registry.Valkey.Addr = getEnv("VALKEY_ADDR")
 	if v, ok := os.LookupEnv("VALKEY_PASSWORD"); ok && v != "" {
 		cfg.Registry.Valkey.Password = v
 	}
@@ -257,24 +223,10 @@ func (c *Config) validate() error {
 	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
 		return err
 	}
-	if err := validateRegistry(c.Registry); err != nil {
-		return err
+	if c.Registry.Valkey.Addr == "" {
+		return missing("VALKEY_ADDR")
 	}
-	return nil
-}
-
-// validateRegistry asserts the registry backend choice is one of the
-// known values and that the matching connection settings are present.
-func validateRegistry(rc RegistryConfig) error {
-	if _, ok := validRegistryBackends[rc.Backend]; !ok {
-		return fmt.Errorf("invalid REGISTRY_BACKEND %q: must be one of %s, %s",
-			rc.Backend, RegistryBackendSitesYAML, RegistryBackendValkey)
-	}
-	if rc.Backend == RegistryBackendValkey && rc.Valkey.Addr == "" {
-		return fmt.Errorf("REGISTRY_BACKEND=%s requires VALKEY_ADDR to be set",
-			RegistryBackendValkey)
-	}
-	if rc.AuthzTeam == "" {
+	if c.Registry.AuthzTeam == "" {
 		return fmt.Errorf("REGISTRY_AUTHZ_TEAM must not be empty")
 	}
 	return nil

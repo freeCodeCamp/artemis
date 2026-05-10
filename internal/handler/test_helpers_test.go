@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"sort"
+
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
-	"github.com/freeCodeCamp/artemis/internal/sites"
 )
 
 // fakeGH implements GitHubAuthenticator with deterministic behaviour.
@@ -118,16 +119,44 @@ func (f *fakeJWT) Verify(token string) (auth.DeploySessionClaims, error) {
 	return f.signer.Verify(token)
 }
 
-// fakeSites implements SitesProvider over an in-memory map. The
-// returned snapshot is the concrete sites.Snapshot — that struct
-// already satisfies registry.Snapshot via its Sites/TeamsForSite
-// methods, so the test-side fake stays the same shape post-refactor.
+// fakeSites implements SitesProvider over an in-memory map.
 type fakeSites struct {
 	bySite map[string][]string
 }
 
 func (f *fakeSites) Snapshot() registry.Snapshot {
-	return sites.NewSnapshot(f.bySite)
+	cp := make(map[string][]string, len(f.bySite))
+	for k, v := range f.bySite {
+		dup := make([]string, len(v))
+		copy(dup, v)
+		cp[k] = dup
+	}
+	return staticSnapshot{bySite: cp}
+}
+
+// staticSnapshot is a registry.Snapshot impl backed by an in-memory
+// map. Test-only — production reads come from valkey.Reader.
+type staticSnapshot struct {
+	bySite map[string][]string
+}
+
+func (s staticSnapshot) Sites() []string {
+	out := make([]string, 0, len(s.bySite))
+	for k := range s.bySite {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s staticSnapshot) TeamsForSite(slug string) []string {
+	teams, ok := s.bySite[slug]
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(teams))
+	copy(out, teams)
+	return out
 }
 
 // fakeR2 implements R2Store in-memory. It tracks the set of stored keys

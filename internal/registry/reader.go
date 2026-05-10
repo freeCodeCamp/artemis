@@ -1,17 +1,9 @@
 // Package registry defines the abstract site-registry contract that
-// artemis handlers consume. It deliberately sits above the concrete
-// backends (sites.yaml, valkey) so that the rest of the codebase
-// depends on the smallest possible surface — one method, one type.
+// artemis handlers consume. The Reader interface lets handler code
+// stay decoupled from the concrete backend (today: Valkey; the prior
+// sites.yaml path was retired alongside the Valkey cutover).
 //
-// Two implementations exist:
-//
-//   - internal/registry/sitesyaml — reads from a hot-reloaded YAML file
-//     (the legacy helm-embedded ConfigMap path; backward-compat window).
-//   - internal/registry/valkey    — reads from the Valkey store
-//     (target path, post-cassiopeia GA).
-//
-// Selection happens in cmd/artemis/main.go based on the
-// REGISTRY_BACKEND env var (cf. config.RegistryConfig).
+// The single implementation lives at internal/registry/valkey.
 package registry
 
 // Snapshot is a point-in-time view of the registry. Each call to
