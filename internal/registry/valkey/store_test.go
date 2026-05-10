@@ -277,6 +277,64 @@ func TestStore_Sites_EmptyWhenUnregistered(t *testing.T) {
 	require.Empty(t, all)
 }
 
+func TestStore_UpdateTeams_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	s, _, advance := newStore(t)
+	ctx := context.Background()
+
+	original, err := s.Register(ctx, "blog", []string{"staff"}, "alice")
+	require.NoError(t, err)
+
+	advance(time.Hour)
+	updated, err := s.UpdateTeams(ctx, "blog", []string{"news-editors", "platform"})
+	require.NoError(t, err)
+
+	require.Equal(t, "blog", updated.Slug)
+	require.Equal(t, []string{"news-editors", "platform"}, updated.Teams)
+	require.Equal(t, "alice", updated.CreatedBy, "created_by must round-trip")
+	require.True(t, updated.CreatedAt.Equal(original.CreatedAt), "created_at frozen")
+	require.True(t, updated.UpdatedAt.After(original.UpdatedAt), "updated_at advanced")
+}
+
+func TestStore_UpdateTeams_NotFoundOnAbsent(t *testing.T) {
+	t.Parallel()
+
+	s, _, _ := newStore(t)
+	ctx := context.Background()
+
+	_, err := s.UpdateTeams(ctx, "absent", []string{"staff"})
+	require.ErrorIs(t, err, valkey.ErrNotFound)
+}
+
+func TestStore_UpdateTeams_PublishesRegistryChanged(t *testing.T) {
+	t.Parallel()
+
+	s, mr, _ := newStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := s.Register(ctx, "blog", []string{"staff"}, "alice")
+	require.NoError(t, err)
+
+	// Drain the SUBSCRIBE confirm + the Register publish so we only see
+	// the UpdateTeams publish in the assertion below.
+	sub := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = sub.Close() })
+	pub := sub.Subscribe(ctx, valkey.ChannelRegistryChanged)
+	t.Cleanup(func() { _ = pub.Close() })
+	_, err = pub.Receive(ctx)
+	require.NoError(t, err)
+
+	_, err = s.UpdateTeams(ctx, "blog", []string{"platform"})
+	require.NoError(t, err)
+
+	msg, err := pub.ReceiveMessage(ctx)
+	require.NoError(t, err)
+	require.Equal(t, valkey.ChannelRegistryChanged, msg.Channel)
+	require.Equal(t, "blog", msg.Payload)
+}
+
 func TestStore_Subscribe_DeliversInOrder(t *testing.T) {
 	t.Parallel()
 
