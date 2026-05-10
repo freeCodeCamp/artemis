@@ -9,6 +9,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sites"
 )
 
@@ -117,12 +118,15 @@ func (f *fakeJWT) Verify(token string) (auth.DeploySessionClaims, error) {
 	return f.signer.Verify(token)
 }
 
-// fakeSites implements SitesProvider over an in-memory map.
+// fakeSites implements SitesProvider over an in-memory map. The
+// returned snapshot is the concrete sites.Snapshot — that struct
+// already satisfies registry.Snapshot via its Sites/TeamsForSite
+// methods, so the test-side fake stays the same shape post-refactor.
 type fakeSites struct {
 	bySite map[string][]string
 }
 
-func (f *fakeSites) Snapshot() sites.Snapshot {
+func (f *fakeSites) Snapshot() registry.Snapshot {
 	return sites.NewSnapshot(f.bySite)
 }
 

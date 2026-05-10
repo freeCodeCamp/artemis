@@ -22,6 +22,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry/sitesyaml"
 	"github.com/freeCodeCamp/artemis/internal/server"
 	"github.com/freeCodeCamp/artemis/internal/sites"
 )
@@ -87,7 +88,7 @@ func run() error {
 	h := &handler.Handlers{
 		GH:                 ghClient,
 		JWT:                signer,
-		Sites:              siteLoader,
+		Sites:              sitesyaml.New(siteLoader),
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
