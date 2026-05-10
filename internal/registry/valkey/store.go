@@ -7,8 +7,11 @@ package valkey
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -18,6 +21,43 @@ import (
 // in the message body so they can invalidate scoped caches without
 // re-reading the entire registry.
 const ChannelRegistryChanged = "registry.changed"
+
+// keyAllSites is the Set index of every registered slug.
+const keyAllSites = "sites:all"
+
+// fieldTeams, fieldCreatedAt, fieldUpdatedAt, fieldCreatedBy are the
+// hash field names per RFC §B Schema. The literal strings are the
+// wire contract; tests assert against them.
+const (
+	fieldTeams     = "teams"
+	fieldCreatedAt = "created_at"
+	fieldUpdatedAt = "updated_at"
+	fieldCreatedBy = "created_by"
+)
+
+// Sentinel errors returned by store operations. Callers compare with
+// errors.Is.
+var (
+	// ErrAlreadyExists is returned by Register when the slug is already
+	// in the registry. The caller (HTTP layer) maps this to 409.
+	ErrAlreadyExists = errors.New("registry: site already exists")
+
+	// ErrNotFound is returned when an operation targets a slug that
+	// is not in the registry. The caller maps this to 404.
+	ErrNotFound = errors.New("registry: site not found")
+)
+
+// Site is the in-memory representation of one registry row. It is
+// the only shape the rest of the codebase sees; the wire encoding
+// (JSON-encoded teams field, RFC3339Nano timestamps) stays inside
+// this package.
+type Site struct {
+	Slug      string
+	Teams     []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	CreatedBy string
+}
 
 // Config carries the wire credentials needed to dial Valkey. Address
 // follows the host:port convention (no scheme prefix). Password is
@@ -34,6 +74,10 @@ type Config struct {
 // through the package boundary.
 type Store struct {
 	client *redis.Client
+
+	// Now is the clock used for created_at / updated_at fields. Tests
+	// inject a deterministic clock; production uses time.Now.
+	Now func() time.Time
 }
 
 // New dials Valkey, verifies connectivity with a PING, and returns
@@ -50,7 +94,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		_ = c.Close()
 		return nil, fmt.Errorf("valkey: ping %s: %w", cfg.Addr, err)
 	}
-	return &Store{client: c}, nil
+	return &Store{client: c, Now: time.Now}, nil
 }
 
 // Ping verifies the underlying connection. Cheap; safe to call on a
@@ -63,4 +107,159 @@ func (s *Store) Ping(ctx context.Context) error {
 // times; subsequent calls return the same nil/error result as the first.
 func (s *Store) Close() error {
 	return s.client.Close()
+}
+
+// siteKey returns the hash key for a given slug. Defined in one place
+// so the wire format (`site:<slug>`) cannot drift between methods.
+func siteKey(slug string) string {
+	return "site:" + slug
+}
+
+// Register writes a new site row atomically and publishes a
+// registry.changed event on success. Returns ErrAlreadyExists if the
+// slug is already in the index set; the existing row is left
+// untouched. All concurrent Register calls for the same slug are
+// serialized — exactly one succeeds, the rest return ErrAlreadyExists.
+func (s *Store) Register(ctx context.Context, slug string, teams []string, createdBy string) (Site, error) {
+	if slug == "" {
+		return Site{}, errors.New("registry: empty slug")
+	}
+	now := s.Now().UTC()
+	site := Site{
+		Slug:      slug,
+		Teams:     append([]string(nil), teams...),
+		CreatedAt: now,
+		UpdatedAt: now,
+		CreatedBy: createdBy,
+	}
+
+	// WATCH+MULTI/EXEC gives us the SISMEMBER check + writes as one
+	// optimistic transaction. Concurrent registrants either succeed
+	// (first one) or trip the WATCH (rest) and re-read the index;
+	// re-read sees the slug present and returns ErrAlreadyExists.
+	txf := func(tx *redis.Tx) error {
+		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		if err != nil {
+			return err
+		}
+		if exists {
+			return ErrAlreadyExists
+		}
+		teamsJSON, err := json.Marshal(site.Teams)
+		if err != nil {
+			return fmt.Errorf("encode teams: %w", err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, siteKey(slug),
+				fieldTeams, string(teamsJSON),
+				fieldCreatedAt, site.CreatedAt.Format(time.RFC3339Nano),
+				fieldUpdatedAt, site.UpdatedAt.Format(time.RFC3339Nano),
+				fieldCreatedBy, site.CreatedBy,
+			)
+			pipe.SAdd(ctx, keyAllSites, slug)
+			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			return nil
+		})
+		return err
+	}
+
+	for {
+		err := s.client.Watch(ctx, txf, keyAllSites)
+		switch {
+		case err == nil:
+			return site, nil
+		case errors.Is(err, redis.TxFailedErr):
+			// Optimistic lock failed; another writer touched
+			// keyAllSites between our SISMEMBER and EXEC. Retry —
+			// either we lose the race (and SISMEMBER returns
+			// ErrAlreadyExists) or we win on the next pass.
+			continue
+		default:
+			return Site{}, err
+		}
+	}
+}
+
+// TeamsForSite returns the authorized teams for a slug or
+// ErrNotFound when the slug is absent. Callers MUST treat the slice
+// as read-only; the package returns a fresh copy per call.
+func (s *Store) TeamsForSite(ctx context.Context, slug string) ([]string, error) {
+	site, err := s.GetSite(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return site.Teams, nil
+}
+
+// GetSite returns the full Site row or ErrNotFound. Used by the
+// list endpoint to enumerate metadata; callers that only need the
+// teams list should use TeamsForSite.
+func (s *Store) GetSite(ctx context.Context, slug string) (Site, error) {
+	values, err := s.client.HGetAll(ctx, siteKey(slug)).Result()
+	if err != nil {
+		return Site{}, err
+	}
+	// HGETALL on a missing key returns an empty map, not an error.
+	// Cross-check the index set so a hash row deleted out-of-band
+	// without SREM still surfaces as ErrNotFound (defense in depth).
+	if len(values) == 0 {
+		return Site{}, ErrNotFound
+	}
+	return decodeSite(slug, values)
+}
+
+// Sites returns every registered site, sorted by slug ascending. The
+// implementation reads the index set then HGETALLs each row; for
+// the expected ~100 → ~10K site range this is acceptable. If the
+// fan-out becomes a hotspot, switch to a pipelined read.
+func (s *Store) Sites(ctx context.Context) ([]Site, error) {
+	slugs, err := s.client.SMembers(ctx, keyAllSites).Result()
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(slugs)
+	out := make([]Site, 0, len(slugs))
+	for _, slug := range slugs {
+		values, err := s.client.HGetAll(ctx, siteKey(slug)).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(values) == 0 {
+			// Row deleted out-of-band between SMEMBERS and HGETALL.
+			// Skip rather than fail the whole enumeration.
+			continue
+		}
+		site, err := decodeSite(slug, values)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, site)
+	}
+	return out, nil
+}
+
+// decodeSite parses the raw hash fields back into a Site. Wire
+// format (JSON teams, RFC3339Nano timestamps) is enforced here.
+func decodeSite(slug string, values map[string]string) (Site, error) {
+	site := Site{Slug: slug, CreatedBy: values[fieldCreatedBy]}
+	if raw, ok := values[fieldTeams]; ok && raw != "" {
+		if err := json.Unmarshal([]byte(raw), &site.Teams); err != nil {
+			return Site{}, fmt.Errorf("decode teams for %q: %w", slug, err)
+		}
+	}
+	if raw, ok := values[fieldCreatedAt]; ok && raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return Site{}, fmt.Errorf("decode created_at for %q: %w", slug, err)
+		}
+		site.CreatedAt = t
+	}
+	if raw, ok := values[fieldUpdatedAt]; ok && raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return Site{}, fmt.Errorf("decode updated_at for %q: %w", slug, err)
+		}
+		site.UpdatedAt = t
+	}
+	return site, nil
 }
