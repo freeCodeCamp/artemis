@@ -276,3 +276,56 @@ func TestStore_Sites_EmptyWhenUnregistered(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, all)
 }
+
+func TestStore_Subscribe_DeliversInOrder(t *testing.T) {
+	t.Parallel()
+
+	s, _, _ := newStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := s.Subscribe(ctx)
+	require.NoError(t, err)
+
+	want := []string{"alpha", "bravo", "charlie"}
+	for _, slug := range want {
+		_, err := s.Register(ctx, slug, []string{"staff"}, "alice")
+		require.NoError(t, err)
+	}
+
+	got := make([]string, 0, len(want))
+	for range want {
+		select {
+		case slug, ok := <-ch:
+			require.True(t, ok, "channel closed early")
+			got = append(got, slug)
+		case <-ctx.Done():
+			t.Fatalf("timeout receiving slug %d/%d (got=%v)", len(got), len(want), got)
+		}
+	}
+	require.Equal(t, want, got)
+}
+
+func TestStore_Subscribe_ChannelClosesOnCancel(t *testing.T) {
+	t.Parallel()
+
+	s, _, _ := newStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := s.Subscribe(ctx)
+	require.NoError(t, err)
+
+	cancel()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("channel did not close after ctx cancel")
+		}
+	}
+}
