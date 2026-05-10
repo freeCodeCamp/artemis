@@ -9,6 +9,7 @@
 //	POST   /api/deploy/{deployId}/finalize                — Deploy-session JWT
 //	GET    /api/sites                                     — GitHub bearer
 //	POST   /api/site/register                             — GitHub bearer + registry-authz team
+//	PATCH  /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
 //	POST   /api/site/{site}/promote                       — GitHub bearer
 //	POST   /api/site/{site}/rollback                      — GitHub bearer
@@ -40,6 +41,7 @@ func New(h *handler.Handlers) http.Handler {
 			r.Post("/deploy/init", h.DeployInit)
 			r.Get("/sites", h.SitesList)
 			r.Post("/site/register", h.SiteRegister)
+			r.Patch("/site/{slug}", h.SiteUpdate)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)

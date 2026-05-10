@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
@@ -105,6 +107,64 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, toSiteRow(site))
+}
+
+// SiteUpdateRequest is the body of PATCH /api/site/{slug}.
+type SiteUpdateRequest struct {
+	Teams []string `json:"teams"`
+}
+
+// SiteUpdate implements PATCH /api/site/{slug} — replaces the teams
+// list for an existing site. Authz: caller in h.RegistryAuthzTeam.
+//
+// Status matrix:
+//
+//	200 OK             — body = SiteRow
+//	400 Bad Request    — invalid teams / json
+//	403 Forbidden      — caller not in authz team
+//	404 Not Found      — slug not registered
+//	502 Bad Gateway    — registry write failed
+//	503 Service Unavail — github membership probe upstream error
+func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := h.requireRegistryAuthz(w, r); err != nil {
+		return
+	}
+	slug := chi.URLParam(r, "slug")
+	if !slugRe.MatchString(slug) {
+		writeError(w, http.StatusBadRequest, "invalid_slug",
+			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
+		return
+	}
+
+	var req SiteUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
+	if len(req.Teams) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_team",
+			"teams must contain at least one slug; use DELETE to remove a site")
+		return
+	}
+	for _, t := range req.Teams {
+		if !teamSlugRe.MatchString(t) {
+			writeError(w, http.StatusBadRequest, "invalid_team",
+				"team slugs must be 1-39 chars matching [a-z0-9][a-z0-9_-]*")
+			return
+		}
+	}
+
+	site, err := h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
+	if err != nil {
+		switch {
+		case errors.Is(err, registry.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
+		default:
+			writeError(w, http.StatusBadGateway, "registry_write_failed", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, toSiteRow(site))
 }
 
 // SitesList implements GET /api/sites — enumerates every registered

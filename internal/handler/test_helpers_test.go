@@ -55,6 +55,31 @@ func (f *fakeRegistry) Register(_ context.Context, slug string, teams []string, 
 	return site, nil
 }
 
+func (f *fakeRegistry) UpdateTeams(_ context.Context, slug string, teams []string) (registry.Site, error) {
+	if f.registerErr != nil {
+		return registry.Site{}, f.registerErr
+	}
+	existing, ok := f.bySite[slug]
+	if !ok {
+		return registry.Site{}, registry.ErrNotFound
+	}
+	now := f.fixedNow
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	teamsCopy := make([]string, len(teams))
+	copy(teamsCopy, teams)
+	updated := registry.Site{
+		Slug:      slug,
+		Teams:     teamsCopy,
+		CreatedAt: existing.CreatedAt,
+		UpdatedAt: now,
+		CreatedBy: existing.CreatedBy,
+	}
+	f.bySite[slug] = updated
+	return updated, nil
+}
+
 func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	out := make([]registry.Site, 0, len(f.bySite))
 	for _, s := range f.bySite {
@@ -73,6 +98,9 @@ func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 type erroringRegistry struct{ err error }
 
 func (e *erroringRegistry) Register(_ context.Context, _ string, _ []string, _ string) (registry.Site, error) {
+	return registry.Site{}, e.err
+}
+func (e *erroringRegistry) UpdateTeams(_ context.Context, _ string, _ []string) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
 func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {

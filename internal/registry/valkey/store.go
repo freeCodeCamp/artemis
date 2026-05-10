@@ -214,6 +214,75 @@ func (s *Store) Register(ctx context.Context, slug string, teams []string, creat
 	}
 }
 
+// UpdateTeams replaces the teams list for an existing slug, stamps
+// updated_at to the store's clock, and publishes a registry.changed
+// event. Returns ErrNotFound if the slug is not in the index set.
+// Concurrent updates are serialized via WATCH+MULTI/EXEC on the row
+// key; the loser of an optimistic-lock race retries and re-reads.
+func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (Site, error) {
+	if slug == "" {
+		return Site{}, errors.New("registry: empty slug")
+	}
+	teamsCopy := append([]string(nil), teams...)
+	now := s.Now().UTC()
+
+	var resolved Site
+	txf := func(tx *redis.Tx) error {
+		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		// Read existing row so the response carries created_at +
+		// created_by unchanged from the original Register call.
+		values, err := tx.HGetAll(ctx, siteKey(slug)).Result()
+		if err != nil {
+			return err
+		}
+		existing, err := decodeSite(slug, values)
+		if err != nil {
+			return err
+		}
+		teamsJSON, err := json.Marshal(teamsCopy)
+		if err != nil {
+			return fmt.Errorf("encode teams: %w", err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, siteKey(slug),
+				fieldTeams, string(teamsJSON),
+				fieldUpdatedAt, now.Format(time.RFC3339Nano),
+			)
+			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		resolved = Site{
+			Slug:      slug,
+			Teams:     teamsCopy,
+			CreatedAt: existing.CreatedAt,
+			UpdatedAt: now,
+			CreatedBy: existing.CreatedBy,
+		}
+		return nil
+	}
+
+	for {
+		err := s.client.Watch(ctx, txf, siteKey(slug))
+		switch {
+		case err == nil:
+			return resolved, nil
+		case errors.Is(err, redis.TxFailedErr):
+			continue
+		default:
+			return Site{}, err
+		}
+	}
+}
+
 // TeamsForSite returns the authorized teams for a slug or
 // ErrNotFound when the slug is absent. Callers MUST treat the slice
 // as read-only; the package returns a fresh copy per call.

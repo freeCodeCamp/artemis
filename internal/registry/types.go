@@ -49,4 +49,9 @@ type Writer interface {
 	// registry.changed event on success. Returns ErrAlreadyExists
 	// when slug is already registered.
 	Register(ctx context.Context, slug string, teams []string, createdBy string) (Site, error)
+
+	// UpdateTeams replaces the teams list for an existing slug,
+	// stamps updated_at, and publishes a registry.changed event.
+	// Returns ErrNotFound if the slug is absent.
+	UpdateTeams(ctx context.Context, slug string, teams []string) (Site, error)
 }
