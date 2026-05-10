@@ -54,4 +54,11 @@ type Writer interface {
 	// stamps updated_at, and publishes a registry.changed event.
 	// Returns ErrNotFound if the slug is absent.
 	UpdateTeams(ctx context.Context, slug string, teams []string) (Site, error)
+
+	// Delete removes a slug from the registry (hash row + index set
+	// member) and publishes a registry.changed event. Returns
+	// ErrNotFound if the slug is absent. The deletion does NOT
+	// touch any deploy bytes in R2 — those age out via the
+	// post-GA cleanup cron.
+	Delete(ctx context.Context, slug string) error
 }

@@ -167,6 +167,42 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toSiteRow(site))
 }
 
+// SiteDelete implements DELETE /api/site/{slug} — removes a slug
+// from the registry. R2 deploy bytes are NOT touched (those age out
+// via the post-GA cleanup cron). Authz: caller in
+// h.RegistryAuthzTeam.
+//
+// Status matrix:
+//
+//	204 No Content     — deleted
+//	400 Bad Request    — invalid slug
+//	403 Forbidden      — caller not in authz team
+//	404 Not Found      — slug not registered
+//	502 Bad Gateway    — registry write failed
+//	503 Service Unavail — github membership probe upstream error
+func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
+	if err := h.requireRegistryAuthz(w, r); err != nil {
+		return
+	}
+	slug := chi.URLParam(r, "slug")
+	if !slugRe.MatchString(slug) {
+		writeError(w, http.StatusBadRequest, "invalid_slug",
+			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
+		return
+	}
+
+	if err := h.Registry.Delete(r.Context(), slug); err != nil {
+		switch {
+		case errors.Is(err, registry.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
+		default:
+			writeError(w, http.StatusBadGateway, "registry_write_failed", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // SitesList implements GET /api/sites — enumerates every registered
 // site row. Open to any GH bearer (no special authz beyond
 // authentication). Reads the source of truth on every request — no

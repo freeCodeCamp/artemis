@@ -283,6 +283,44 @@ func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (S
 	}
 }
 
+// Delete removes the slug's hash row + index-set member and
+// publishes a registry.changed event. Returns ErrNotFound if the
+// slug is absent. R2 deploy bytes are NOT touched — those age out
+// via the post-GA cleanup cron.
+func (s *Store) Delete(ctx context.Context, slug string) error {
+	if slug == "" {
+		return errors.New("registry: empty slug")
+	}
+	txf := func(tx *redis.Tx) error {
+		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Del(ctx, siteKey(slug))
+			pipe.SRem(ctx, keyAllSites, slug)
+			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			return nil
+		})
+		return err
+	}
+
+	for {
+		err := s.client.Watch(ctx, txf, keyAllSites, siteKey(slug))
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, redis.TxFailedErr):
+			continue
+		default:
+			return err
+		}
+	}
+}
+
 // TeamsForSite returns the authorized teams for a slug or
 // ErrNotFound when the slug is absent. Callers MUST treat the slice
 // as read-only; the package returns a fresh copy per call.
