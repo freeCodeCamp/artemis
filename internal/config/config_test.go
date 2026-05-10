@@ -202,3 +202,71 @@ func TestLoad_AcceptsValidDeployPrefix(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "<site>/custom/<ts>-<sha>/sub/", cfg.DeployPrefixFormat)
 }
+
+func TestLoad_RegistryDefaultsToSitesYAML(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, RegistryBackendSitesYAML, cfg.Registry.Backend)
+	assert.Equal(t, "staff", cfg.Registry.AuthzTeam)
+	assert.Empty(t, cfg.Registry.Valkey.Addr)
+	assert.Empty(t, cfg.Registry.Valkey.Password)
+}
+
+func TestLoad_RegistryValkeyExplicit(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("REGISTRY_BACKEND", "valkey")
+	t.Setenv("VALKEY_ADDR", "valkey.artemis.svc:6379")
+	t.Setenv("VALKEY_PASSWORD", "secret-pw")
+	t.Setenv("REGISTRY_AUTHZ_TEAM", "platform")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, RegistryBackendValkey, cfg.Registry.Backend)
+	assert.Equal(t, "valkey.artemis.svc:6379", cfg.Registry.Valkey.Addr)
+	assert.Equal(t, "secret-pw", cfg.Registry.Valkey.Password)
+	assert.Equal(t, "platform", cfg.Registry.AuthzTeam)
+}
+
+func TestLoad_RegistryRejectsUnknownBackend(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("REGISTRY_BACKEND", "redis")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "REGISTRY_BACKEND")
+	assert.Contains(t, err.Error(), "redis")
+}
+
+func TestLoad_RegistryValkeyRequiresAddr(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("REGISTRY_BACKEND", "valkey")
+	// no VALKEY_ADDR
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VALKEY_ADDR")
+}
+
+func TestLoad_RegistryValkeyAcceptsEmptyPassword(t *testing.T) {
+	// Dev / unauthenticated valkey — operators must set the env to
+	// "valkey" + addr but password may be empty.
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("REGISTRY_BACKEND", "valkey")
+	t.Setenv("VALKEY_ADDR", "localhost:6379")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Registry.Valkey.Password)
+}

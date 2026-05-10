@@ -27,6 +27,51 @@ type Config struct {
 	DeployPrefixFormat string
 	UploadMaxBytes     int64 // single PUT /upload body cap; default 100 MiB
 	LogLevel           string
+	Registry           RegistryConfig
+}
+
+// RegistryConfig selects which backend artemis reads/writes the
+// site-registry from. The default `sites_yaml` keeps the helm-embedded
+// ConfigMap path live for one release; once operators flip to `valkey`
+// and the soak window passes, the sites_yaml backend is removed in a
+// follow-up sprint.
+type RegistryConfig struct {
+	// Backend is `sites_yaml` (default) or `valkey`.
+	Backend string
+
+	// AuthzTeam is the GitHub team slug that gates state-mutating
+	// /api/site/* endpoints (register/update/delete). Default `staff`.
+	AuthzTeam string
+
+	// Valkey connection details. Required when Backend == "valkey";
+	// ignored otherwise.
+	Valkey ValkeyConfig
+}
+
+// ValkeyConfig holds the connection string + auth password for the
+// Valkey instance backing the registry. Address follows host:port
+// (no scheme). Password is required by the production chart but
+// dev / unauthenticated instances may set it to the empty string.
+type ValkeyConfig struct {
+	Addr     string
+	Password string
+}
+
+const (
+	// RegistryBackendSitesYAML reads the registry from the
+	// helm-embedded sites.yaml ConfigMap (legacy path).
+	RegistryBackendSitesYAML = "sites_yaml"
+
+	// RegistryBackendValkey reads the registry from a Valkey instance
+	// (target path post-cassiopeia-GA).
+	RegistryBackendValkey = "valkey"
+
+	defaultRegistryAuthzTeam = "staff"
+)
+
+var validRegistryBackends = map[string]struct{}{
+	RegistryBackendSitesYAML: {},
+	RegistryBackendValkey:    {},
 }
 
 // R2Config holds the Cloudflare R2 (S3-compatible) credentials and target bucket.
@@ -94,6 +139,10 @@ func Load() (*Config, error) {
 		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
 		UploadMaxBytes:     100 * 1024 * 1024, // 100 MiB
 		LogLevel:           "info",
+		Registry: RegistryConfig{
+			Backend:   RegistryBackendSitesYAML,
+			AuthzTeam: defaultRegistryAuthzTeam,
+		},
 	}
 
 	if v, ok := os.LookupEnv("PORT"); ok {
@@ -160,6 +209,19 @@ func Load() (*Config, error) {
 		cfg.LogLevel = v
 	}
 
+	if v, ok := os.LookupEnv("REGISTRY_BACKEND"); ok && v != "" {
+		cfg.Registry.Backend = v
+	}
+	if v, ok := os.LookupEnv("REGISTRY_AUTHZ_TEAM"); ok && v != "" {
+		cfg.Registry.AuthzTeam = v
+	}
+	if v, ok := os.LookupEnv("VALKEY_ADDR"); ok && v != "" {
+		cfg.Registry.Valkey.Addr = v
+	}
+	if v, ok := os.LookupEnv("VALKEY_PASSWORD"); ok && v != "" {
+		cfg.Registry.Valkey.Password = v
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -194,6 +256,26 @@ func (c *Config) validate() error {
 	}
 	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
 		return err
+	}
+	if err := validateRegistry(c.Registry); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRegistry asserts the registry backend choice is one of the
+// known values and that the matching connection settings are present.
+func validateRegistry(rc RegistryConfig) error {
+	if _, ok := validRegistryBackends[rc.Backend]; !ok {
+		return fmt.Errorf("invalid REGISTRY_BACKEND %q: must be one of %s, %s",
+			rc.Backend, RegistryBackendSitesYAML, RegistryBackendValkey)
+	}
+	if rc.Backend == RegistryBackendValkey && rc.Valkey.Addr == "" {
+		return fmt.Errorf("REGISTRY_BACKEND=%s requires VALKEY_ADDR to be set",
+			RegistryBackendValkey)
+	}
+	if rc.AuthzTeam == "" {
+		return fmt.Errorf("REGISTRY_AUTHZ_TEAM must not be empty")
 	}
 	return nil
 }
