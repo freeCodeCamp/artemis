@@ -55,6 +55,30 @@ func (f *fakeRegistry) Register(_ context.Context, slug string, teams []string, 
 	return site, nil
 }
 
+func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
+	out := make([]registry.Site, 0, len(f.bySite))
+	for _, s := range f.bySite {
+		// Defensive copy of teams so caller mutations don't leak.
+		dup := make([]string, len(s.Teams))
+		copy(dup, s.Teams)
+		s.Teams = dup
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out, nil
+}
+
+// erroringRegistry returns the same error from every method. Used by
+// tests that need to assert the handler's error envelope mapping.
+type erroringRegistry struct{ err error }
+
+func (e *erroringRegistry) Register(_ context.Context, _ string, _ []string, _ string) (registry.Site, error) {
+	return registry.Site{}, e.err
+}
+func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {
+	return nil, e.err
+}
+
 // fakeGH implements GitHubAuthenticator with deterministic behaviour.
 //
 //   - tokenLogins maps Bearer token → resolved login (covers ValidateToken)
