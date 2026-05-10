@@ -1,12 +1,13 @@
 // Package server wires the Handlers + middleware into a chi router.
 //
-// Route table (mirrors ADR-016 §API surface):
+// Route table (mirrors ADR-016 §API surface + RFC §B CLI surface):
 //
 //	GET    /healthz                                       — no auth
 //	GET    /api/whoami                                    — GitHub bearer
 //	POST   /api/deploy/init                               — GitHub bearer
 //	PUT    /api/deploy/{deployId}/upload                  — Deploy-session JWT
 //	POST   /api/deploy/{deployId}/finalize                — Deploy-session JWT
+//	POST   /api/site/register                             — GitHub bearer + registry-authz team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
 //	POST   /api/site/{site}/promote                       — GitHub bearer
 //	POST   /api/site/{site}/rollback                      — GitHub bearer
@@ -36,6 +37,7 @@ func New(h *handler.Handlers) http.Handler {
 			r.Use(h.RequireGitHubBearer)
 			r.Get("/whoami", h.WhoAmI)
 			r.Post("/deploy/init", h.DeployInit)
+			r.Post("/site/register", h.SiteRegister)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)

@@ -14,6 +14,47 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
+// fakeRegistry implements RegistryWriter in-memory. Tests pre-seed
+// existing slugs via the bySite map; Register adds rows + returns
+// ErrAlreadyExists on duplicate. The injected clock keeps timestamps
+// deterministic.
+type fakeRegistry struct {
+	bySite map[string]registry.Site
+
+	// fixedNow drives created_at / updated_at; if zero, time.Now() is used.
+	fixedNow time.Time
+	// registerErr forces Register to return this error on the next call.
+	registerErr error
+}
+
+func newFakeRegistry() *fakeRegistry {
+	return &fakeRegistry{bySite: map[string]registry.Site{}}
+}
+
+func (f *fakeRegistry) Register(_ context.Context, slug string, teams []string, createdBy string) (registry.Site, error) {
+	if f.registerErr != nil {
+		return registry.Site{}, f.registerErr
+	}
+	if _, ok := f.bySite[slug]; ok {
+		return registry.Site{}, registry.ErrAlreadyExists
+	}
+	now := f.fixedNow
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	teamsCopy := make([]string, len(teams))
+	copy(teamsCopy, teams)
+	site := registry.Site{
+		Slug:      slug,
+		Teams:     teamsCopy,
+		CreatedAt: now,
+		UpdatedAt: now,
+		CreatedBy: createdBy,
+	}
+	f.bySite[slug] = site
+	return site, nil
+}
+
 // fakeGH implements GitHubAuthenticator with deterministic behaviour.
 //
 //   - tokenLogins maps Bearer token → resolved login (covers ValidateToken)
@@ -307,10 +348,12 @@ func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store R2Store) (*H
 		GH:                 gh,
 		JWT:                jwt,
 		Sites:              st,
+		Registry:           newFakeRegistry(),
 		R2:                 store,
 		AliasProductionFmt: "<site>/production",
 		AliasPreviewFmt:    "<site>/preview",
 		DeployPrefix:       mustDeployPrefixTemplate("<site>/deploys/<ts>-<sha>/"),
+		RegistryAuthzTeam:  "staff",
 		NewDeployID: func(sha string) string {
 			return "20260420-141522-" + sha[:min(7, len(sha))]
 		},

@@ -41,6 +41,12 @@ type DeployJWTSigner interface {
 // transitively for the Snapshot type.
 type SitesProvider = registry.Reader
 
+// RegistryWriter is the state-mutating registry contract used by
+// the /api/site/register and PATCH/DELETE endpoints. Aliasing
+// registry.Writer keeps handler tests independent of the concrete
+// Valkey backend.
+type RegistryWriter = registry.Writer
+
 // R2Store is the subset of *r2.Client used here.
 type R2Store interface {
 	PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error
@@ -56,6 +62,7 @@ type Handlers struct {
 	GH                 GitHubAuthenticator
 	JWT                DeployJWTSigner
 	Sites              SitesProvider
+	Registry           RegistryWriter
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
@@ -65,10 +72,15 @@ type Handlers struct {
 	// UploadMaxBytes caps a single PUT /upload body size (B4). 0 or
 	// negative means uncapped — production wiring sets a finite default
 	// (UPLOAD_MAX_BYTES env, 100 MiB by default).
-	UploadMaxBytes   int64
-	NewDeployID      func(sha string) string
-	Now              func() time.Time
-	PublicURLForSite func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
+	UploadMaxBytes int64
+	// RegistryAuthzTeam gates state-mutating /api/site/* endpoints
+	// (register/update/delete). Caller must be on this team. Default
+	// "staff" via config; production wiring sets it from
+	// REGISTRY_AUTHZ_TEAM env.
+	RegistryAuthzTeam string
+	NewDeployID       func(sha string) string
+	Now               func() time.Time
+	PublicURLForSite  func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.
