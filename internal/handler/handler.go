@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
-	"github.com/freeCodeCamp/artemis/internal/sites"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
 // GitHubAuthenticator is the subset of *auth.GitHubClient used by the
@@ -35,10 +35,11 @@ type DeployJWTSigner interface {
 	Verify(token string) (auth.DeploySessionClaims, error)
 }
 
-// SitesProvider is the subset of *sites.Loader used here.
-type SitesProvider interface {
-	Snapshot() sites.Snapshot
-}
+// SitesProvider is the read-side registry contract used by handlers.
+// It is an alias of registry.Reader; the indirection lets handler
+// tests substitute fakes without importing the registry package
+// transitively for the Snapshot type.
+type SitesProvider = registry.Reader
 
 // R2Store is the subset of *r2.Client used here.
 type R2Store interface {
