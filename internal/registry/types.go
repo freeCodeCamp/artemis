@@ -30,11 +30,21 @@ var (
 	ErrNotFound = errors.New("registry: site not found")
 )
 
-// Writer is the state-mutating contract for the site registry. Each
-// method is required to be atomic at the source-of-truth layer
-// (e.g. Valkey MULTI/EXEC) so concurrent callers never observe a
-// partial state.
+// Writer is the registry contract handlers depend on for both reads
+// of the full Site row (timestamps, createdBy) and atomic writes.
+// State-mutating methods are required to be atomic at the
+// source-of-truth layer (e.g. Valkey MULTI/EXEC) so concurrent
+// callers never observe a partial state.
+//
+// Cache-light reads (just `<slug> -> [teams]`) go through Reader /
+// Snapshot instead — those are served from an in-process cache
+// refreshed on registry.changed events.
 type Writer interface {
+	// Sites returns every registered site row, sorted by slug
+	// ascending. Reads bypass any in-process cache; the response
+	// reflects the source-of-truth at call time.
+	Sites(ctx context.Context) ([]Site, error)
+
 	// Register creates a new site row and publishes a
 	// registry.changed event on success. Returns ErrAlreadyExists
 	// when slug is already registered.

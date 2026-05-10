@@ -10,6 +10,27 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
+// SiteRow is the canonical JSON shape for a registry row across
+// register / list / update endpoints. The shape is stable so
+// universe-cli can decode the same struct from any of them.
+type SiteRow struct {
+	Slug      string    `json:"slug"`
+	Teams     []string  `json:"teams"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	CreatedBy string    `json:"createdBy"`
+}
+
+func toSiteRow(s registry.Site) SiteRow {
+	return SiteRow{
+		Slug:      s.Slug,
+		Teams:     s.Teams,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
+		CreatedBy: s.CreatedBy,
+	}
+}
+
 // SiteRegisterRequest is the body of POST /api/site/register.
 type SiteRegisterRequest struct {
 	Slug  string   `json:"slug"`
@@ -17,15 +38,9 @@ type SiteRegisterRequest struct {
 }
 
 // SiteRegisterResponse is the 201 body returned on successful
-// registration. It mirrors the row shape callers see from
-// GET /api/sites for envelope symmetry.
-type SiteRegisterResponse struct {
-	Slug      string    `json:"slug"`
-	Teams     []string  `json:"teams"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	CreatedBy string    `json:"createdBy"`
-}
+// registration. Alias of SiteRow so the on-the-wire shape across
+// register / list / update endpoints is stable.
+type SiteRegisterResponse = SiteRow
 
 // slugRe matches DNS-safe site slugs: 1-63 chars, lowercase letter
 // first, then lowercase letters / digits / hyphens. Mirrors the
@@ -89,13 +104,31 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, SiteRegisterResponse{
-		Slug:      site.Slug,
-		Teams:     site.Teams,
-		CreatedAt: site.CreatedAt,
-		UpdatedAt: site.UpdatedAt,
-		CreatedBy: site.CreatedBy,
-	})
+	writeJSON(w, http.StatusCreated, toSiteRow(site))
+}
+
+// SitesList implements GET /api/sites — enumerates every registered
+// site row. Open to any GH bearer (no special authz beyond
+// authentication). Reads the source of truth on every request — no
+// in-process cache here; staleness <60s is bounded by the registry
+// reader's TTL fallback for the deploy hot path, but list/dashboard
+// callers want the freshest view.
+//
+// Status matrix:
+//
+//	200 OK             — body = []SiteRow
+//	502 Bad Gateway    — registry read failed
+func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
+	sites, err := h.Registry.Sites(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "registry_read_failed", err.Error())
+		return
+	}
+	rows := make([]SiteRow, len(sites))
+	for i, s := range sites {
+		rows[i] = toSiteRow(s)
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 // requireRegistryAuthz enforces that the authenticated caller is on
