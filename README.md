@@ -36,7 +36,9 @@ Auth headers (`/api/*` except `/healthz`):
 | `GH_CLIENT_ID`                | _(required)_                 | GitHub OAuth app client ID (CLI device flow)   |
 | `GH_ORG`                      | `freeCodeCamp`               | GitHub org for team probes                     |
 | `GH_API_BASE`                 | `https://api.github.com`     | GitHub REST API base                           |
-| `SITES_YAML_PATH`             | `/etc/artemis/sites.yaml`    | Path to site→teams map                         |
+| `VALKEY_ADDR`                 | _(required)_                 | Valkey `host:port` for the sites registry      |
+| `VALKEY_PASSWORD`             | _(required)_                 | Valkey AUTH password                           |
+| `REGISTRY_AUTHZ_TEAM`         | `staff`                      | GH team allowed to mutate the sites registry   |
 | `JWT_SIGNING_KEY`             | _(required)_                 | 32-byte random; mounted from k8s Secret        |
 | `JWT_TTL_SECONDS`             | `900`                        | Deploy-session JWT TTL (15 min)                |
 | `GH_MEMBERSHIP_CACHE_TTL`     | `300`                        | GH `/user` + team membership cache TTL (5 min) |
@@ -61,21 +63,39 @@ Auth headers (`/api/*` except `/healthz`):
 
 Atomic alias semantics: `PutObject` is atomic per-key in R2. Old deploy keeps serving until the alias `PUT` lands. Verify-then-PUT order means a partial deploy never becomes live.
 
-## sites.yaml
+## Sites registry
 
-```yaml
-# /etc/artemis/sites.yaml — site → authorized GitHub teams
-sites:
-  www:
-    teams:
-      - team-eng
-      - team-platform
-  learn:
-    teams:
-      - team-eng
+Authoritative store: Valkey (`VALKEY_ADDR`, namespace `valkey`).
+Each entry maps a site slug to the list of GitHub teams whose
+members may deploy to that site. Mutations go through the registry
+endpoints:
+
+```
+POST   /api/site/register      { slug, teams? }      → 201 SiteRow
+GET    /api/sites              [?slug=…]             → { count, sites: [SiteRow] }
+PATCH  /api/site/{slug}        { teams }             → 200 SiteRow
+DELETE /api/site/{slug}                              → 204
 ```
 
-Hot-reloaded via `fsnotify`. On schema error the pod retains the last-good config and emits an alert.
+Write endpoints are gated on `REGISTRY_AUTHZ_TEAM` (default `staff`).
+The read endpoint is open to any GitHub bearer.
+
+Operator-facing CLI surface (universe-cli ≥ 0.5.0):
+
+```sh
+universe sites register <slug> --team <team>[,<team>...]
+universe sites update   <slug> --team <team>[,<team>...]
+universe sites rm       <slug>
+universe sites ls       [--mine] [--slug <slug>]
+```
+
+Mutations propagate to every artemis replica via the
+`registry.changed` pub-sub channel within seconds, or ≤ 60 s on the
+TTL fallback.
+
+`config/sites.yaml` in this repo is a **dormant cold-start seed** —
+checked in for cold-recovery reference, not consumed at runtime.
+The `sites_yaml` backend was retired alongside the Valkey cutover.
 
 ## Local development
 
@@ -109,8 +129,8 @@ ARTEMIS_URL=https://uploads.freecode.camp \
 
 `make integration-help` prints the full env-var reference. The suite
 is **safe to run against production** — it writes only under the `test`
-site (a staff-only smoke target reserved in `config/sites.yaml`) and
-relies on the cleanup cron (T22, 7-day retention) for prefix GC.
+site (a staff-only smoke target registered in the artemis registry)
+and relies on the cleanup cron (T22, 7-day retention) for prefix GC.
 
 ### Setup / teardown
 
@@ -147,7 +167,7 @@ Edge cases:
 | -------------- | --------------- | --------------------------------------------- |
 | `ARTEMIS_URL`  | _(required)_    | Live artemis base URL, no trailing slash      |
 | `GH_TOKEN`     | _(required)_    | GitHub bearer authorized for `SITE`           |
-| `SITE`         | `test`          | Site key from `sites.yaml`                    |
+| `SITE`         | `test`          | Registered site slug                          |
 | `ROOT_DOMAIN`  | `freecode.camp` | Root domain for preview/production URL derive |
 | `PROD_SLO`     | `2m`            | Production-alias serve SLO (D38)              |
 | `PREVIEW_SLO`  | `90s`           | Preview-alias serve SLO                       |

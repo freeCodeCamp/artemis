@@ -1,19 +1,26 @@
-# sites.yaml — Artemis authorization map (source of truth)
+# sites.yaml — Artemis sites map (dormant cold-start seed)
 #
-# Per ADR-016 §sites.yaml lifecycle (line 178), this file is the canonical
-# site→teams authorization map for the Artemis deploy-proxy service. PRs
-# reviewed by platform team. Mounted into the artemis pod as a ConfigMap
-# (rendered by the T34 Helm chart via `--set-file` from operator's local
-# checkout); hot-reloaded via fsnotify on update — no pod restart.
+# Post-cutover (artemis@f115198, 2026-05-10) the authoritative store is
+# Valkey. This file is **NOT consumed at runtime** — the `sites_yaml`
+# backend has been removed. The file is retained as a cold-start
+# reference: after a full Valkey wipe an operator can replay entries
+# here via `universe sites register <slug> --team <team>...` against a
+# freshly-booted artemis to restore the pre-wipe set.
 #
-# Schema (per ADR-016 §Q11, line 35):
+# Live mutation surface (staff-gated by REGISTRY_AUTHZ_TEAM):
+#   universe sites register <slug> --team <team>[,<team>...]
+#   universe sites update   <slug> --team <team>[,<team>...]
+#   universe sites rm       <slug>
+#   universe sites ls       [--mine] [--slug <slug>]
+#
+# Schema below is preserved for parity with the live registry shape:
 #   sites:
 #     <site-slug>:
 #       teams: [<gh-team-slug>, ...]
 #
-# Authorization check per request:
-#   1. artemis resolves user via GitHub Bearer token → GET /user
-#   2. lookup <site-slug> in this file → list of authorized team slugs
+# Authorization check per deploy (runtime, against Valkey snapshot):
+#   1. artemis resolves caller via GitHub Bearer → GET /user
+#   2. registry snapshot lookup <site-slug> → authorized team slugs
 #   3. for each team_slug:
 #        GET /orgs/freeCodeCamp/teams/{team_slug}/memberships/{user}
 #        (cached per (user, team_slug) for GH_MEMBERSHIP_CACHE_TTL,
@@ -24,21 +31,9 @@
 # and `<site>.preview.freecode.camp` (preview). Caddy on gxy-cassiopeia
 # reverse-proxies via `r2_alias` (D35 dot-scheme).
 #
-# Lifecycle:
-#   - Add new site / change team list: PR to this file → review → merge
-#     → operator runs `just helm-upgrade gxy-management artemis` → chart
-#     renders ConfigMap from latest checkout → fsnotify reload (≤1min).
-#   - Future (parked at infra TODO-park §Application config): schema
-#     slim to flat allowlist + env AUTHORIZED_TEAMS, then embedded
-#     SQLite/KV registry with `POST /api/site/register` endpoint.
-#
 # fCC GitHub teams reference (verified 2026-04-27):
 #   bots, classroom, curriculum, dev-team, devdocs, i18n, mobile,
 #   moderators, none, ops, staff
-#
-#   `platform` team does NOT yet exist in the freeCodeCamp org. Operator
-#   either creates one (preferred for clean separation of concerns) or
-#   continues using `staff` as the universal authorized team.
 
 sites:
   # `test` site — used by T34 smoke harness (test.freecode.camp +
