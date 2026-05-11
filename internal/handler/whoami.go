@@ -8,13 +8,13 @@ import (
 // WhoAmI implements GET /api/whoami. Returns the resolved login plus the
 // list of sites the caller is authorized to deploy to.
 //
-// Pre-B9 this looped sites.yaml × per-site teams and made one
+// Pre-B9 this looped registered sites × per-site teams and made one
 // AuthorizeForSite (→ N IsTeamMember) call per site. With S sites and
 // T teams each, cold-cache cost was up to S×T sequential GitHub round
 // trips, all serialized on a single mutex.
 //
 // Post-B9: a single GET /user/teams returns every team the token is
-// on; intersection with sites.yaml is local. Authorization-side check
+// on; intersection with the registry snapshot is local. Authorization
 // for individual deploys still uses AuthorizeForSite — that's a
 // per-deploy hot path with its own team cache.
 func (h *Handlers) WhoAmI(w http.ResponseWriter, r *http.Request) {

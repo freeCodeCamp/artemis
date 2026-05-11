@@ -30,7 +30,7 @@ type DeployInitResponse struct {
 //
 // Preconditions: caller must have passed RequireGitHubBearer (login on
 // context). The handler additionally enforces that the requested site
-// exists in sites.yaml and that the caller's team membership grants
+// exists in the registry and that the caller's team membership grants
 // access to it.
 func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	login := LoginFromContext(r.Context())

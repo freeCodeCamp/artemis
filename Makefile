@@ -53,7 +53,7 @@ integration-help: ## Print integration-suite usage
 	@echo "  GH_TOKEN      GitHub bearer token authorized for SITE"
 	@echo
 	@echo "Optional env:"
-	@echo "  SITE          Target site key in sites.yaml (default: test)"
+	@echo "  SITE          Registered site slug          (default: test)"
 	@echo "  ROOT_DOMAIN   Public root domain        (default: freecode.camp)"
 	@echo "  PROD_SLO      Production-alias SLO      (default: 2m, D38)"
 	@echo "  PREVIEW_SLO   Preview-alias SLO         (default: 90s)"
