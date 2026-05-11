@@ -19,8 +19,8 @@
 //	ARTEMIS_URL   Base URL of a live artemis deployment (no trailing slash).
 //	GH_TOKEN      A GitHub bearer the target site authorizes (the caller's
 //	              team must appear under the site's `teams` list in the
-//	              artemis registry — `universe sites ls --slug <site>` to
-//	              inspect). `gh auth token` is the easiest source on a
+//	              artemis registry — `universe sites ls | grep "<site>"`
+//	              to inspect). `gh auth token` is the easiest source on a
 //	              dev laptop. CI can pass any PAT or a workflow token.
 //
 // Optional environment:

@@ -86,7 +86,7 @@ Operator-facing CLI surface (universe-cli ≥ 0.5.0):
 universe sites register <slug> --team <team>[,<team>...]
 universe sites update   <slug> --team <team>[,<team>...]
 universe sites rm       <slug>
-universe sites ls       [--mine] [--slug <slug>]
+universe sites ls       [--mine]
 ```
 
 Mutations propagate to every artemis replica via the

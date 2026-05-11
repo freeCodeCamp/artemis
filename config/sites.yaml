@@ -11,7 +11,7 @@
 #   universe sites register <slug> --team <team>[,<team>...]
 #   universe sites update   <slug> --team <team>[,<team>...]
 #   universe sites rm       <slug>
-#   universe sites ls       [--mine] [--slug <slug>]
+#   universe sites ls       [--mine]
 #
 # Schema below is preserved for parity with the live registry shape:
 #   sites:

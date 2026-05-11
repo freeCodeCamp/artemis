@@ -311,7 +311,7 @@ func TestWhoAmI(t *testing.T) {
 	}
 	t.Logf("[whoami] login=%s authorizedSites=%v", resp.Login, resp.AuthorizedSites)
 	if !slices.Contains(resp.AuthorizedSites, c.Site) {
-		t.Fatalf("whoami: site %q not in authorized list %v — caller's GH teams must match the site's teams in the artemis registry (run `universe sites ls --slug %s` to inspect)",
+		t.Fatalf("whoami: site %q not in authorized list %v — caller's GH teams must match the site's teams in the artemis registry (run `universe sites ls | grep %q` to inspect)",
 			c.Site, resp.AuthorizedSites, c.Site)
 	}
 }
