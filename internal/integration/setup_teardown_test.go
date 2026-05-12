@@ -103,10 +103,21 @@ func preflightHealthz(c cfg) error {
 	return nil
 }
 
-// captureBaselineProd reads the deploys list and returns the head
-// (most-recent) deploy id, which is what /api/site/{site}/promote
-// would have made live last. Empty string + nil error means the
-// site has no deploys yet.
+// captureBaselineProd reads the deploys list and returns the most
+// recent deploy id, which is what `/api/site/{site}/promote` would
+// most plausibly have made live last. Used by teardown to leave the
+// live site converged on the most recent deploy rather than reverting
+// to the oldest. Empty string + nil error means the site has no
+// deploys yet (fresh site).
+//
+// Order note: `/api/site/{site}/deploys` returns deploys in R2
+// ListObjectsV2 lex-ascending order (handler/site.go:99-129 does no
+// post-sort). Deploy IDs are `<yyyymmdd-hhmmss>-<sha7>` so lex-ascending
+// = chronological-ascending = oldest-first. The newest is therefore
+// `deploys[len-1]`, not `deploys[0]`. universe-cli wraps this list
+// with a client-side reverse before display (see f746a01); the raw
+// API does not. Pre-2026-05-12 this helper read `deploys[0]` and the
+// teardown was reverting prod toward the oldest deploy every run.
 func captureBaselineProd(c cfg) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -122,8 +133,7 @@ func captureBaselineProd(c cfg) (string, error) {
 	if len(deploys) == 0 {
 		return "", nil
 	}
-	// /deploys returns newest-first per artemis handler convention.
-	return deploys[0].DeployID, nil
+	return deploys[len(deploys)-1].DeployID, nil
 }
 
 // restoreProd POSTs /api/site/{site}/rollback to rewire the prod
