@@ -17,7 +17,6 @@ coverage.html
 
 # Local env / runtime
 .env
-.envrc
 # config/sites.yaml is a dormant cold-start seed (Valkey is the live
 # registry post-cutover, artemis@f115198); committed for reference only.
 
