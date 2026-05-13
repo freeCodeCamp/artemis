@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -59,6 +60,16 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	if req.DeployID != "" && !deployIDPattern.MatchString(req.DeployID) {
 		writeError(w, http.StatusBadRequest, "bad_request", "deployId is not a valid artemis deploy id")
 		return
+	}
+
+	// Telemetry-only — empty body keeps legacy semantics for one
+	// release per RELEASING.md; the warn surfaces remaining callers
+	// before the next sprint flips this branch to 400 Bad Request.
+	if req.DeployID == "" && req.ExpectedCurrent == "" {
+		slog.Warn("promote.legacy_bare",
+			"site", site,
+			"remote", r.RemoteAddr,
+			"reqID", RequestIDFromContext(r.Context()))
 	}
 
 	prodKey := h.aliasKey(site, "production")

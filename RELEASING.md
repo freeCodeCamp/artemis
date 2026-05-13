@@ -106,6 +106,16 @@ docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:0.2.0 \
 
 Open a PR against `freeCodeCamp/infra`, merge after review, let the GitOps reconciler roll it out.
 
+## Active deprecations
+
+Behaviour-bearing warnings emitted by the running service. Each entry lists the log event, the removal trigger, and the replacement contract.
+
+| event                 | emitted when                                                  | removal trigger                                                                                                                              | replacement                                                                      |
+| --------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `promote.legacy_bare` | `POST /api/site/{site}/promote` with empty / zero-valued body | one release after first appearance — flip the empty-body branch to `400 Bad Request` in the sprint following the release that ships the warn | `{"deployId": "<id>"}` (direct-write) and/or `{"expectedCurrent": "<id>"}` (CAS) |
+
+Telemetry consumers can grep `event=promote.legacy_bare` in the artemis access log to find remaining callers before the flip.
+
 ## Hotfix on an older release line
 
 If `v0.3.x` is current but `v0.2.x` is still pinned in some galaxy and needs a fix:
