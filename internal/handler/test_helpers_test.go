@@ -281,6 +281,11 @@ type fakeR2 struct {
 	// the cheaper probe was used (B6).
 	hasPrefixCalls  int
 	listPrefixCalls int
+
+	// getAliasKeys records the keys passed to GetAlias in call order.
+	// Direct-write promote (#28) + rollback CAS (#29) tests use this to
+	// assert which alias keys were/weren't probed.
+	getAliasKeys []string
 }
 
 func newFakeR2() *fakeR2 {
@@ -329,6 +334,7 @@ func (f *fakeR2) PutAlias(_ context.Context, aliasKey, deployID string) error {
 func (f *fakeR2) GetAlias(_ context.Context, aliasKey string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getAliasKeys = append(f.getAliasKeys, aliasKey)
 	v, ok := f.aliases[aliasKey]
 	if !ok {
 		return "", r2.ErrNotFound

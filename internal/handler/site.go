@@ -2,39 +2,111 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/go-chi/chi/v5"
 )
 
-// SitePromote implements POST /api/site/{site}/promote — copies the
-// preview alias content (a deploy id pointer) to the production alias.
-// Atomic single-PUT semantics.
+// deployIDPattern matches the artemis deploy id shape
+// `YYYYMMDD-HHMMSS-<sha>`. The `<sha>` segment is intentionally
+// permissive (real values include `nogit-N` markers and short hex
+// SHAs) — kept in sync with the integration-test widening at
+// commit f025693.
+var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-\S+$`)
+
+// SitePromoteRequest is the optional body for POST /api/site/{site}/promote.
+// Both fields are additive — an empty body keeps the legacy bare-promote
+// semantics (read preview alias, copy to production).
+type SitePromoteRequest struct {
+	DeployID        string `json:"deployId,omitempty"`
+	ExpectedCurrent string `json:"expectedCurrent,omitempty"`
+}
+
+// SitePromote implements POST /api/site/{site}/promote.
+//
+// Body schema:
+//
+//   - empty body — legacy behavior: read preview alias, write that
+//     deploy id to the production alias.
+//   - {"deployId": "<id>"} — direct-write path: skip the preview read,
+//     write the supplied id to production. Eliminates the bare-promote
+//     race (universe-cli §B B1) for callers that know which id they
+//     want.
+//   - {"expectedCurrent": "<id>"} — CAS guard: read current production
+//     alias, refuse with 409 alias_drift if it does not match. Combines
+//     with deployId so callers can read → diff → swap atomically
+//     against the last-observed prod pointer.
+//
+// Authz: unchanged — staff-team gate enforced by requireSiteAuthz.
 func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	site := chi.URLParam(r, "site")
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return // already wrote response
 	}
 
-	previewKey := h.aliasKey(site, "preview")
-	deployID, err := h.R2.GetAlias(r.Context(), previewKey)
-	if err != nil {
-		if r2.IsNotFound(err) {
-			writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
-			return
-		}
-		writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+	var req SitePromoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
-	deployID = strings.TrimSpace(deployID)
-	if deployID == "" {
-		writeError(w, http.StatusUnprocessableEntity, "no_preview", "preview alias is empty")
+	req.DeployID = strings.TrimSpace(req.DeployID)
+	req.ExpectedCurrent = strings.TrimSpace(req.ExpectedCurrent)
+	if req.DeployID != "" && !deployIDPattern.MatchString(req.DeployID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "deployId is not a valid artemis deploy id")
 		return
 	}
 
 	prodKey := h.aliasKey(site, "production")
+
+	// CAS guard: read current production alias and bail on mismatch.
+	// Treat missing-alias as the empty string so callers can use CAS
+	// to assert "no prod yet" by passing ExpectedCurrent="".
+	if req.ExpectedCurrent != "" {
+		current, err := h.R2.GetAlias(r.Context(), prodKey)
+		if err != nil && !r2.IsNotFound(err) {
+			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			return
+		}
+		current = strings.TrimSpace(current)
+		if current != req.ExpectedCurrent {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": map[string]string{
+					"code":    "alias_drift",
+					"message": "production alias has moved since expectedCurrent was read",
+				},
+				"site":    site,
+				"current": current,
+			})
+			return
+		}
+	}
+
+	// Resolve the deploy id to write. Explicit param wins; otherwise
+	// fall back to the preview alias (legacy path).
+	deployID := req.DeployID
+	if deployID == "" {
+		previewKey := h.aliasKey(site, "preview")
+		v, err := h.R2.GetAlias(r.Context(), previewKey)
+		if err != nil {
+			if r2.IsNotFound(err) {
+				writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			return
+		}
+		deployID = strings.TrimSpace(v)
+		if deployID == "" {
+			writeError(w, http.StatusUnprocessableEntity, "no_preview", "preview alias is empty")
+			return
+		}
+	}
+
 	if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
 		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
 		return

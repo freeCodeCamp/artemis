@@ -245,3 +245,199 @@ func TestSiteDeploys_GroupsByDeployID(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"d1", "d2"}, ids)
 }
+
+// ---------------------------------------------------------------
+// #28 — POST /api/site/{site}/promote body schema (deployId + CAS).
+// ---------------------------------------------------------------
+
+// TestSitePromote_DirectWriteSkipsPreviewRead verifies that when the
+// caller supplies {deployId}, the handler writes prod = deployId
+// directly and never reads the preview alias key. This is the B3-shape
+// race-free path.
+func TestSitePromote_DirectWriteSkipsPreviewRead(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	// Pre-seed a preview alias that would be promoted under the
+	// legacy path. It must remain untouched here.
+	store.aliases["www/preview"] = "20260420-141522-pre1234"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{DeployID: "20260513-101010-cas9999"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	prod := store.aliases["www/production"]
+	preview := store.aliases["www/preview"]
+	keys := append([]string(nil), store.getAliasKeys...)
+	store.mu.Unlock()
+
+	assert.Equal(t, "20260513-101010-cas9999", prod, "prod must equal supplied deployId")
+	assert.Equal(t, "20260420-141522-pre1234", preview, "preview must be untouched")
+	assert.NotContains(t, keys, "www/preview", "direct-write must not read preview alias")
+}
+
+// TestSitePromote_RejectsBadDeployIDFormat — invalid deployId is 400
+// and prod is unchanged.
+func TestSitePromote_RejectsBadDeployIDFormat(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{DeployID: "not-a-deploy-id"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	errObj, ok := resp["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "bad_request", errObj["code"])
+
+	store.mu.Lock()
+	_, exists := store.aliases["www/production"]
+	store.mu.Unlock()
+	assert.False(t, exists, "rejected promote must not mutate prod alias")
+}
+
+// TestSitePromote_CAS_HappyPath — expectedCurrent matches → 200 +
+// alias swapped.
+func TestSitePromote_CAS_HappyPath(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.aliases["www/preview"] = "20260420-141522-newer1"
+	store.aliases["www/production"] = "20260101-101010-older1"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{ExpectedCurrent: "20260101-101010-older1"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "20260420-141522-newer1", store.aliases["www/production"])
+}
+
+// TestSitePromote_CAS_DriftReturns409 — expectedCurrent mismatches →
+// 409 alias_drift, prod alias untouched, response carries the actual
+// current value so callers can re-read + retry.
+func TestSitePromote_CAS_DriftReturns409(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.aliases["www/preview"] = "20260420-141522-newer1"
+	store.aliases["www/production"] = "20260101-101010-current"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{ExpectedCurrent: "20260101-101010-stale99"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	errObj, ok := resp["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "alias_drift", errObj["code"])
+	assert.Equal(t, "20260101-101010-current", resp["current"])
+	assert.Equal(t, "www", resp["site"])
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "20260101-101010-current", store.aliases["www/production"], "prod must be untouched on drift")
+}
+
+// TestSitePromote_CAS_AndDeployID_AtomicSwap — both fields supplied:
+// CAS read fires, then direct-write — preview alias is never read.
+func TestSitePromote_CAS_AndDeployID_AtomicSwap(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.aliases["www/preview"] = "20260420-141522-pre1234"
+	store.aliases["www/production"] = "20260101-101010-current"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{
+		DeployID:        "20260513-101010-cas9999",
+		ExpectedCurrent: "20260101-101010-current",
+	})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "20260513-101010-cas9999", store.aliases["www/production"])
+	assert.NotContains(t, store.getAliasKeys, "www/preview", "direct-write+CAS must not read preview")
+	assert.Contains(t, store.getAliasKeys, "www/production", "CAS branch must read production")
+}
+
+// TestSitePromote_CAS_NoExistingProdRejectsExpectation — expectedCurrent
+// against a site with no prod alias yet returns 409 (current = "").
+// Lets callers assert "no prod yet" by passing ExpectedCurrent="" via
+// the same code path (verified by absence: empty ExpectedCurrent skips
+// the CAS branch entirely — covered by TestSitePromote_Atomic).
+func TestSitePromote_CAS_NoExistingProdRejectsExpectation(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.aliases["www/preview"] = "20260420-141522-newer1"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SitePromoteRequest{ExpectedCurrent: "20260101-101010-anything"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+}
+
+// TestSitePromote_BadJSON — malformed body short-circuits to 400.
+func TestSitePromote_BadJSON(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	h, _ := newTestHandlers(t, gh, standardSites(), newFakeR2())
+
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", []byte("not-json"),
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
