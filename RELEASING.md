@@ -106,7 +106,7 @@ docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:0.2.0 \
   --format '{{.Manifest.Digest}}'
 ```
 
-Commit + push to `freeCodeCamp/infra` per that repo's PR-workflow threshold (small fixes direct, substantial changes via PR). Roll out + verify via the [post-publish deploy runbook](docs/DEPLOYING.md). The reconciler is operator-driven today (`just release artemis` from `k3s/gxy-management/`); ArgoCD pull-mode is parked in Universe ADR-018 epic 4.
+Commit + push to `freeCodeCamp/infra` per that repo's PR-workflow threshold (small fixes direct, substantial changes via PR). Roll out + verify via the [post-publish deploy runbook](docs/DEPLOYING.md). The reconciler is operator-driven today (`just release gxy-management artemis` from the infra repo root); ArgoCD pull-mode is parked in Universe ADR-018 epic 4.
 
 ## Active deprecations
 

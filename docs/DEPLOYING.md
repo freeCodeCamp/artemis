@@ -51,14 +51,14 @@ Commit + push per infra-repo conventions. Decide between direct commit (small-fi
 
 ## Step 3 — Helm release
 
-From the `k3s/gxy-management/` working directory **only** (the `.envrc` at that level loads the cluster `KUBECONFIG` + DO Universe token; running from repo root will hit the wrong cluster):
+Run from the **infra repo root**. The recipe takes `cluster app` as positional args and sets `KUBECONFIG` internally — no `cd` into the galaxy dir needed:
 
 ```bash
-cd ~/DEV/fCC/infra/k3s/gxy-management
-just release artemis
+cd ~/DEV/fCC/infra
+just release gxy-management artemis
 ```
 
-This is a wrapper for `helm upgrade --install` against the artemis chart. The reconciler is operator-driven, not GitOps-driven today (no ArgoCD pull yet — see Universe ADR-018 epic 4 for the planned cutover).
+Wrapper for `helm upgrade --install` against the artemis chart at `k3s/gxy-management/apps/artemis/charts/artemis/`. Reads `k3s/gxy-management/apps/artemis/values.production.yaml` as the production overlay on top of chart defaults, with the sops sealed overlay layered last. Reconciler is operator-driven today (no ArgoCD pull — Universe ADR-018 epic 4 covers the planned cutover).
 
 ## Step 4 — Verify the rollout
 
@@ -112,7 +112,7 @@ Under "Done": one line linking the release tag, digest, and verify timestamp. Un
 If verify catches a regression:
 
 1. Revert `values.production.yaml` to the previous `X.Y.Z-1@sha256:<previous-digest>`.
-1. Re-run `just release artemis` from `k3s/gxy-management/`.
+1. Re-run `just release gxy-management artemis` from the infra repo root.
 1. Re-run verify steps (1) + (2). If still red, file an incident note in the dossier closeout `## Rollback` section.
 
 The previous digest lives in the helm revision history:
