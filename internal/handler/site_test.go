@@ -441,3 +441,114 @@ func TestSitePromote_BadJSON(t *testing.T) {
 	)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// ---------------------------------------------------------------
+// #29 — POST /api/site/{site}/rollback expectedCurrent CAS guard.
+// ---------------------------------------------------------------
+
+// TestSiteRollback_CAS_HappyPath — prod = D1, POST {to: D2,
+// expectedCurrent: D1} → 200, prod = D2.
+func TestSiteRollback_CAS_HappyPath(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.aliases["www/production"] = "d1-current"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d1-current"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "d2-old-deploy", store.aliases["www/production"])
+	assert.Contains(t, store.getAliasKeys, "www/production", "CAS branch must read prod alias")
+}
+
+// TestSiteRollback_CAS_DriftReturns409 — prod = D1, POST {to: D2,
+// expectedCurrent: D0} → 409, body has current: D1, prod unchanged.
+func TestSiteRollback_CAS_DriftReturns409(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.aliases["www/production"] = "d1-current"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d0-stale"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	errObj, ok := resp["error"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "alias_drift", errObj["code"])
+	assert.Equal(t, "d1-current", resp["current"])
+	assert.Equal(t, "www", resp["site"])
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "d1-current", store.aliases["www/production"], "prod must be untouched on drift")
+}
+
+// TestSiteRollback_NoCAS_LegacyPath — POST without expectedCurrent
+// keeps existing behavior: HasPrefix check, then PutAlias, never
+// reads the prod alias.
+func TestSiteRollback_NoCAS_LegacyPath(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.aliases["www/production"] = "d1-current"
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Equal(t, "d2-old-deploy", store.aliases["www/production"])
+	assert.NotContains(t, store.getAliasKeys, "www/production", "legacy path must not read prod alias")
+}
+
+// TestSiteRollback_CAS_NoExistingProdRejectsExpectation — rollback
+// CAS against a site with no prod alias yet returns 409 (current = "").
+// Parity with the SitePromote CAS contract.
+func TestSiteRollback_CAS_NoExistingProdRejectsExpectation(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	store := newFakeR2()
+	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	h, _ := newTestHandlers(t, gh, standardSites(), store)
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d-anything"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+}

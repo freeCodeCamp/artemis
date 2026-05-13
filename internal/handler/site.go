@@ -119,13 +119,22 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 }
 
 // SiteRollbackRequest is the body of /api/site/{site}/rollback.
+//
+//   - To is the target deploy id (required).
+//   - ExpectedCurrent, when non-empty, gates the rollback on the
+//     current production alias matching this value. On mismatch the
+//     handler returns 409 alias_drift and refuses to mutate the
+//     alias. Mirrors the SitePromoteRequest CAS contract (#28).
 type SiteRollbackRequest struct {
-	To string `json:"to"`
+	To              string `json:"to"`
+	ExpectedCurrent string `json:"expectedCurrent,omitempty"`
 }
 
 // SiteRollback implements POST /api/site/{site}/rollback — rewrites the
 // production alias to point at a past deploy id. Refuses if the target
-// deploy prefix has no objects (i.e. has been swept by the cleanup cron).
+// deploy prefix has no objects (i.e. has been swept by the cleanup
+// cron) or if ExpectedCurrent is set and disagrees with the current
+// production alias body.
 func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	site := chi.URLParam(r, "site")
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
@@ -137,6 +146,8 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
 		return
 	}
+	req.To = strings.TrimSpace(req.To)
+	req.ExpectedCurrent = strings.TrimSpace(req.ExpectedCurrent)
 	if req.To == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "to is required")
 		return
@@ -154,6 +165,30 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prodKey := h.aliasKey(site, "production")
+
+	// CAS guard: read current prod alias and bail on mismatch. Missing
+	// alias normalises to empty-string — symmetric with SitePromote so
+	// callers can use a single response shape across both verbs.
+	if req.ExpectedCurrent != "" {
+		current, err := h.R2.GetAlias(r.Context(), prodKey)
+		if err != nil && !r2.IsNotFound(err) {
+			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			return
+		}
+		current = strings.TrimSpace(current)
+		if current != req.ExpectedCurrent {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": map[string]string{
+					"code":    "alias_drift",
+					"message": "production alias has moved since expectedCurrent was read",
+				},
+				"site":    site,
+				"current": current,
+			})
+			return
+		}
+	}
+
 	if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
 		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
 		return
