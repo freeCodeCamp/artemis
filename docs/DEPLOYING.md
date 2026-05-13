@@ -84,10 +84,20 @@ ARTEMIS_URL=https://uploads.freecode.camp \
 ## Step 5 — Smoke-test the live binary
 
 ```bash
-curl -sI https://uploads.freecode.camp/healthz
+curl -s https://uploads.freecode.camp/healthz
 ```
 
-Expected: `200 OK`, `artemis-version: X.Y.Z` header (embedded at build via `-X main.version=`).
+Expected: `{"ok":true}` body on a `200 OK`. `/healthz` allows only `GET`; `HEAD` returns `405 Method Not Allowed` with `Allow: GET`.
+
+Confirm the running version + commit via the startup banner in pod logs:
+
+```bash
+cd ~/DEV/fCC/infra/k3s/gxy-management
+KUBECONFIG="$(pwd)/.kubeconfig.yaml" kubectl -n artemis logs \
+  -l app.kubernetes.io/name=artemis --since=15m | grep "starting version"
+```
+
+Expected: `artemis: starting version=X.Y.Z commit=<full-sha>` (one line per replica). Both `version=` and `commit=` are embedded at build time via `-X main.version=… -X main.commit=…` and survive into the running binary.
 
 ## Step 6 — Closeout
 
