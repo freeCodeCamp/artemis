@@ -71,12 +71,17 @@ git push origin main
 git push origin v0.2.0
 ```
 
-CI (GitHub Actions, `.github/workflows/`) picks up the tag and:
+The tag push fires `.github/workflows/docker-ghcr.yml` (trigger: `push.tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']`). The workflow:
 
-- builds + pushes a multi-arch image to `ghcr.io/freecodecamp/artemis:v0.2.0`
-- attaches `CHANGELOG.md` excerpt to the GitHub Release notes
+- builds + pushes the image to `ghcr.io/freecodecamp/artemis`, emitting tags
+  - `v0.2.0` (full semver, via `docker/metadata-action` `type=semver,pattern={{version}}`)
+  - `v0.2` (major.minor, for floating point-release pins)
+  - `sha-<full-sha>` (immutable audit anchor; always emitted)
+- embeds `VERSION=v0.2.0` + `COMMIT=<full-sha>` into the binary via `-X main.version=… -X main.commit=…` (visible in the startup log line `artemis: starting version=v0.2.0 commit=<sha>`).
 
-(_Release workflow lives in `.github/workflows/release.yml`; if absent, the operator opens the Release manually from the tag and pastes the `v0.2.0` section of `CHANGELOG.md` into the description._)
+The same workflow is also `workflow_dispatch`-able for ad-hoc builds off `main`; those emit only `sha-<full-sha>`, `main`, and `latest` — never a semver tag.
+
+GitHub Release notes are **not** auto-published. After the workflow succeeds, the operator opens the Release from the tag and pastes the matching `v0.2.0` section of `CHANGELOG.md` into the description. (A future workflow may automate this; track via the `release-automation` follow-up if added.)
 
 ### 5. Pin the new version in `freeCodeCamp/infra`
 
@@ -85,10 +90,17 @@ Edit `infra/k3s/gxy-management/apps/artemis/values.production.yaml`:
 ```yaml
 image:
   # release: v0.2.0
-  tag: sha-<full-sha>@sha256:<digest>
+  tag: v0.2.0@sha256:<digest>
 ```
 
-The `# release: vX.Y.Z` comment is the human-readable anchor. The `tag:` line stays as `sha-<full-sha>@sha256:<digest>` for immutability + audit traceability — never `tag: v0.2.0`, because tags can be moved on the registry side while a digest cannot.
+The `# release:` comment is redundant once the semver tag is in `image.tag`, but is kept for `grep`-ability and to survive future tag-format changes. The `@sha256:<digest>` suffix is the **load-bearing** part: it pins the image immutably regardless of whether the `v0.2.0` registry tag is later overwritten (which we never do, but the digest is the audit-grade anchor). Never use `tag: v0.2.0` without the digest, and never use `tag: latest` in production values.
+
+Resolve the digest after the workflow succeeds:
+
+```bash
+docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:v0.2.0 \
+  --format '{{.Manifest.Digest}}'
+```
 
 Open a PR against `freeCodeCamp/infra`, merge after review, let the GitOps reconciler roll it out.
 
@@ -108,6 +120,16 @@ If `v0.3.x` is current but `v0.2.x` is still pinned in some galaxy and needs a f
 
 ## Why this shape
 
-- Operators map `helm list` releases to changelog entries via the `# release:` comment in the infra repo. Without that anchor, the pinned digest is opaque.
-- Tags are local-cheap, push-discoverable. CI runs only on `v*` tag push, so a typo in step 2 is a soft failure (the tag can be deleted before step 4).
+- Operators map `helm list` releases to changelog entries via the semver portion of `image.tag` in the infra repo. Even though `@sha256:<digest>` is the load-bearing pin, the `vX.Y.Z` prefix and the parallel `# release:` comment give `grep`-able human anchors that survive future tag-format migrations.
+- Tags are local-cheap, push-discoverable. CI builds run only on `v*` tag push, so a typo in step 2 is a soft failure (the tag can be deleted before step 4).
 - `MINOR-may-break` pre-1.0 is preserved in this file (not just in `cliff.toml` comments) because operators reading `CHANGELOG.md` need to see the caveat without diving into the tooling config.
+
+## Bootstrap note — `v0.1.0`
+
+`v0.1.0` was tagged in commit `5cd947f` (`chore(release): adopt git-cliff + tag v0.1.0`) before the GHCR workflow learned to fire on tag push. The fix landed in a follow-up commit. Before pushing `v0.1.0`, the operator must:
+
+1. Confirm the workflow change is on `main` (i.e. `docker-ghcr.yml` contains `push.tags`).
+1. Re-point the local tag at the latest behaviour-bearing commit on `main` (see the retag recipe in step 3).
+1. Push the tag.
+
+Subsequent releases follow the standard 5-step flow with no special handling.

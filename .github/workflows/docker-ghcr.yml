@@ -2,6 +2,16 @@ name: CD - Docker - GHCR Images
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+concurrency:
+  group: ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
   build-and-push:
@@ -29,7 +39,14 @@ jobs:
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
         with:
           images: ghcr.io/freecodecamp/artemis
+          # Tag plan:
+          #   - semver tags (v0.1.0 → "0.1.0", "0.1"): only on tag push.
+          #   - sha-<full-sha>: always — immutable, used as audit anchor.
+          #   - branch name: workflow_dispatch / branch push.
+          #   - latest: default-branch builds only (not tag push).
           tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
@@ -49,8 +66,11 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
+          # VERSION = metadata-action's primary version (semver on tag push,
+          # branch name or "sha-<sha>" otherwise). Embedded via -X main.version.
+          # COMMIT  = full SHA, immutable audit anchor.
           build-args: |
-            VERSION=${{ github.sha }}
+            VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

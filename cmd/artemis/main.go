@@ -26,6 +26,13 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/server"
 )
 
+// Build-time identity, injected via -ldflags "-X main.version=... -X main.commit=...".
+// Defaults match the Dockerfile ARG defaults so a bare `go build` is still useful.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("artemis: fatal", "err", err)
@@ -34,6 +41,11 @@ func main() {
 }
 
 func run() error {
+	// Log version BEFORE config.Load() so a misconfigured deploy still leaves
+	// a version breadcrumb in container logs (default slog handler is fine
+	// for this single line; configureLogger swaps it in below).
+	slog.Info("artemis: starting", "version", version, "commit", commit)
+
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
