@@ -74,14 +74,16 @@ git push origin v0.2.0
 The tag push fires `.github/workflows/docker-ghcr.yml` (trigger: `push.tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']`). The workflow:
 
 - builds + pushes the image to `ghcr.io/freecodecamp/artemis`, emitting tags
-  - `v0.2.0` (full semver, via `docker/metadata-action` `type=semver,pattern={{version}}`)
-  - `v0.2` (major.minor, for floating point-release pins)
+  - `0.2.0` (full semver — `docker/metadata-action` `type=semver,pattern={{version}}` **strips the leading `v`** from the git tag; the registry tag is the bare semver)
+  - `0.2` (major.minor, for floating point-release pins — same `v`-stripping)
   - `sha-<full-sha>` (immutable audit anchor; always emitted)
-- embeds `VERSION=v0.2.0` + `COMMIT=<full-sha>` into the binary via `-X main.version=… -X main.commit=…` (visible in the startup log line `artemis: starting version=v0.2.0 commit=<sha>`).
+- embeds `VERSION=0.2.0` + `COMMIT=<full-sha>` into the binary via `-X main.version=… -X main.commit=…` (visible in the startup log line `artemis: starting version=0.2.0 commit=<sha>`).
+
+Git tag (`v0.2.0`) and registry tag (`0.2.0`) intentionally differ by the `v` prefix — this is the docker/metadata-action default and the broader OCI-registry convention. Don't try to "fix" the asymmetry by adding `pattern=v{{version}}`; downstream tooling (helm, kustomize, ArgoCD image-updater) expects the bare semver.
 
 The same workflow is also `workflow_dispatch`-able for ad-hoc builds off `main`; those emit only `sha-<full-sha>`, `main`, and `latest` — never a semver tag.
 
-GitHub Release notes are **not** auto-published. After the workflow succeeds, the operator opens the Release from the tag and pastes the matching `v0.2.0` section of `CHANGELOG.md` into the description. (A future workflow may automate this; track via the `release-automation` follow-up if added.)
+GitHub Release notes are **not** auto-published. After the workflow succeeds, the operator opens the Release from the tag and pastes the matching `[0.2.0]` section of `CHANGELOG.md` into the description (note: section heading is the bare semver, no `v` prefix — `cliff.toml` strips it via `trim_start_matches`). (A future workflow may automate this; track via the `release-automation` follow-up if added.)
 
 ### 5. Pin the new version in `freeCodeCamp/infra`
 
@@ -89,16 +91,16 @@ Edit `infra/k3s/gxy-management/apps/artemis/values.production.yaml`:
 
 ```yaml
 image:
-  # release: v0.2.0
-  tag: v0.2.0@sha256:<digest>
+  # release: 0.2.0
+  tag: "0.2.0@sha256:<digest>"
 ```
 
-The `# release:` comment is redundant once the semver tag is in `image.tag`, but is kept for `grep`-ability and to survive future tag-format changes. The `@sha256:<digest>` suffix is the **load-bearing** part: it pins the image immutably regardless of whether the `v0.2.0` registry tag is later overwritten (which we never do, but the digest is the audit-grade anchor). Never use `tag: v0.2.0` without the digest, and never use `tag: latest` in production values.
+The `# release:` comment is redundant once the semver tag is in `image.tag`, but is kept for `grep`-ability and to survive future tag-format changes. The `@sha256:<digest>` suffix is the **load-bearing** part: it pins the image immutably regardless of whether the `0.2.0` registry tag is later overwritten (which we never do, but the digest is the audit-grade anchor). Never use `tag: 0.2.0` without the digest, and never use `tag: latest` in production values.
 
 Resolve the digest after the workflow succeeds:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:v0.2.0 \
+docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:0.2.0 \
   --format '{{.Manifest.Digest}}'
 ```
 
@@ -120,7 +122,7 @@ If `v0.3.x` is current but `v0.2.x` is still pinned in some galaxy and needs a f
 
 ## Why this shape
 
-- Operators map `helm list` releases to changelog entries via the semver portion of `image.tag` in the infra repo. Even though `@sha256:<digest>` is the load-bearing pin, the `vX.Y.Z` prefix and the parallel `# release:` comment give `grep`-able human anchors that survive future tag-format migrations.
+- Operators map `helm list` releases to changelog entries via the semver portion of `image.tag` in the infra repo. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) and the parallel `# release:` comment give `grep`-able human anchors that survive future tag-format migrations. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — this is intentional and consistent with docker/metadata-action defaults.
 - Tags are local-cheap, push-discoverable. CI builds run only on `v*` tag push, so a typo in step 2 is a soft failure (the tag can be deleted before step 4).
 - `MINOR-may-break` pre-1.0 is preserved in this file (not just in `cliff.toml` comments) because operators reading `CHANGELOG.md` need to see the caveat without diving into the tooling config.
 
