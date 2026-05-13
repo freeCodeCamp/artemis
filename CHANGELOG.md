@@ -5,10 +5,24 @@ All notable changes to artemis are documented here. Format follows
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [0.2.0] - 2026-05-13
+
+### Features
+
+- **handler:** Warn promote.legacy_bare on empty-body promote ([d507918](https://github.com/freeCodeCamp/artemis/commit/d5079186a3e78527d25acf3dec721c1a6ea1b72f))
+- **release:** Auto-publish GH Release on tag push ([602def0](https://github.com/freeCodeCamp/artemis/commit/602def06e8224dab460701c778c5ff4c4b8ffaf7))
+
+### Documentation
+
+- **release:** Clarify registry tag has no v prefix ([22fc95b](https://github.com/freeCodeCamp/artemis/commit/22fc95bbd9ca2efdba5305d85317a31b0812dfe4))
+
 ## [0.1.0] - 2026-05-13
 
 ### Features
 
+- **release:** Tag-trigger GHCR + embed version ([8551656](https://github.com/freeCodeCamp/artemis/commit/8551656c44cc9d08fdb53f7a27c00e68f83a5082))
+- **handler:** Rollback expectedCurrent CAS guard ([596b3f8](https://github.com/freeCodeCamp/artemis/commit/596b3f8d413f262bc0f52ea8c8e2272a0bfd58ea))
+- **handler:** Promote body schema + CAS guard ([0976e21](https://github.com/freeCodeCamp/artemis/commit/0976e214e4c08e2b88873aa24e46847f7b4e5e6e))
 - **handler:** GET /api/site/{site}/alias/{mode} ([d6914a2](https://github.com/freeCodeCamp/artemis/commit/d6914a23d04083dbcc6b7ace995cf1854bfa90a0))
 - **handler:** DELETE /api/site/{slug} ([7adf917](https://github.com/freeCodeCamp/artemis/commit/7adf9172a6bcac54f6965768639411dcd6e8ec0c))
 - **handler:** PATCH /api/site/{slug} ([fd6894a](https://github.com/freeCodeCamp/artemis/commit/fd6894a3ad895dda85058df0572b06a1cc67f842))
