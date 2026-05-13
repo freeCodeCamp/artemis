@@ -83,7 +83,9 @@ Git tag (`v0.2.0`) and registry tag (`0.2.0`) intentionally differ by the `v` pr
 
 The same workflow is also `workflow_dispatch`-able for ad-hoc builds off `main`; those emit only `sha-<full-sha>`, `main`, and `latest` — never a semver tag.
 
-GitHub Release notes are auto-published as part of the same `docker-ghcr.yml` run. After the build+push job finishes the image, two extra steps fire only on tag push: `Slice CHANGELOG section for this tag` extracts the matching `[X.Y.Z]` section from `CHANGELOG.md` (note: section heading is the bare semver, no `v` prefix — `cliff.toml` strips it via `trim_start_matches`), and `Publish GitHub Release` (softprops/action-gh-release pinned to v3.0.0) creates / updates the Release object with that body. The action is idempotent — re-running against an existing release updates rather than failing. The slice step exits hard if the section is missing rather than publishing an empty release body, so a forgotten `git-cliff -o CHANGELOG.md` regen surfaces as a CI red, not a silent empty release.
+GitHub Release notes are auto-published as part of the same `docker-ghcr.yml` run. After the build+push job finishes the image, two extra steps fire only on tag push: `Generate release notes` invokes `orhun/git-cliff-action` with `--current --strip all` to render the body for the tag directly from the commit log + `cliff.toml`, and `Publish GitHub Release` (softprops/action-gh-release pinned to v3.0.0) creates / updates the Release object with that body. The action is idempotent — re-running against an existing release updates rather than failing.
+
+The notes come from the git history walked between the previous tag and the current one — **not** from `CHANGELOG.md` state at the tagged commit. Decoupling them lets the release-chore commit (`chore(release): vX.Y.Z`) land **after** the tag without breaking the workflow: the tag can keep pointing at the last behaviour-bearing commit per step 2 while still publishing a populated GH Release body. The checkout step uses `fetch-depth: 0` + `fetch-tags: true` so git-cliff can resolve `--current` against the full ref graph.
 
 ### 5. Pin the new version in `freeCodeCamp/infra`
 

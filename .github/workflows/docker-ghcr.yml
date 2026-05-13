@@ -23,6 +23,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # git-cliff renders release notes by walking commits between
+          # the previous tag and the current one. Shallow checkout
+          # truncates that history and breaks `--current`. Full clone
+          # (+ tags) decouples the release-notes generation from
+          # CHANGELOG.md state at any specific commit.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
@@ -82,24 +90,19 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Slice CHANGELOG section for this tag
+      # git-cliff regenerates the release notes section directly from
+      # the commit log + cliff.toml — same tool used in
+      # `RELEASING.md §3`. Decouples the GH Release body from
+      # CHANGELOG.md state at the tagged commit so the workflow stays
+      # green regardless of whether the chore-release commit lands
+      # before, after, or at the tag.
+      - name: Generate release notes
         if: startsWith(github.ref, 'refs/tags/v')
         id: notes
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.meta.outputs.version }}"
-          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
-          awk -v ver="$VERSION" '
-            $0 ~ "^## \\[" ver "\\]" { in_section = 1 }
-            in_section && /^## \[/ && $0 !~ "^## \\[" ver "\\]" { exit }
-            in_section { print }
-          ' CHANGELOG.md > "$NOTES_FILE"
-          if [ ! -s "$NOTES_FILE" ]; then
-            echo "FAIL: no [$VERSION] section found in CHANGELOG.md" >&2
-            exit 1
-          fi
-          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
-          head -40 "$NOTES_FILE"
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+        with:
+          config: cliff.toml
+          args: --current --strip all
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -107,6 +110,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          body_path: ${{ steps.notes.outputs.notes_file }}
+          body: ${{ steps.notes.outputs.content }}
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
