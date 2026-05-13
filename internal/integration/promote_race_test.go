@@ -10,19 +10,26 @@ import (
 	"time"
 )
 
-// TestPromoteRead pins the bare-promote read-then-write contract that
-// motivated the RFC §G investigation. Two operators each finalize a
-// preview deploy back-to-back, then operator A calls bare
-// `/api/site/{site}/promote` expecting to publish A's deploy. Because
-// `SitePromote` (handler/site.go:15-47) reads the preview alias body
-// at GetAlias time and writes that to prod with no CAS, what actually
-// gets published is B's deploy id — whoever finalized last wins.
+// TestPromoteRace is the positive control for the documented-unsafe
+// bare-promote path. With G3 landed, callers have two safe alternatives:
+// `{deployId: <id>}` (direct-write, see TestPromoteWithDeployId) and
+// `{expectedCurrent: <id>}` (CAS, see TestPromoteCAS). The bare path
+// (empty body) is retained for one release behind a `promote.legacy_bare`
+// deprecation log (SPEC §V4, T9) and still exhibits the original
+// last-writer-wins behavior.
 //
-// This test codifies the current behavior as a regression-detection
-// trip-wire. If `SitePromote` ever grows CAS body params (G3 follow-up
-// — `expectedCurrent` refuses on mismatch), the assertion flips from
-// "second wins" to "API refused with a conflict code"; T4 is the
-// natural place to make that flip.
+// Two operators each finalize a preview deploy back-to-back; operator A
+// then bare-POSTs `/api/site/{site}/promote` intending to publish A.
+// Because the empty-body branch reads the preview alias body at
+// GetAlias time and writes that to prod with no CAS, the published id
+// is B's — whoever finalized preview last wins.
+//
+// This test PINS that contract as the regression-detection trip-wire
+// for the legacy code path. The assertion stays `second wins` until
+// the bare path is removed entirely (planned follow-up sprint per SPEC
+// §V4 / RELEASING.md); when removal lands, this test flips to assert
+// `400 Bad Request` and the safe-variant tests carry the contract
+// forward.
 //
 // No R2 creds needed — asserts on the promote HTTP response deployId,
 // not on alias body bytes. Suite-level teardown restores baseline prod
@@ -66,17 +73,18 @@ func TestPromoteRace(t *testing.T) {
 	}
 
 	if promoteResp.DeployID != initB.DeployID {
-		t.Fatalf("bare promote published %q, want B=%q (operator A intended A=%q) — RFC §G B2 contract drift",
+		t.Fatalf("bare promote published %q, want B=%q (operator A intended A=%q) — RFC §G B2 contract drift on the documented-unsafe legacy path; use {deployId: A} or {expectedCurrent: <baseline>} for safe variants",
 			promoteResp.DeployID, initB.DeployID, initA.DeployID)
 	}
-	t.Logf("[race] bare promote → %s (= B, A's intent silently overridden)",
+	t.Logf("[race] bare promote → %s (= B; legacy path, A's intent silently overridden — see TestPromoteWithDeployId / TestPromoteCAS for safe variants)",
 		promoteResp.DeployID)
 }
 
 // promoteRaceFinalizePreview runs init → upload → finalize(preview)
-// for a single operator slice of TestPromoteRace. Inlined-pattern
-// matching TestDeployFlow (no new abstractions yet — extract if T2/T3/T5
-// want the same shape).
+// for a single operator slice of a promote-shape test. Shared across
+// TestPromoteRace, TestPromoteWithDeployId, and TestPromoteCAS — all
+// three exercise the same finalize-then-promote pattern with different
+// promote bodies.
 //
 // Returns the init response (deployId + jwt) so callers can chain
 // further calls if they need to (today: not used after finalize).
