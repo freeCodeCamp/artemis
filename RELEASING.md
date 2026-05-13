@@ -83,7 +83,7 @@ Git tag (`v0.2.0`) and registry tag (`0.2.0`) intentionally differ by the `v` pr
 
 The same workflow is also `workflow_dispatch`-able for ad-hoc builds off `main`; those emit only `sha-<full-sha>`, `main`, and `latest` — never a semver tag.
 
-GitHub Release notes are **not** auto-published. After the workflow succeeds, the operator opens the Release from the tag and pastes the matching `[0.2.0]` section of `CHANGELOG.md` into the description (note: section heading is the bare semver, no `v` prefix — `cliff.toml` strips it via `trim_start_matches`). (A future workflow may automate this; track via the `release-automation` follow-up if added.)
+GitHub Release notes are auto-published as part of the same `docker-ghcr.yml` run. After the build+push job finishes the image, two extra steps fire only on tag push: `Slice CHANGELOG section for this tag` extracts the matching `[X.Y.Z]` section from `CHANGELOG.md` (note: section heading is the bare semver, no `v` prefix — `cliff.toml` strips it via `trim_start_matches`), and `Publish GitHub Release` (softprops/action-gh-release pinned to v3.0.0) creates / updates the Release object with that body. The action is idempotent — re-running against an existing release updates rather than failing. The slice step exits hard if the section is missing rather than publishing an empty release body, so a forgotten `git-cliff -o CHANGELOG.md` regen surfaces as a CI red, not a silent empty release.
 
 ### 5. Pin the new version in `freeCodeCamp/infra`
 
