@@ -12,6 +12,7 @@
 //	PATCH  /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	DELETE /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
+//	GET    /api/site/{site}/alias/{mode}                  — GitHub bearer
 //	POST   /api/site/{site}/promote                       — GitHub bearer
 //	POST   /api/site/{site}/rollback                      — GitHub bearer
 package server
@@ -45,6 +46,7 @@ func New(h *handler.Handlers) http.Handler {
 			r.Patch("/site/{slug}", h.SiteUpdate)
 			r.Delete("/site/{slug}", h.SiteDelete)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
+			r.Get("/site/{site}/alias/{mode}", h.AliasGet)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)
 		})
