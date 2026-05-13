@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -124,11 +125,9 @@ func TestLoad_MissingRequiredFails(t *testing.T) {
 	for _, omitted := range cases {
 		t.Run("missing "+omitted, func(t *testing.T) {
 			for k, v := range requiredEnv() {
-				if k == omitted {
-					continue
-				}
 				t.Setenv(k, v)
 			}
+			require.NoError(t, os.Unsetenv(omitted))
 			_, err := Load()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), omitted)
