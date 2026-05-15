@@ -193,7 +193,7 @@ curl -X POST https://uploads.freecode.camp/api/site/www/rollback \
 
 # whoami
 curl https://uploads.freecode.camp/api/whoami -H "Authorization: Bearer $GITHUB_TOKEN"
-# → { "login": "ahmadabdolsaheb", "authorizedSites": ["www","learn"] }
+# → { "login": "octocat", "authorizedSites": ["www","learn"] }
 ```
 
 ## License
