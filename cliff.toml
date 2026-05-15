@@ -34,7 +34,7 @@ footer = """
 """
 trim = true
 # Strip phase-tracker IDs that historical commit subjects carried.
-# Subjects in the form `feat(scope): summary (PH1-B23)` or `(B23)`
+# Subjects with a trailing `(PH<n>-B<m>)` or bare `(B<m>)` parenthetical
 # render into CHANGELOG.md verbatim without this. Regex applies to
 # the fully-rendered changelog string.
 postprocessors = [

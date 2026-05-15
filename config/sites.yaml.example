@@ -1,15 +1,14 @@
-# sites.yaml.example — historical seed shape for the artemis sites map.
+# sites.yaml.example — schema reference for the artemis sites map.
 #
-# Post-cutover (artemis@f115198) the authoritative store is Valkey;
-# this file is **not** consumed at runtime. It is retained as a
-# cold-start reference — useful for replaying entries after a full
-# Valkey wipe via `universe sites register <slug> --team <team>...`.
+# The authoritative store at runtime is Valkey; this file is not
+# consumed by the running service. It exists as a schema reference,
+# useful when replaying entries after a full Valkey wipe via
+# `universe sites register <slug> --team <team>...`.
 #
-# Each top-level key under `sites:` is a site slug (matches the
-# sub-domain served by Caddy on cassiopeia, e.g.
-# `<site>.freecode.camp`). The `teams:` list enumerates GitHub team
-# slugs (within GH_ORG) whose members are authorized to deploy to
-# that site.
+# Each top-level key under `sites:` is a site slug, which becomes the
+# sub-domain the deployment serves (e.g. `<site>.<root-domain>`). The
+# `teams:` list enumerates GitHub team slugs (within GH_ORG) whose
+# members are authorized to deploy to that site.
 
 sites:
   www:
