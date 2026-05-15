@@ -116,7 +116,7 @@ ARTEMIS_URL=https://uploads.freecode.camp \
   make integration
 ```
 
-`make integration-help` prints the full env-var reference. The suite is **safe to run against production** — it writes only under the `test` site (a staff-only smoke target registered in the artemis registry) and relies on the cleanup cron (T22, 7-day retention) for prefix GC.
+`make integration-help` prints the full env-var reference. The suite is **safe to run against production** — it writes only under the `test` site (a staff-only smoke target registered in the artemis registry) and relies on the cleanup cron (7-day retention) for prefix GC.
 
 ### Setup / teardown
 
@@ -155,7 +155,7 @@ Edge cases:
 | `GH_TOKEN`     | _(required)_    | GitHub bearer authorized for `SITE`           |
 | `SITE`         | `test`          | Registered site slug                          |
 | `ROOT_DOMAIN`  | `freecode.camp` | Root domain for preview/production URL derive |
-| `PROD_SLO`     | `2m`            | Production-alias serve SLO (D38)              |
+| `PROD_SLO`     | `2m`            | Production-alias serve SLO                    |
 | `PREVIEW_SLO`  | `90s`           | Preview-alias serve SLO                       |
 | `HTTP_TIMEOUT` | `30s`           | Per-request HTTP timeout                      |
 

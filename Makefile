@@ -55,7 +55,7 @@ integration-help: ## Print integration-suite usage
 	@echo "Optional env:"
 	@echo "  SITE          Registered site slug          (default: test)"
 	@echo "  ROOT_DOMAIN   Public root domain        (default: freecode.camp)"
-	@echo "  PROD_SLO      Production-alias SLO      (default: 2m, D38)"
+	@echo "  PROD_SLO      Production-alias SLO      (default: 2m)"
 	@echo "  PREVIEW_SLO   Preview-alias SLO         (default: 90s)"
 	@echo "  HTTP_TIMEOUT  Per-request timeout       (default: 30s)"
 	@echo

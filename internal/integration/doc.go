@@ -41,6 +41,6 @@
 //  2. Each run uploads a tiny HTML payload tagged with a unique marker
 //     and verifies the marker round-trips through Caddy + R2.
 //  3. It does not delete deploys; cleanup is handled by the cleanup cron
-//     (T22, 7-day retention) so prior deploys remain available for
-//     rollback testing.
+//     (7-day retention) so prior deploys remain available for rollback
+//     testing.
 package integration

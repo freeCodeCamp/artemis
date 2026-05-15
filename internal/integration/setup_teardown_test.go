@@ -158,7 +158,7 @@ func restoreProd(c cfg, deployID string) error {
 }
 
 // registerDeployCleanup logs (at test end, success or failure) the
-// deploy id any test created. Cleanup cron (T22, 7-day retention)
+// deploy id any test created. The cleanup cron (7-day retention)
 // sweeps the prefix; this just makes the artifact visible in test
 // output for debugging.
 //
@@ -167,7 +167,7 @@ func restoreProd(c cfg, deployID string) error {
 func registerDeployCleanup(t *testing.T, deployID string) {
 	t.Helper()
 	t.Cleanup(func() {
-		t.Logf("[cleanup] deploy %s left in R2 for site=%s — cleanup cron (T22, 7d retention) will sweep",
+		t.Logf("[cleanup] deploy %s left in R2 for site=%s — cleanup cron (7d retention) will sweep",
 			deployID, envDefault("SITE", "test"))
 	})
 }

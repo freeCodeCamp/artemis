@@ -237,8 +237,8 @@ func (c cfg) fetchAndContains(ctx context.Context, url, marker string) (bool, in
 }
 
 // pollForMarker polls url until body contains marker on two
-// consecutive hits (matches Q6 alias-cache settling rule) or budget
-// expires. Returns total wait + error.
+// consecutive hits (alias-cache settling rule) or budget expires.
+// Returns total wait + error.
 func (c cfg) pollForMarker(t *testing.T, url, marker string, budget time.Duration) error {
 	t.Helper()
 	deadline := time.Now().Add(budget)
@@ -451,9 +451,9 @@ func TestDeployFlow(t *testing.T) {
 	}
 	t.Logf("       promoted to deployId=%s url=%s", promoteResp.DeployID, promoteResp.URL)
 
-	// 6. curl production (Q6/D38: ≤ 2 min SLO)
+	// 6. curl production (≤ 2 min SLO)
 	prodURL := fmt.Sprintf("https://%s.%s/", c.Site, c.RootDomain)
-	t.Logf("[6/7] GET %s — poll up to %s for marker (D38 SLO)", prodURL, c.ProdSLO)
+	t.Logf("[6/7] GET %s — poll up to %s for marker (prod SLO)", prodURL, c.ProdSLO)
 	if err := c.pollForMarker(t, prodURL, marker, c.ProdSLO); err != nil {
 		t.Fatalf("production: %v", err)
 	}
@@ -488,9 +488,9 @@ func TestDeployFlow(t *testing.T) {
 // exist (e.g. on a fresh site).
 //
 // We do NOT verify served content for the prior deploy — the cleanup
-// cron may have purged its prefix (T22, 7-day retention). This test
-// covers the API contract; full content rollback is exercised by
-// running TestDeployFlow twice in a row (CI doubles up).
+// cron may have purged its prefix (7-day retention). This test covers
+// the API contract; full content rollback is exercised by running
+// TestDeployFlow twice in a row (CI doubles up).
 func TestRollback(t *testing.T) {
 	c := loadCfg(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
