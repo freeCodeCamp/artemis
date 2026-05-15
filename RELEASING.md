@@ -1,6 +1,6 @@
 # Releasing artemis
 
-This file is the operator playbook for cutting a new version of artemis. Reader: a maintainer with push rights to `freeCodeCamp/artemis` and edit rights to `freeCodeCamp/infra` (for the deploy pin).
+This file is the operator playbook for cutting a new version of artemis. Reader: a maintainer with push rights to the artemis repo. Downstream-deployment pin updates (helm/kustomize/ArgoCD/etc.) are operator-specific and live outside this file.
 
 ## Versioning rule
 
@@ -20,7 +20,7 @@ A release is cut **only** when the unreleased section contains at least one `fea
 
 ### `v1.0.0` trigger
 
-Cut `v1.0.0` when ADR-016 §API surface is declared frozen — practically, after `GET /api/site/{site}/alias/{mode}`, the sites-registry CRUD, and the deploy/promote/rollback verbs have settled in production CLI use without breaking changes for two consecutive minor releases.
+Cut `v1.0.0` when the API surface is declared frozen — practically, after `GET /api/site/{site}/alias/{mode}`, the sites-registry CRUD, and the deploy/promote/rollback verbs have settled in production CLI use without breaking changes for two consecutive minor releases.
 
 ## Release flow
 
@@ -87,26 +87,16 @@ GitHub Release notes are auto-published as part of the same `docker-ghcr.yml` ru
 
 The notes come from the git history walked between the previous tag and the current one — **not** from `CHANGELOG.md` state at the tagged commit. Decoupling them lets the release-chore commit (`chore(release): vX.Y.Z`) land **after** the tag without breaking the workflow: the tag can keep pointing at the last behaviour-bearing commit per step 2 while still publishing a populated GH Release body. The checkout step uses `fetch-depth: 0` + `fetch-tags: true` so git-cliff can resolve `--current` against the full ref graph.
 
-### 5. Pin the new version in `freeCodeCamp/infra`
+### 5. Downstream deployment pin
 
-Edit `infra/k3s/gxy-management/apps/artemis/values.production.yaml`:
-
-```yaml
-image:
-  # release: 0.2.0
-  tag: "0.2.0@sha256:<digest>"
-```
-
-The `# release:` comment is redundant once the semver tag is in `image.tag`, but is kept for `grep`-ability and to survive future tag-format changes. The `@sha256:<digest>` suffix is the **load-bearing** part: it pins the image immutably regardless of whether the `0.2.0` registry tag is later overwritten (which we never do, but the digest is the audit-grade anchor). Never use `tag: 0.2.0` without the digest, and never use `tag: latest` in production values.
-
-Resolve the digest after the workflow succeeds:
+Once the workflow finishes, downstream deployments pin the new release. Resolve the digest:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:0.2.0 \
+docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:X.Y.Z \
   --format '{{.Manifest.Digest}}'
 ```
 
-Commit + push to `freeCodeCamp/infra` per that repo's PR-workflow threshold (small fixes direct, substantial changes via PR). Roll out + verify via the [post-publish deploy runbook](docs/DEPLOYING.md). The reconciler is operator-driven today (`just release gxy-management artemis` from the infra repo root); ArgoCD pull-mode is parked in Universe ADR-018 epic 4.
+The pin format is `image.tag: "X.Y.Z@sha256:<digest>"` — bare semver (no `v`-prefix; docker/metadata-action strips it from the git tag per OCI convention) plus the `@sha256:<digest>` immutable anchor. Never use `tag: X.Y.Z` without the digest, and never use `tag: latest` in production. Deployment mechanics (helm/kustomize/ArgoCD/etc.) are operator-specific.
 
 ## Active deprecations
 
@@ -120,7 +110,7 @@ Telemetry consumers can grep `event=promote.legacy_bare` in the artemis access l
 
 ## Hotfix on an older release line
 
-If `v0.3.x` is current but `v0.2.x` is still pinned in some galaxy and needs a fix:
+If `v0.3.x` is current but `v0.2.x` is still pinned in some downstream deployment and needs a fix:
 
 1. `git checkout -b release/v0.2.x v0.2.0`
 1. Cherry-pick the fix commit.
@@ -134,16 +124,6 @@ If `v0.3.x` is current but `v0.2.x` is still pinned in some galaxy and needs a f
 
 ## Why this shape
 
-- Operators map `helm list` releases to changelog entries via the semver portion of `image.tag` in the infra repo. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) and the parallel `# release:` comment give `grep`-able human anchors that survive future tag-format migrations. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — this is intentional and consistent with docker/metadata-action defaults.
+- Operators map deployed releases back to changelog entries via the semver portion of `image.tag`. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) gives a `grep`-able human anchor that survives future tag-format migrations. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — intentional, consistent with docker/metadata-action defaults.
 - Tags are local-cheap, push-discoverable. CI builds run only on `v*` tag push, so a typo in step 2 is a soft failure (the tag can be deleted before step 4).
 - `MINOR-may-break` pre-1.0 is preserved in this file (not just in `cliff.toml` comments) because operators reading `CHANGELOG.md` need to see the caveat without diving into the tooling config.
-
-## Bootstrap note — `v0.1.0`
-
-`v0.1.0` was tagged in commit `5cd947f` (`chore(release): adopt git-cliff + tag v0.1.0`) before the GHCR workflow learned to fire on tag push. The fix landed in a follow-up commit. Before pushing `v0.1.0`, the operator must:
-
-1. Confirm the workflow change is on `main` (i.e. `docker-ghcr.yml` contains `push.tags`).
-1. Re-point the local tag at the latest behaviour-bearing commit on `main` (see the retag recipe in step 3).
-1. Push the tag.
-
-Subsequent releases follow the standard 5-step flow with no special handling.
