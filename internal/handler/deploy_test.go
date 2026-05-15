@@ -177,29 +177,43 @@ func TestDeployUpload_FallsBackToOctetStream(t *testing.T) {
 	assert.Equal(t, "application/octet-stream", store.lastContentType)
 }
 
-// TestIsCleanRelPath — B22 anchor + tightening: reject ".", absolute,
-// traversal, and empty paths. "." passing pre-B22 stored a malformed
-// `<deploy-prefix>.` key on R2 (harmless but never spec'd as legal).
+// TestIsCleanRelPath covers the accept + reject matrix for the upload
+// path-segment guard: empty, current-dir, absolute, parent-traversal,
+// control bytes, backslash. High-bit UTF-8 is intentionally accepted
+// (artemis serves static apps with non-ASCII filenames).
 func TestIsCleanRelPath(t *testing.T) {
 	cases := []struct {
+		name string
 		p    string
 		want bool
 	}{
-		{"index.html", true},
-		{"a/b/c.html", true},
-		{"foo.bar.baz", true},
-		// rejects
-		{"", false},
-		{".", false},  // B22: was true pre-fix
-		{"./", false}, // path.Clean("./") == "." which then != p
-		{"..", false},
-		{"../escape.html", false},
-		{"a/../b", false},
-		{"/abs.html", false},
-		{"/", false},
+		// accepts
+		{"plain", "index.html", true},
+		{"nested", "a/b/c.html", true},
+		{"dotted", "foo.bar.baz", true},
+		{"utf8", "café/menu.html", true},
+
+		// rejects — shape
+		{"empty", "", false},
+		{"current-dir", ".", false},
+		{"current-dir-slash", "./", false},
+		{"parent", "..", false},
+		{"parent-prefix", "../escape.html", false},
+		{"parent-mid", "a/../b", false},
+		{"absolute", "/abs.html", false},
+		{"root-slash", "/", false},
+
+		// rejects — control bytes + backslash
+		{"null-byte", "foo\x00bar", false},
+		{"newline", "foo\nbar", false},
+		{"tab", "foo\tbar", false},
+		{"carriage-return", "foo\rbar", false},
+		{"del", "foo\x7Fbar", false},
+		{"backslash", "foo\\bar", false},
+		{"backslash-only", "\\", false},
 	}
 	for _, tc := range cases {
-		t.Run(tc.p, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, isCleanRelPath(tc.p))
 		})
 	}

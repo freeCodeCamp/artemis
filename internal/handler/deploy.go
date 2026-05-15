@@ -257,11 +257,29 @@ func normalizeMode(m string) (string, error) {
 }
 
 // isCleanRelPath rejects empty / absolute / traversal / current-dir
-// paths. The current-dir reject prevents creating a malformed
-// `<deploy-prefix>.` key on R2 — harmless but never spec'd as legal.
+// paths plus paths containing ASCII control bytes or backslashes.
+//
+// Reject rationale:
+//   - empty / ".": creates a malformed `<deploy-prefix>.` key on R2.
+//   - absolute / "..": classic traversal; the user-controlled relPath
+//     would otherwise escape the per-deploy prefix.
+//   - control bytes (<0x20 or 0x7F): null bytes (\x00) silently truncate
+//     in some downstream tooling; newlines / tabs enable log-injection
+//     against artemis access logs.
+//   - backslash: never legal in an R2 key segment in the deploy schema;
+//     accepting it makes Caddy + R2 disagree on the canonical key.
+//
+// High-bit UTF-8 codepoints (≥0x80) are accepted — artemis serves
+// static apps whose filenames may include non-ASCII characters.
 func isCleanRelPath(p string) bool {
 	if p == "" || p == "." || strings.HasPrefix(p, "/") {
 		return false
+	}
+	for i := 0; i < len(p); i++ {
+		b := p[i]
+		if b < 0x20 || b == 0x7F || b == '\\' {
+			return false
+		}
 	}
 	cleaned := path.Clean(p)
 	if cleaned != p {
