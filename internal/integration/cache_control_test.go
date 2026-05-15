@@ -15,11 +15,10 @@ import (
 //
 // End-to-end path: artemis `PutObject` (internal/r2/r2.go:80-97) sets
 // `ContentType` only — never `CacheControl`. Caddy `file_server` reads
-// the R2 object via the `r2_alias` plugin (Caddyfile in
-// `infra/k3s/gxy-cassiopeia/apps/caddy/charts/caddy/templates/configmap.yaml`)
-// and synthesizes no Cache-Control. CF zone-default does not add one
-// to HTML. Result: `curl -I https://test.freecode.camp/` shows no
-// `cache-control` response header today.
+// the R2 object via the `r2_alias` plugin (configured by the operator's
+// reverse-proxy chart) and synthesizes no Cache-Control. CF zone-default
+// does not add one to HTML. Result: `curl -I https://<site>.<root>/`
+// shows no `cache-control` response header today.
 //
 // This test is a trip-wire. When any layer ships explicit
 // Cache-Control (defensive Caddy header per RFC §G "Defer" row, or
