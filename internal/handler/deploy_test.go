@@ -343,10 +343,10 @@ func TestDeployFinalize_VerifyMissing_DoesNotWriteAlias(t *testing.T) {
 	assert.False(t, hasAlias, "alias must NOT be written on verify failure")
 }
 
-// TestDeployFinalize_RequiresFiles — B5: a finalize body with no files
-// manifest must NOT flip the alias (today VerifyDeployComplete returns
-// nil for an empty expected list, which silently promotes a possibly
-// empty deploy and breaks ADR-016's atomic-never-partial invariant).
+// TestDeployFinalize_RequiresFiles: a finalize body with no files
+// manifest must NOT flip the alias. VerifyDeployComplete returns nil
+// for an empty expected list, which would silently promote a possibly
+// empty deploy and break the atomic-never-partial alias invariant.
 func TestDeployFinalize_RequiresFiles(t *testing.T) {
 	st := standardSites()
 	store := newFakeR2()

@@ -1,4 +1,4 @@
-// Package handler implements the HTTP endpoints defined in ADR-016 §API surface.
+// Package handler implements the artemis HTTP API.
 //
 // Handlers are wired into a chi router by package server. They depend on
 // small interfaces (GitHubAuthenticator, DeployJWTSigner, SitesProvider,

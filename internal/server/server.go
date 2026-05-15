@@ -1,6 +1,6 @@
 // Package server wires the Handlers + middleware into a chi router.
 //
-// Route table (mirrors ADR-016 §API surface + RFC §B CLI surface):
+// Route table:
 //
 //	GET    /healthz                                       — no auth
 //	GET    /api/whoami                                    — GitHub bearer
@@ -51,7 +51,7 @@ func New(h *handler.Handlers) http.Handler {
 			r.Post("/site/{site}/rollback", h.SiteRollback)
 		})
 
-		// Deploy-session JWT branch — narrowed scope per ADR-016 amendment.
+		// Deploy-session JWT branch — scoped to (login, site, deployId).
 		r.Group(func(r chi.Router) {
 			r.Use(h.RequireDeployJWT)
 			r.Put("/deploy/{deployId}/upload", h.DeployUpload)

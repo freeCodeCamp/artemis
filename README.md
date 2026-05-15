@@ -133,7 +133,7 @@ Per-test (`t.Cleanup` in tests that mint deploys):
 
 | Test             | Cleanup                                                                                                                                                                                                                                         |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TestDeployFlow` | Logs the new deploy id at end (success or failure) so the artifact is visible in test output. R2 prefix sweep is owned by the cleanup cron — the suite intentionally does not call a delete API (none exists; immutable-by-design per ADR-016). |
+| `TestDeployFlow` | Logs the new deploy id at end (success or failure) so the artifact is visible in test output. R2 prefix sweep is owned by the cleanup cron — the suite intentionally does not call a delete API (none exists; deploys are immutable by design). |
 | `TestRollback`   | None per-test — suite teardown handles prod alias restore                                                                                                                                                                                       |
 
 If teardown's restore call fails, `TestMain` logs the manual fix:

@@ -1,9 +1,9 @@
 // Command artemis is the Universe static-apps deploy proxy.
 //
 // It loads its configuration from environment variables, mounts a
-// sites→teams authorization map, and serves the API surface defined in
-// ADR-016 §API surface. R2 admin S3 credentials live exclusively in this
-// process; staff and CI never see them.
+// sites→teams authorization map, and serves the deploy/promote/rollback
+// API. R2 admin S3 credentials live exclusively in this process; staff
+// and CI never see them.
 package main
 
 import (

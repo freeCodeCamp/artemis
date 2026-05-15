@@ -30,8 +30,7 @@
 //	              with SITE to derive preview/production URLs as
 //	              `<site>.preview.<root>` and `<site>.<root>`.
 //	HTTP_TIMEOUT  Per-request HTTP timeout (Go duration). Default: `30s`.
-//	PROD_SLO      Production-alias serve SLO (Go duration). Default: `2m`
-//	              (matches D38 from ADR-016).
+//	PROD_SLO      Production-alias serve SLO (Go duration). Default: `2m`.
 //	PREVIEW_SLO   Preview-alias serve SLO (Go duration). Default: `90s`.
 //
 // The suite is **safe to run against production** because:

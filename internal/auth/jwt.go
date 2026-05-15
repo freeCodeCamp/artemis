@@ -4,9 +4,10 @@
 //     issued by /api/deploy/init and consumed by /upload + /finalize.
 //   - GitHub identity + team-membership probe (in github.go).
 //
-// See ADR-016 §Authn/authz and the 2026-04-26 amendment "JWT scope
-// clarification" for why deploy-session JWTs ship in v1 while a separate
-// "auth-session" JWT remains parked.
+// The deploy-session JWT is the only JWT artemis mints today; a separate
+// auth-session JWT was considered and parked — the narrow per-deploy
+// scope is enough for the upload/finalize handoff without a longer-lived
+// session token.
 package auth
 
 import (
@@ -23,12 +24,13 @@ const (
 )
 
 // DeploySessionClaims are the custom claims carried in a deploy-session
-// JWT. See ADR-016 amendment §JWT scope clarification.
+// JWT. The narrow scope is (login, site, deployId): any of the three
+// missing or mismatched on Verify is a hard reject.
 //
 // `sub` (login) and `iss` come from the embedded RegisteredClaims so
-// there is exactly one source of each on the wire. Pre-B14 outer
-// Login/Issuer fields shadowed the embedded ones at marshal time and
-// silently dropped the embedded values on the wire.
+// there is exactly one source of each on the wire. An earlier shape
+// had outer Login/Issuer fields that shadowed the embedded ones at
+// marshal time and silently dropped the embedded values on the wire.
 type DeploySessionClaims struct {
 	Site     string `json:"site"`
 	DeployID string `json:"deployId"`
