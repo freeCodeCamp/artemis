@@ -37,8 +37,7 @@
 // The suite is **safe to run against production** because:
 //
 //  1. It writes only under SITE (default `test`), which is reserved as a
-//     staff-only smoke target in the artemis registry (and seeded in
-//     `config/sites.yaml` for cold-recovery reference). Real customer
+//     staff-only smoke target in the artemis registry. Real customer
 //     sites are untouched.
 //  2. Each run uploads a tiny HTML payload tagged with a unique marker
 //     and verifies the marker round-trips through Caddy + R2.

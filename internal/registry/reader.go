@@ -1,7 +1,6 @@
 // Package registry defines the abstract site-registry contract that
 // artemis handlers consume. The Reader interface lets handler code
-// stay decoupled from the concrete backend (today: Valkey; the prior
-// sites.yaml path was retired alongside the Valkey cutover).
+// stay decoupled from the concrete backend.
 //
 // The single implementation lives at internal/registry/valkey.
 package registry

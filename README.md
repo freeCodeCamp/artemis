@@ -65,10 +65,7 @@ Atomic alias semantics: `PutObject` is atomic per-key in R2. Old deploy keeps se
 
 ## Sites registry
 
-Authoritative store: Valkey (`VALKEY_ADDR`, namespace `valkey`).
-Each entry maps a site slug to the list of GitHub teams whose
-members may deploy to that site. Mutations go through the registry
-endpoints:
+Authoritative store: Valkey (`VALKEY_ADDR`, namespace `valkey`). Each entry maps a site slug to the list of GitHub teams whose members may deploy to that site. Mutations go through the registry endpoints:
 
 ```
 POST   /api/site/register      { slug, teams? }      → 201 SiteRow
@@ -77,8 +74,7 @@ PATCH  /api/site/{slug}        { teams }             → 200 SiteRow
 DELETE /api/site/{slug}                              → 204
 ```
 
-Write endpoints are gated on `REGISTRY_AUTHZ_TEAM` (default `staff`).
-The read endpoint is open to any GitHub bearer.
+Write endpoints are gated on `REGISTRY_AUTHZ_TEAM` (default `staff`). The read endpoint is open to any GitHub bearer.
 
 Operator-facing CLI surface (universe-cli ≥ 0.5.0):
 
@@ -89,13 +85,9 @@ universe sites rm       <slug>
 universe sites ls       [--mine]
 ```
 
-Mutations propagate to every artemis replica via the
-`registry.changed` pub-sub channel within seconds, or ≤ 60 s on the
-TTL fallback.
+Mutations propagate to every artemis replica via the `registry.changed` pub-sub channel within seconds, or ≤ 60 s on the TTL fallback.
 
-`config/sites.yaml` in this repo is a **dormant cold-start seed** —
-checked in for cold-recovery reference, not consumed at runtime.
-The `sites_yaml` backend was retired alongside the Valkey cutover.
+See `config/sites.yaml.example` for the on-disk schema shape. The live registry is Valkey; the on-disk YAML form is not consumed at runtime.
 
 ## Local development
 
@@ -108,17 +100,14 @@ make image            # docker build
 
 ## Integration testing
 
-End-to-end suite under `internal/integration/`. Build-tagged behind
-`integration` so it stays out of `make test`. Hits a live, deployed
-artemis over HTTPS and exercises the full deploy lifecycle:
+End-to-end suite under `internal/integration/`. Build-tagged behind `integration` so it stays out of `make test`. Hits a live, deployed artemis over HTTPS and exercises the full deploy lifecycle:
 
 ```
 healthz → whoami → init → upload → finalize(preview) → curl preview
        → promote → curl production → list deploys → rollback
 ```
 
-Plus negative-path coverage (bad token → 401, missing token → 401,
-unknown site → 403, missing required field → 400).
+Plus negative-path coverage (bad token → 401, missing token → 401, unknown site → 403, missing required field → 400).
 
 ```sh
 ARTEMIS_URL=https://uploads.freecode.camp \
@@ -127,10 +116,7 @@ ARTEMIS_URL=https://uploads.freecode.camp \
   make integration
 ```
 
-`make integration-help` prints the full env-var reference. The suite
-is **safe to run against production** — it writes only under the `test`
-site (a staff-only smoke target registered in the artemis registry)
-and relies on the cleanup cron (T22, 7-day retention) for prefix GC.
+`make integration-help` prints the full env-var reference. The suite is **safe to run against production** — it writes only under the `test` site (a staff-only smoke target registered in the artemis registry) and relies on the cleanup cron (T22, 7-day retention) for prefix GC.
 
 ### Setup / teardown
 
