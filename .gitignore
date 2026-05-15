@@ -24,3 +24,8 @@ vendor/
 
 # dossier: internal scratchpad theater tooling
 .scratchpad/
+
+# Claude Code + coding-assistant session state (per-contributor)
+.claude/
+.cocoindex_code/
+CLAUDE.md
