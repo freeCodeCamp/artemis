@@ -106,7 +106,7 @@ func TestSubtractivePromote(t *testing.T) {
 	if err := pollFor404(t, c, f1URL, c.ProdSLO); err != nil {
 		t.Fatalf("F1 should 404 after promote B (subtractive contract): %v", err)
 	}
-	t.Logf("[subtract] OK — F1 silently 404d on prod after operator dropped it from preview B; RFC §G B4 contract pinned")
+	t.Logf("[subtract] OK — F1 silently 404d on prod after operator dropped it from preview B; subtractive-promote contract pinned")
 }
 
 // finalizePreviewMulti runs init → upload (one PUT per file) →

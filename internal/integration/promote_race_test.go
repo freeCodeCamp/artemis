@@ -10,19 +10,17 @@ import (
 	"time"
 )
 
-// TestPromoteRead pins the bare-promote read-then-write contract that
-// motivated the RFC §G investigation. Two operators each finalize a
-// preview deploy back-to-back, then operator A calls bare
-// `/api/site/{site}/promote` expecting to publish A's deploy. Because
-// `SitePromote` (handler/site.go:15-47) reads the preview alias body
-// at GetAlias time and writes that to prod with no CAS, what actually
+// TestPromoteRead pins the bare-promote read-then-write contract.
+// Two operators each finalize a preview deploy back-to-back, then
+// operator A calls bare `/api/site/{site}/promote` expecting to publish
+// A's deploy. Because `SitePromote` reads the preview alias body at
+// GetAlias time and writes that to prod with no CAS, what actually
 // gets published is B's deploy id — whoever finalized last wins.
 //
 // This test codifies the current behavior as a regression-detection
-// trip-wire. If `SitePromote` ever grows CAS body params (G3 follow-up
-// — `expectedCurrent` refuses on mismatch), the assertion flips from
-// "second wins" to "API refused with a conflict code"; T4 is the
-// natural place to make that flip.
+// trip-wire. If `SitePromote` ever grows mandatory CAS body params
+// (`expectedCurrent` refuses on mismatch), the assertion flips from
+// "second wins" to "API refused with a conflict code".
 //
 // No R2 creds needed — asserts on the promote HTTP response deployId,
 // not on alias body bytes. Suite-level teardown restores baseline prod
@@ -66,7 +64,7 @@ func TestPromoteRace(t *testing.T) {
 	}
 
 	if promoteResp.DeployID != initB.DeployID {
-		t.Fatalf("bare promote published %q, want B=%q (operator A intended A=%q) — RFC §G B2 contract drift",
+		t.Fatalf("bare promote published %q, want B=%q (operator A intended A=%q) — bare-promote contract drift",
 			promoteResp.DeployID, initB.DeployID, initA.DeployID)
 	}
 	t.Logf("[race] bare promote → %s (= B, A's intent silently overridden)",

@@ -1,8 +1,15 @@
 // Package valkey is the Valkey-backed implementation of the artemis
 // site registry. It serializes registrations through a single Valkey
-// instance and uses pub-sub for cross-replica cache invalidation. The
-// schema (HSET site:<slug> + SADD sites:all + PUBLISH registry.changed)
-// is specified in rfc-gxy-cassiopeia-ga.md §B.
+// instance and uses pub-sub for cross-replica cache invalidation.
+//
+// Wire schema:
+//
+//   - HSET  site:<slug>   — hash row per site (teams, created_at,
+//     updated_at, created_by fields)
+//   - SADD  sites:all     — index set of every registered slug
+//   - PUBLISH registry.changed <slug> — fired on every state-mutating
+//     write so subscribers can
+//     invalidate scoped caches
 package valkey
 
 import (
@@ -28,8 +35,8 @@ const ChannelRegistryChanged = "registry.changed"
 const keyAllSites = "sites:all"
 
 // fieldTeams, fieldCreatedAt, fieldUpdatedAt, fieldCreatedBy are the
-// hash field names per RFC §B Schema. The literal strings are the
-// wire contract; tests assert against them.
+// hash field names. The literal strings are the wire contract; tests
+// assert against them.
 const (
 	fieldTeams     = "teams"
 	fieldCreatedAt = "created_at"
@@ -107,8 +114,8 @@ func (s *Store) Close() error {
 //
 // Callers are expected to consume promptly; the internal forwarder
 // uses a small buffer (16). If the buffer fills, messages are
-// dropped silently — pub-sub is fire-and-forget per RFC §B Schema
-// (artemis pairs this with a TTL-fallback cache for missed events).
+// dropped silently — pub-sub is fire-and-forget by design (artemis
+// pairs this with a TTL-fallback cache for missed events).
 func (s *Store) Subscribe(ctx context.Context) (<-chan string, error) {
 	pubsub := s.client.Subscribe(ctx, ChannelRegistryChanged)
 	// Receive blocks until the SUBSCRIBE confirmation arrives, so when

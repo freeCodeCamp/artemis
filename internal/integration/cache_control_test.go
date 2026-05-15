@@ -21,10 +21,10 @@ import (
 // shows no `cache-control` response header today.
 //
 // This test is a trip-wire. When any layer ships explicit
-// Cache-Control (defensive Caddy header per RFC §G "Defer" row, or
-// future PutObject change in artemis, or a CF page rule), update the
-// expected value here in the same commit. Until then, this stays the
-// canonical baseline assertion.
+// Cache-Control (defensive Caddy header, or a future PutObject change
+// in artemis, or a CF page rule), update the expected value here in
+// the same commit. Until then, this stays the canonical baseline
+// assertion.
 //
 // No R2 creds needed — pure HTTP HEAD.
 func TestResponseCacheControl(t *testing.T) {

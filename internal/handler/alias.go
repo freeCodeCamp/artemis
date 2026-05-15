@@ -10,9 +10,9 @@ import (
 
 // AliasGet implements GET /api/site/{site}/alias/{mode} — read-only
 // access to the deploy id currently pointed at by the preview or
-// production alias. Required by RFC §G B4 (unblocks pre-promote echo)
-// and by the v0.5.x-era client-side CAS workflow that compares the
-// current alias body before issuing a promote/rollback.
+// production alias. Used to unblock the pre-promote echo workflow and
+// by the client-side CAS workflow that compares the current alias body
+// before issuing a promote/rollback.
 //
 // Authz mirrors the other /api/site/{site}/* read-paths: caller must
 // be on at least one of the site's authorized teams. Returns 400 on

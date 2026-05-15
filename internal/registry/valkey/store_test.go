@@ -120,8 +120,8 @@ func TestStore_Register_HappyPath(t *testing.T) {
 	require.False(t, got.CreatedAt.IsZero())
 	require.True(t, got.CreatedAt.Equal(got.UpdatedAt))
 
-	// Wire shape: HSET site:<slug>, SADD sites:all, schema fields
-	// per RFC §B Schema.
+	// Wire shape: HSET site:<slug>, SADD sites:all, schema fields per
+	// the package doc.
 	require.True(t, mr.Exists("site:blog"), "hash row missing")
 	members, err := mr.SMembers("sites:all")
 	require.NoError(t, err)

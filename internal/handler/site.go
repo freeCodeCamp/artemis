@@ -36,8 +36,7 @@ type SitePromoteRequest struct {
 //     deploy id to the production alias.
 //   - {"deployId": "<id>"} — direct-write path: skip the preview read,
 //     write the supplied id to production. Eliminates the bare-promote
-//     race (universe-cli §B B1) for callers that know which id they
-//     want.
+//     read-then-write race for callers that know which id they want.
 //   - {"expectedCurrent": "<id>"} — CAS guard: read current production
 //     alias, refuse with 409 alias_drift if it does not match. Combines
 //     with deployId so callers can read → diff → swap atomically
