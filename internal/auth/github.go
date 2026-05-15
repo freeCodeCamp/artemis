@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -248,9 +249,17 @@ func (c *GitHubClient) IsTeamMember(ctx context.Context, token, user, teamSlug s
 }
 
 func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, teamSlug string, key teamCacheKey) (bool, error) {
-	url := fmt.Sprintf("%s/orgs/%s/teams/%s/memberships/%s",
-		c.cfg.APIBase, c.cfg.Org, teamSlug, user)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Belt-and-suspenders URL-escape: teamSlug is validated by the
+	// handler's teamSlugRe at registry-write time and `user` comes
+	// from GitHub's /user response (trusted). PathEscape defends
+	// against any future caller that bypasses that validation by
+	// preventing path-injection / SSRF through crafted segments.
+	requestURL := fmt.Sprintf("%s/orgs/%s/teams/%s/memberships/%s",
+		c.cfg.APIBase,
+		url.PathEscape(c.cfg.Org),
+		url.PathEscape(teamSlug),
+		url.PathEscape(user))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("github: build request: %w", err)
 	}

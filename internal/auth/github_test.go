@@ -148,6 +148,50 @@ func TestGitHubClient_TeamMembership_NotMember(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// TestGitHubClient_TeamMembership_PathEscape pins the URL-escape
+// belt-and-suspenders on the GH team-membership probe. teamSlug and
+// user are validated upstream (handler.teamSlugRe + GitHub /user) but
+// any future caller that bypasses that validation must not be able
+// to inject path segments through the GET URL.
+func TestGitHubClient_TeamMembership_PathEscape(t *testing.T) {
+	var capturedPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase: server.URL, Org: "freeCodeCamp", CacheTTL: time.Minute,
+	})
+
+	// Crafted slug + user containing path-injection metacharacters.
+	const slug = "../bypass/foo"
+	const user = "a/b#frag"
+	_, err := c.IsTeamMember(context.Background(), "ghp_test", user, slug)
+	require.NoError(t, err)
+
+	// The captured server-side path MUST treat the slug + user as
+	// single path segments — every embedded `/` and `#` is
+	// percent-encoded so the URL never re-routes through path
+	// injection. PathEscape leaves the literal `..` alone (it is a
+	// valid path-component byte sequence on the wire) but the lack
+	// of an unescaped `/` between the dots and the rest means the
+	// HTTP path parser sees a single opaque segment.
+	assert.Contains(t, capturedPath, "..%2Fbypass%2Ffoo",
+		"teamSlug not PathEscaped: got %q", capturedPath)
+	assert.Contains(t, capturedPath, "a%2Fb%23frag",
+		"user not PathEscaped: got %q", capturedPath)
+	assert.NotContains(t, capturedPath, "/bypass/",
+		"raw traversal slash leaked through: %q", capturedPath)
+	assert.NotContains(t, capturedPath, "#frag",
+		"unescaped fragment marker leaked through: %q", capturedPath)
+}
+
 func TestGitHubClient_TeamMembership_Cached(t *testing.T) {
 	gh := newFakeGH()
 	defer gh.Close()
