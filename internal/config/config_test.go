@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,4 +219,53 @@ func TestLoad_RegistryAuthzTeamRejectsBlank(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, "  ", cfg.Registry.AuthzTeam)
+}
+
+// captureSlog redirects slog.Default() to a buffer for the duration of
+// the test and restores the previous default on cleanup.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	buf := &bytes.Buffer{}
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	return buf
+}
+
+// TestLoad_GHAPIBaseDefaultNoWarn pins the negative case: the default
+// GH_API_BASE must NOT emit the override-warn. Without this, a future
+// refactor could fire the warn unconditionally and bury real overrides
+// in the noise.
+func TestLoad_GHAPIBaseDefaultNoWarn(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	logs := captureSlog(t)
+	_, err := Load()
+	require.NoError(t, err)
+	assert.NotContains(t, logs.String(), "GH_API_BASE overridden")
+}
+
+// TestLoad_GHAPIBaseOverrideWarn asserts that a non-default
+// GH_API_BASE triggers a startup warn carrying the configured value +
+// the canonical default. The warn is the operator's only visible
+// signal that GitHub probes are routing through a non-canonical host.
+func TestLoad_GHAPIBaseOverrideWarn(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	const override = "https://evil.example.com"
+	t.Setenv("GH_API_BASE", override)
+
+	logs := captureSlog(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, override, cfg.GitHub.APIBase)
+
+	out := logs.String()
+	assert.True(t, strings.Contains(out, "GH_API_BASE overridden"),
+		"warn missing from slog output: %q", out)
+	assert.Contains(t, out, "level=WARN")
+	assert.Contains(t, out, override)
+	assert.Contains(t, out, defaultGitHubAPIBase)
 }

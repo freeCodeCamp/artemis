@@ -10,11 +10,18 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// defaultGitHubAPIBase is the trusted upstream for GitHub identity +
+// team-membership probes. Overridable via GH_API_BASE for testing
+// against a proxy; Load() emits a warn when overridden so operators
+// see the non-default in startup logs.
+const defaultGitHubAPIBase = "https://api.github.com"
 
 // Config holds the full Artemis runtime configuration.
 type Config struct {
@@ -102,7 +109,7 @@ func Load() (*Config, error) {
 		},
 		GitHub: GitHubConfig{
 			Org:                "freeCodeCamp",
-			APIBase:            "https://api.github.com",
+			APIBase:            defaultGitHubAPIBase,
 			MembershipCacheTTL: 5 * time.Minute,
 		},
 		JWT: JWTConfig{
@@ -191,6 +198,19 @@ func Load() (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+
+	// Non-default GH_API_BASE means every GitHub identity + team-
+	// membership probe routes through a non-canonical host. Legit for
+	// testing against a recording proxy or a GitHub Enterprise
+	// instance; suspicious if it appears in a production pod env.
+	// Warn loudly so operators see the override in startup logs.
+	if cfg.GitHub.APIBase != defaultGitHubAPIBase {
+		slog.Warn("GH_API_BASE overridden from default; ensure the override is trusted",
+			"configured", cfg.GitHub.APIBase,
+			"default", defaultGitHubAPIBase,
+		)
+	}
+
 	return cfg, nil
 }
 
