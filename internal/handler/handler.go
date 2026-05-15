@@ -24,7 +24,7 @@ type GitHubAuthenticator interface {
 	AuthorizeForSite(ctx context.Context, token, login string, teams []string) (bool, error)
 	// UserTeams returns the slugs of every team in the configured org
 	// that `token` is a member of. One paginated call replaces N×M
-	// per-site IsTeamMember probes in WhoAmI (B9).
+	// per-site IsTeamMember probes in WhoAmI.
 	UserTeams(ctx context.Context, token string) ([]string, error)
 }
 
@@ -66,10 +66,9 @@ type Handlers struct {
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
-	// DeployPrefix is the parsed deploy-key template. Replaces the
-	// raw string + brittle stripDeployIDFromFmt surgery (B7).
+	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
-	// UploadMaxBytes caps a single PUT /upload body size (B4). 0 or
+	// UploadMaxBytes caps a single PUT /upload body size. 0 or
 	// negative means uncapped — production wiring sets a finite default
 	// (UPLOAD_MAX_BYTES env, 100 MiB by default).
 	UploadMaxBytes int64

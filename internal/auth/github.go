@@ -298,7 +298,7 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 // UserTeams returns the slugs of every team in cfg.Org that `token` is a
 // member of. Paginates GET /user/teams with per_page=100. Cached for
 // CacheTTL keyed on hashed token. Concurrent cold-cache calls coalesce
-// via singleflight (B9).
+// via singleflight.
 //
 // Used by WhoAmI to replace the N×M per-site fan-out with a single
 // upstream probe.

@@ -122,9 +122,9 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		body = http.MaxBytesReader(w, r.Body, h.UploadMaxBytes)
 	}
 
-	// Propagate ContentLength when the client sent one (B18). Avoids
-	// chunked transfer-encoding negotiation on small uploads. Zero or
-	// negative → unknown; SDK falls back to its default behavior.
+	// Propagate ContentLength when the client sent one. Avoids chunked
+	// transfer-encoding negotiation on small uploads. Zero or negative
+	// → unknown; SDK falls back to its default behavior.
 	contentLength := r.ContentLength
 	if contentLength < 0 {
 		contentLength = 0
@@ -257,7 +257,7 @@ func normalizeMode(m string) (string, error) {
 }
 
 // isCleanRelPath rejects empty / absolute / traversal / current-dir
-// paths. The current-dir reject (B22) prevents creating a malformed
+// paths. The current-dir reject prevents creating a malformed
 // `<deploy-prefix>.` key on R2 — harmless but never spec'd as legal.
 func isCleanRelPath(p string) bool {
 	if p == "" || p == "." || strings.HasPrefix(p, "/") {

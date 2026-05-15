@@ -254,8 +254,7 @@ func validateDeployPrefixFormat(fmtStr string) error {
 // surfaces any missing required vars with a uniform error message;
 // using empty string here lets validate() be the single source of
 // truth for "missing var" errors rather than scattering os.Getenv
-// checks. Renamed from `mustEnv` (B21) — this function does not
-// panic, so the previous name was misleading.
+// checks.
 func getEnv(name string) string {
 	return os.Getenv(name)
 }

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- builder ----
-# Digest pinned for reproducible builds (B11). Refresh via:
+# Digest pinned for reproducible builds. Refresh via:
 #   docker buildx imagetools inspect golang:1.26.2-alpine
 FROM golang:1.26.2-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1 AS builder
 WORKDIR /src
@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
         -o /out/artemis ./cmd/artemis
 
 # ---- final ----
-# Digest pinned for reproducible builds (B11). Refresh via:
+# Digest pinned for reproducible builds. Refresh via:
 #   docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:a9329520abc449e3b14d5bc3a6ffae065bdde0f02667fa10880c49b35c109fd1
 WORKDIR /app

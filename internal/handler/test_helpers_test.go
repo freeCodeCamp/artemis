@@ -134,12 +134,12 @@ type fakeGH struct {
 	userTeams   map[string]map[string]bool
 	upstreamErr error
 
-	// userTeamsCalls counts batched /user/teams probes (B9). WhoAmI
-	// must hit this at most once per cold cache, never N×.
+	// userTeamsCalls counts batched /user/teams probes. WhoAmI must
+	// hit this at most once per cold cache, never N×.
 	userTeamsCalls int
-	// authorizeCalls counts AuthorizeForSite invocations. Post-B9 the
-	// WhoAmI handler must NOT call AuthorizeForSite at all (intersect
-	// locally instead).
+	// authorizeCalls counts AuthorizeForSite invocations. The WhoAmI
+	// handler must NOT call AuthorizeForSite at all (intersect
+	// locally against the batched UserTeams response instead).
 	authorizeCalls int
 }
 
@@ -278,7 +278,7 @@ type fakeR2 struct {
 	verifyErr error
 
 	// hasPrefixCalls and listPrefixCalls let SiteRollback tests assert
-	// the cheaper probe was used (B6).
+	// the cheaper probe was used.
 	hasPrefixCalls  int
 	listPrefixCalls int
 

@@ -8,10 +8,10 @@
 //	    -pkg github.com/freeCodeCamp/artemis/internal/handler \
 //	    coverage.txt
 //
-// Replaces a fragile inline-awk gate in `.github/workflows/ci.yml`
-// (B10). One Go program is easier to test, easier to extend (per-pkg
-// thresholds, JSON output, etc.) and removes the awk → sed → awk
-// shellish that the old gate used.
+// Replaces a fragile inline-awk gate that used to live in
+// `.github/workflows/test.yml`. One Go program is easier to test,
+// easier to extend (per-pkg thresholds, JSON output, etc.) and
+// removes the awk → sed → awk shellish that the old gate used.
 package main
 
 import (

@@ -44,8 +44,8 @@ func TestDeployPrefixTemplate_AppendsTrailingSlash(t *testing.T) {
 
 // TestDeployPrefixTemplate_RejectsMalformed — parser refuses inputs
 // that lack the required tokens. Validate() at config load is the
-// primary gate (B8); this is the in-handler last line of defence in
-// case Handlers is built directly in tests / future callers.
+// primary gate; this is the in-handler last line of defence in case
+// Handlers is built directly in tests / future callers.
 func TestDeployPrefixTemplate_RejectsMalformed(t *testing.T) {
 	cases := []string{
 		"hello",

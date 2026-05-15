@@ -76,7 +76,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 // from the originating HTTP request, len() of an in-memory buffer).
 // Pass 0 when unknown — the SDK negotiates chunked transfer-encoding
 // in that case. Setting ContentLength when known skips that round
-// trip and lets R2 short-circuit on small uploads (B18).
+// trip and lets R2 short-circuit on small uploads.
 func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error {
 	in := &s3.PutObjectInput{
 		Bucket: awsv2.String(c.bucket),
