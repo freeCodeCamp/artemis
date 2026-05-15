@@ -25,22 +25,21 @@ const r2SkipUsage = `
 R2 direct-read probe skipped: %s not set.
 
 To enable byte-level alias assertions (TestAliasBodyRoundTrip,
-TestDeployPromoteSkipsPreview), export Caddy's read-only key alongside
-the artemis env:
+TestDeployPromoteSkipsPreview), export an R2 read-only key scoped to
+the configured bucket, alongside the artemis env:
 
   R2_ENDPOINT='https://<account>.r2.cloudflarestorage.com'
-  R2_ACCESS_KEY_ID='<from infra-secrets caddy.values.yaml.enc>'
-  R2_SECRET_ACCESS_KEY='<from same>'
-  R2_BUCKET='universe-static-apps-01'                          # optional
+  R2_ACCESS_KEY_ID='<r2 read-only access key id>'
+  R2_SECRET_ACCESS_KEY='<r2 read-only secret access key>'
+  R2_BUCKET='<bucket-name>'                                    # optional
 
-The key is read-only on the universe-static-apps-01 bucket. Tests
-without these vars still run; R2-direct probes Skip with a clear log.
+Tests without these vars still run; R2-direct probes Skip with a
+clear log.
 
-Alias key format defaults match the production artemis configuration
-(see infra k3s/gxy-management/apps/artemis values.yaml):
-  ALIAS_PRODUCTION_KEY_FORMAT='<site>.freecode.camp/production'
-  ALIAS_PREVIEW_KEY_FORMAT='<site>.freecode.camp/preview'
-Override via env if testing a non-prod artemis with a different format.
+Alias key format defaults must match the artemis deployment under
+test. Override via env when the deployment uses non-default formats:
+  ALIAS_PRODUCTION_KEY_FORMAT='<site>.<root>/production'
+  ALIAS_PREVIEW_KEY_FORMAT='<site>.<root>/preview'
 `
 
 // errAliasNotFound is returned by r2Probe.getAlias / .headObject when
@@ -69,9 +68,8 @@ type r2Probe struct {
 // r2Client returns a configured R2 read probe or t.Skip()s if any of
 // R2_ENDPOINT/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY are unset.
 //
-// The credentials are the read-only key Caddy already uses in
-// production (infra-secrets/k3s/gxy-cassiopeia/caddy.values.yaml.enc);
-// scope is r2:read on the universe-static-apps-01 bucket.
+// The credentials are an R2 read-only key scoped to the configured
+// bucket; provisioning is operator-specific.
 func r2Client(t *testing.T) r2Probe {
 	t.Helper()
 	endpoint := os.Getenv("R2_ENDPOINT")
