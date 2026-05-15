@@ -5,6 +5,20 @@ All notable changes to artemis are documented here. Format follows
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [Unreleased]
+
+### Documentation
+
+- **code:** Drop PH1-B phase-tracker IDs from inline comments ([406fa39](https://github.com/freeCodeCamp/artemis/commit/406fa3944d7609096e92f428952f472554ea2a04))
+- **code:** Drop internal sprint-tracker IDs from public surface ([48e9216](https://github.com/freeCodeCamp/artemis/commit/48e921639c48089d0bef65049140e7073e155cf0))
+- **code:** Drop internal RFC §-refs from code comments ([8c3a8bf](https://github.com/freeCodeCamp/artemis/commit/8c3a8bf8dfbecb25fbc6e79fc79ccbd18a1528a8))
+- **code:** Drop internal ADR cross-refs from code comments ([e3fd374](https://github.com/freeCodeCamp/artemis/commit/e3fd37465ec6e1028ae2262152fd910fcfad057a))
+- **readme:** Use octocat as example whoami login ([53d336b](https://github.com/freeCodeCamp/artemis/commit/53d336b54184fdde6d5d44ebf5840ae54999adc9))
+- **release:** Drop operator-side pin steps + internal cross-refs ([f594e99](https://github.com/freeCodeCamp/artemis/commit/f594e994df3e912a1ac0c025e5c6897654a8a7a9))
+- **deploy:** Drop internal-only post-publish runbook ([1c87936](https://github.com/freeCodeCamp/artemis/commit/1c87936f4ab1e7d5b034964bfd13dbf266c5334b))
+- **deploy:** Fix healthz smoke + version check ([dfdedb4](https://github.com/freeCodeCamp/artemis/commit/dfdedb48e699e04b6a594312dcebb2ebe410f129))
+- **deploy:** Correct just release invocation ([f87d138](https://github.com/freeCodeCamp/artemis/commit/f87d138a2ed77cbcdec832d4cbaa816733fcff67))
+
 ## [0.2.0] - 2026-05-13
 
 ### Features
@@ -14,6 +28,7 @@ with the pre-1.0 caveat noted in `RELEASING.md`.
 
 ### Documentation
 
+- **deploy:** Add post-publish runbook ([adf07a6](https://github.com/freeCodeCamp/artemis/commit/adf07a670ad2936348580f030e46b64839183ac2))
 - **release:** Clarify registry tag has no v prefix ([22fc95b](https://github.com/freeCodeCamp/artemis/commit/22fc95bbd9ca2efdba5305d85317a31b0812dfe4))
 
 ## [0.1.0] - 2026-05-13
@@ -43,36 +58,36 @@ with the pre-1.0 caveat noted in `RELEASING.md`.
 - **integration:** Broaden deployIDPattern regex ([f025693](https://github.com/freeCodeCamp/artemis/commit/f025693807a56c7988910956c70070b40c87c1dd))
 - **direnv:** Correct r2-read envelope path ([c231767](https://github.com/freeCodeCamp/artemis/commit/c231767b1960a54ed849c0c380323fe52ca286f6))
 - **integration:** Teardown picks newest deploy, not oldest ([111f349](https://github.com/freeCodeCamp/artemis/commit/111f349aa09ca15d48261ea2b7ab7599481d7db1))
-- **handler:** Explicit octet-stream Content-Type fallback (PH1-B23) ([1b91739](https://github.com/freeCodeCamp/artemis/commit/1b917395fe7065f0f50e7cd09b37125841f43816))
-- **handler:** IsCleanRelPath rejects current-dir (PH1-B22) ([a148304](https://github.com/freeCodeCamp/artemis/commit/a1483044521c6f6a535959c99dacac4fb1dea0bb))
-- **sites:** Reload on k8s ConfigMap atomic rename (PH1-B19) ([250a464](https://github.com/freeCodeCamp/artemis/commit/250a464c83c1b910e69691240756830822d77d0e))
-- **auth:** Detect rate-limit via header (PH1-B16) ([af3d720](https://github.com/freeCodeCamp/artemis/commit/af3d720d24951a2c2d7f259d65ab381719d880e8))
-- **handler:** Tighten extractBearer to RFC 6750 (PH1-B15) ([f721a25](https://github.com/freeCodeCamp/artemis/commit/f721a25daffe4332075d02580ea1268ef726a1f3))
-- **auth:** Drop shadowed JWT claim fields (PH1-B14) ([c73a233](https://github.com/freeCodeCamp/artemis/commit/c73a23320bc0956d72115c02c88b89d62844dbe7))
-- **r2:** Probe rollback target via HasPrefix (PH1-B6) ([e02153e](https://github.com/freeCodeCamp/artemis/commit/e02153edeb6eb7812fe0d09c16fcb277a6db8315))
-- **handler:** Reject empty Files manifest (PH1-B5) ([a76d9d3](https://github.com/freeCodeCamp/artemis/commit/a76d9d363614b804fe25d692ef27119c44857603))
-- **handler:** Cap upload body via MaxBytesReader (PH1-B4) ([d29b175](https://github.com/freeCodeCamp/artemis/commit/d29b175b1bd56436e90da01c463ad60ab7e3d04a))
-- **handler:** Parse deploy prefix template (PH1-B7) ([e0319f3](https://github.com/freeCodeCamp/artemis/commit/e0319f3e9f18d9555a53eabf3fb061f236bb9370))
-- **config:** Validate DEPLOY_PREFIX_FORMAT shape (PH1-B8) ([e6f9809](https://github.com/freeCodeCamp/artemis/commit/e6f9809e27e876276c94a1db6b276638eb0f5ee0))
+- **handler:** Explicit octet-stream Content-Type fallback ([1b91739](https://github.com/freeCodeCamp/artemis/commit/1b917395fe7065f0f50e7cd09b37125841f43816))
+- **handler:** IsCleanRelPath rejects current-dir ([a148304](https://github.com/freeCodeCamp/artemis/commit/a1483044521c6f6a535959c99dacac4fb1dea0bb))
+- **sites:** Reload on k8s ConfigMap atomic rename ([250a464](https://github.com/freeCodeCamp/artemis/commit/250a464c83c1b910e69691240756830822d77d0e))
+- **auth:** Detect rate-limit via header ([af3d720](https://github.com/freeCodeCamp/artemis/commit/af3d720d24951a2c2d7f259d65ab381719d880e8))
+- **handler:** Tighten extractBearer to RFC 6750 ([f721a25](https://github.com/freeCodeCamp/artemis/commit/f721a25daffe4332075d02580ea1268ef726a1f3))
+- **auth:** Drop shadowed JWT claim fields ([c73a233](https://github.com/freeCodeCamp/artemis/commit/c73a23320bc0956d72115c02c88b89d62844dbe7))
+- **r2:** Probe rollback target via HasPrefix ([e02153e](https://github.com/freeCodeCamp/artemis/commit/e02153edeb6eb7812fe0d09c16fcb277a6db8315))
+- **handler:** Reject empty Files manifest ([a76d9d3](https://github.com/freeCodeCamp/artemis/commit/a76d9d363614b804fe25d692ef27119c44857603))
+- **handler:** Cap upload body via MaxBytesReader ([d29b175](https://github.com/freeCodeCamp/artemis/commit/d29b175b1bd56436e90da01c463ad60ab7e3d04a))
+- **handler:** Parse deploy prefix template ([e0319f3](https://github.com/freeCodeCamp/artemis/commit/e0319f3e9f18d9555a53eabf3fb061f236bb9370))
+- **config:** Validate DEPLOY_PREFIX_FORMAT shape ([e6f9809](https://github.com/freeCodeCamp/artemis/commit/e6f9809e27e876276c94a1db6b276638eb0f5ee0))
 
 ### Performance
 
-- **r2:** Propagate Content-Length to PUT (PH1-B18) ([67c4a20](https://github.com/freeCodeCamp/artemis/commit/67c4a202a09761f16ad3eec75d96d18f7542a676))
-- **handler:** Batch WhoAmI via /user/teams (PH1-B9) ([8865e84](https://github.com/freeCodeCamp/artemis/commit/8865e847974b0e325622482ddc05dd9e4b1212bb))
-- **auth:** Singleflight cold-cache /user + /memberships (PH1-B2) ([1a0f9ff](https://github.com/freeCodeCamp/artemis/commit/1a0f9ff0b6a8ca0dee8263f2d91a9db8dbe30b53))
-- **auth:** Negative-cache 401/403/404 (PH1-B1) ([b91d221](https://github.com/freeCodeCamp/artemis/commit/b91d221c4b0a9b3987ac14b249c81b205870f9fd))
+- **r2:** Propagate Content-Length to PUT ([67c4a20](https://github.com/freeCodeCamp/artemis/commit/67c4a202a09761f16ad3eec75d96d18f7542a676))
+- **handler:** Batch WhoAmI via /user/teams ([8865e84](https://github.com/freeCodeCamp/artemis/commit/8865e847974b0e325622482ddc05dd9e4b1212bb))
+- **auth:** Singleflight cold-cache /user + /memberships ([1a0f9ff](https://github.com/freeCodeCamp/artemis/commit/1a0f9ff0b6a8ca0dee8263f2d91a9db8dbe30b53))
+- **auth:** Negative-cache 401/403/404 ([b91d221](https://github.com/freeCodeCamp/artemis/commit/b91d221c4b0a9b3987ac14b249c81b205870f9fd))
 
 ### Refactor
 
 - **registry:** Drop sites_yaml backend ([f115198](https://github.com/freeCodeCamp/artemis/commit/f1151989d186e730e02af732b243fe64415d1031))
 - **registry:** Introduce Reader iface ([6d349d4](https://github.com/freeCodeCamp/artemis/commit/6d349d48a9daefdec79439267db2fdc82e885a2d))
-- **r2:** Drop GetAlias 404 string fallback (PH1-B24) ([ee88053](https://github.com/freeCodeCamp/artemis/commit/ee88053491bf1092e82d589696fdb709e09a5d99))
-- **config:** Rename mustEnv to getEnv (PH1-B21) ([4868429](https://github.com/freeCodeCamp/artemis/commit/4868429d1bc2cc4fac850c507409ee5b30853db1))
-- **handler:** Typed struct context keys (PH1-B20) ([ac77dc7](https://github.com/freeCodeCamp/artemis/commit/ac77dc7313ef2105f2dda5073ce3dd4c5e36d3c7))
-- **r2:** Inject clock into NewDeployID (PH1-B17) ([c589ed4](https://github.com/freeCodeCamp/artemis/commit/c589ed4dee4c66e3453f1ec602731c12018f88ef))
-- Drop var _ = errors.New twins (PH1-B13) ([42d4484](https://github.com/freeCodeCamp/artemis/commit/42d44847e5ccf1fbd0ebfad11c69947ad5ca1c29))
-- **handler:** Drop unused firstNonEmpty (PH1-B12) ([e848d46](https://github.com/freeCodeCamp/artemis/commit/e848d46ac8fb7570a9c1474d38c1c701e151ae6c))
-- **auth:** Hash bearer tokens in cache key (PH1-B3) ([c0bf911](https://github.com/freeCodeCamp/artemis/commit/c0bf91187ca6d514ca2175ed1f3466a8834c11ba))
+- **r2:** Drop GetAlias 404 string fallback ([ee88053](https://github.com/freeCodeCamp/artemis/commit/ee88053491bf1092e82d589696fdb709e09a5d99))
+- **config:** Rename mustEnv to getEnv ([4868429](https://github.com/freeCodeCamp/artemis/commit/4868429d1bc2cc4fac850c507409ee5b30853db1))
+- **handler:** Typed struct context keys ([ac77dc7](https://github.com/freeCodeCamp/artemis/commit/ac77dc7313ef2105f2dda5073ce3dd4c5e36d3c7))
+- **r2:** Inject clock into NewDeployID ([c589ed4](https://github.com/freeCodeCamp/artemis/commit/c589ed4dee4c66e3453f1ec602731c12018f88ef))
+- Drop var _ = errors.New twins ([42d4484](https://github.com/freeCodeCamp/artemis/commit/42d44847e5ccf1fbd0ebfad11c69947ad5ca1c29))
+- **handler:** Drop unused firstNonEmpty ([e848d46](https://github.com/freeCodeCamp/artemis/commit/e848d46ac8fb7570a9c1474d38c1c701e151ae6c))
+- **auth:** Hash bearer tokens in cache key ([c0bf911](https://github.com/freeCodeCamp/artemis/commit/c0bf91187ca6d514ca2175ed1f3466a8834c11ba))
 
 ### Documentation
 
