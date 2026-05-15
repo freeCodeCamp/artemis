@@ -310,7 +310,7 @@ func (f *fakeR2) PutObject(_ context.Context, key string, body io.Reader, _ stri
 }
 
 // recordingFakeR2 captures the Content-Type passed to PutObject for
-// B23 assertions. Reuses fakeR2 storage semantics.
+// Content-Type-propagation assertions. Reuses fakeR2 storage semantics.
 type recordingFakeR2 struct {
 	*fakeR2
 	lastContentType string

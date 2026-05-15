@@ -137,7 +137,7 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 				"upload body exceeds configured limit")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.upload", err)
 		return
 	}
 
@@ -200,13 +200,13 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeError(w, http.StatusBadGateway, "r2_list_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.verify", err)
 		return
 	}
 
 	aliasKey := h.aliasKey(claims.Site, mode)
 	if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
-		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 		return
 	}
 

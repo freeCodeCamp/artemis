@@ -39,7 +39,7 @@ func (h *Handlers) AliasGet(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "no_alias", "alias has not been set for this site/mode")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias", err)
 		return
 	}
 	deployID = strings.TrimSpace(deployID)

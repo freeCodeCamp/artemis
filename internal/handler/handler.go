@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -97,6 +98,22 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 			"message": message,
 		},
 	})
+}
+
+// writeUpstreamError logs err with full context and writes an opaque
+// generic message to the client. Use whenever err comes from a
+// transitive dependency (R2 SDK, go-redis, GitHub API) whose strings
+// may leak internal endpoints, bucket names, or storage keys. `op` is
+// a short filterable label for the failing operation (e.g.,
+// "r2.put.alias", "valkey.register").
+func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code, op string, err error) {
+	slog.Error("upstream error",
+		"op", op,
+		"err", err,
+		"reqID", RequestIDFromContext(r.Context()),
+		"path", r.URL.Path,
+	)
+	writeError(w, status, code, "upstream call failed")
 }
 
 // errBadRequest is a sentinel for malformed bodies.

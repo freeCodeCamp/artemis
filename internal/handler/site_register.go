@@ -101,7 +101,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, registry.ErrAlreadyExists):
 			writeError(w, http.StatusConflict, "already_exists", "site is already registered")
 		default:
-			writeError(w, http.StatusBadGateway, "registry_write_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.register", err)
 		}
 		return
 	}
@@ -160,7 +160,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, registry.ErrNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
 		default:
-			writeError(w, http.StatusBadGateway, "registry_write_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.update", err)
 		}
 		return
 	}
@@ -196,7 +196,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, registry.ErrNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
 		default:
-			writeError(w, http.StatusBadGateway, "registry_write_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.delete", err)
 		}
 		return
 	}
@@ -217,7 +217,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
 	sites, err := h.Registry.Sites(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "registry_read_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "valkey.list", err)
 		return
 	}
 	rows := make([]SiteRow, len(sites))

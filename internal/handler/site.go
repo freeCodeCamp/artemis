@@ -79,7 +79,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	if req.ExpectedCurrent != "" {
 		current, err := h.R2.GetAlias(r.Context(), prodKey)
 		if err != nil && !r2.IsNotFound(err) {
-			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.promote.cas", err)
 			return
 		}
 		current = strings.TrimSpace(current)
@@ -107,7 +107,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
 				return
 			}
-			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.preview", err)
 			return
 		}
 		deployID = strings.TrimSpace(v)
@@ -118,7 +118,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
-		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	prefix := h.deployPrefix(site, req.To)
 	exists, err := h.R2.HasPrefix(r.Context(), prefix)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "r2_list_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.has.prefix.rollback", err)
 		return
 	}
 	if !exists {
@@ -182,7 +182,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	if req.ExpectedCurrent != "" {
 		current, err := h.R2.GetAlias(r.Context(), prodKey)
 		if err != nil && !r2.IsNotFound(err) {
-			writeError(w, http.StatusBadGateway, "r2_get_failed", err.Error())
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.rollback.cas", err)
 			return
 		}
 		current = strings.TrimSpace(current)
@@ -200,7 +200,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
-		writeError(w, http.StatusBadGateway, "r2_put_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 		return
 	}
 
@@ -222,7 +222,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 	deploysPrefix := h.DeployPrefix.SitePrefix(site)
 	keys, err := h.R2.ListPrefix(r.Context(), deploysPrefix)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "r2_list_failed", err.Error())
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.deploys", err)
 		return
 	}
 
