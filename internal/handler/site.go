@@ -14,11 +14,19 @@ import (
 )
 
 // deployIDPattern matches the artemis deploy id shape
-// `YYYYMMDD-HHMMSS-<sha>`. The `<sha>` segment is intentionally
-// permissive (real values include `nogit-N` markers and short hex
-// SHAs) — kept in sync with the integration-test widening at
-// commit f025693.
-var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-\S+$`)
+// `YYYYMMDD-HHMMSS-<sha>`. The `<sha>` segment is constrained to
+// `[A-Za-z0-9-]{1,64}` — wide enough to accept:
+//
+//   - git short-sha (7 hex digits) emitted by NewDeployID
+//   - `nogit-<base36>` markers from non-git contexts
+//   - bespoke test-only prefixes (e.g. `rA86019`) used by the
+//     integration suite
+//
+// and tight enough to reject path separators, dots, control bytes,
+// Unicode, and absurd lengths. This matters because the deployId
+// flows from the URL / body into R2 key construction in promote /
+// rollback paths.
+var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-[A-Za-z0-9-]{1,64}$`)
 
 // SitePromoteRequest is the optional body for POST /api/site/{site}/promote.
 // Both fields are additive — an empty body keeps the legacy bare-promote

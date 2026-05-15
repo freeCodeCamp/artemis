@@ -46,15 +46,13 @@ test. Override via env when the deployment uses non-default formats:
 // the alias key does not exist. Callers distinguish via errors.Is.
 var errAliasNotFound = errors.New("r2 probe: alias key not found")
 
-// deployIDPattern matches artemis-minted deploy IDs (NewDeployID in
-// internal/r2/r2.go:218-233): "<yyyymmdd-hhmmss>-<sha-or-synthetic>".
-// The third segment is whatever the caller passed for SHA — git
-// hashes (hex) in normal flow, but universe-cli emits `nogit-<base36>`
-// when run outside a git tree (deploy.ts:91-93), and integration
-// tests use bespoke prefixes (`sp86054`, `rA86019`). Accept any
-// non-whitespace suffix; tighter validation belongs in artemis
-// itself, not in the test probe.
-var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-\S+$`)
+// deployIDPattern matches artemis-minted deploy IDs:
+// "<yyyymmdd-hhmmss>-<sha-or-synthetic>". The third segment is
+// whatever the caller passed for SHA — git short-hex in normal
+// flow, `nogit-<base36>` from non-git contexts, and bespoke test-
+// only prefixes (e.g. `rA86019`). Mirrors the production-side
+// guard in internal/handler/site.go: [A-Za-z0-9-]{1,64}.
+var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-[A-Za-z0-9-]{1,64}$`)
 
 // r2Probe is the narrowed R2 read surface used by integration tests.
 // Mirrors the SDK + path-style + region=auto setup the production

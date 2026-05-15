@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -282,6 +283,50 @@ func TestSitePromote_DirectWriteSkipsPreviewRead(t *testing.T) {
 	assert.Equal(t, "20260513-101010-cas9999", prod, "prod must equal supplied deployId")
 	assert.Equal(t, "20260420-141522-pre1234", preview, "preview must be untouched")
 	assert.NotContains(t, keys, "www/preview", "direct-write must not read preview alias")
+}
+
+// TestDeployIDPattern covers the accept + reject matrix for the
+// shared deployId regex used by promote / rollback handlers. The
+// production-emitted shape (`<yyyymmdd-hhmmss>-<7-hex>`) and the
+// universe-cli `nogit-<base36>` shape both pass; control bytes,
+// path separators, dots, Unicode, and absurd lengths reject.
+func TestDeployIDPattern(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		// accepts
+		{"prod-shape", "20260420-141522-abc1234", true},
+		{"nogit-base36", "20260420-141522-nogit-abc123def", true},
+		{"uppercase-suffix", "20260420-141522-rA86019", true},
+		{"long-but-bounded", "20260420-141522-" + strings.Repeat("a", 64), true},
+
+		// rejects — shape
+		{"empty", "", false},
+		{"no-timestamp", "abc1234", false},
+		{"short-date", "2026042-141522-abc1234", false},
+		{"short-time", "20260420-14152-abc1234", false},
+		{"missing-sha", "20260420-141522-", false},
+
+		// rejects — illegal chars in sha segment
+		{"slash", "20260420-141522-abc/def", false},
+		{"dot", "20260420-141522-abc.def", false},
+		{"underscore", "20260420-141522-abc_def", false},
+		{"space", "20260420-141522-abc def", false},
+		{"null-byte", "20260420-141522-abc\x00def", false},
+		{"newline", "20260420-141522-abc\ndef", false},
+		{"parent-traversal", "20260420-141522-../foo", false},
+		{"unicode", "20260420-141522-café", false},
+
+		// rejects — length
+		{"too-long", "20260420-141522-" + strings.Repeat("a", 65), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, deployIDPattern.MatchString(tc.id))
+		})
+	}
 }
 
 // TestSitePromote_RejectsBadDeployIDFormat — invalid deployId is 400
