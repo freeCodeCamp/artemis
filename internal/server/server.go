@@ -2,7 +2,8 @@
 //
 // Route table:
 //
-//	GET    /healthz                                       — no auth
+//	GET    /healthz                                       — no auth (liveness)
+//	GET    /readyz                                        — no auth (readiness; probes Valkey + R2)
 //	GET    /api/whoami                                    — GitHub bearer
 //	POST   /api/deploy/init                               — GitHub bearer
 //	PUT    /api/deploy/{deployId}/upload                  — Deploy-session JWT
@@ -34,6 +35,7 @@ func New(h *handler.Handlers) http.Handler {
 
 	// Public.
 	r.Get("/healthz", h.HealthZ)
+	r.Get("/readyz", h.ReadyZ)
 
 	// /api/* — GitHub bearer required for the human-driven endpoints.
 	r.Route("/api", func(r chi.Router) {

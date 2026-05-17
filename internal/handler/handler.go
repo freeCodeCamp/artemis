@@ -58,12 +58,20 @@ type R2Store interface {
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
 }
 
+// RegistryHealth is the readiness probe contract for the registry
+// backend. *valkey.Store satisfies this; handler tests substitute a
+// fake that returns the desired error.
+type RegistryHealth interface {
+	Ping(ctx context.Context) error
+}
+
 // Handlers carries the dependencies needed by every endpoint in this package.
 type Handlers struct {
 	GH                 GitHubAuthenticator
 	JWT                DeployJWTSigner
 	Sites              SitesProvider
 	Registry           RegistryWriter
+	Health             RegistryHealth
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"

@@ -97,6 +97,7 @@ func run() error {
 		JWT:                signer,
 		Sites:              registryReader,
 		Registry:           registryStore,
+		Health:             registryStore,
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
