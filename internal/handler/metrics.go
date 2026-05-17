@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -37,15 +38,32 @@ type Metrics struct {
 }
 
 // pkgMetrics holds the package-level metrics handle so package-private
-// helpers (writeUpstreamError, AccessLog) can record events without
-// threading *Handlers through every call site. cmd/artemis is expected
-// to invoke SetMetrics once at startup. Nil means "no instrumentation"
-// — tests that don't touch counters can ignore it.
-var pkgMetrics *Metrics
+// helpers (writeUpstreamError) can record events without threading
+// *Handlers through every call site. cmd/artemis MUST invoke
+// SetMetrics exactly once at startup, before the server begins
+// serving traffic. Nil means "no instrumentation" — tests that don't
+// touch counters can ignore it.
+//
+// The single-write contract is enforced by sync.Once: a second
+// SetMetrics call after startup is a no-op (logged via prom panic
+// path would be ambiguous; staying quiet matches the "ignore tests
+// that don't care about counters" semantic). The read side is safe
+// without sync because sync.Once provides happens-before between the
+// write inside Do() and every subsequent read.
+var (
+	pkgMetrics     *Metrics
+	pkgMetricsOnce sync.Once
+)
 
-// SetMetrics installs the package-level metrics handle. Safe to call
-// once at startup; subsequent calls replace the handle.
-func SetMetrics(m *Metrics) { pkgMetrics = m }
+// SetMetrics installs the package-level metrics handle. Idempotent
+// per-process: only the first call wins. Designed for cmd/artemis to
+// invoke once at startup before the server starts; calling it again
+// (e.g. from a test rebuild) is a no-op.
+func SetMetrics(m *Metrics) {
+	pkgMetricsOnce.Do(func() {
+		pkgMetrics = m
+	})
+}
 
 // NewMetrics registers the artemis counters with the given registerer
 // and returns the collector handle. Use a fresh prometheus.Registry

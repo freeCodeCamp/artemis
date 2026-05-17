@@ -91,8 +91,8 @@ type Handlers struct {
 	PublicURLForSite  func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
 	// Metrics, if non-nil, drives the per-endpoint counters surfaced
 	// at /metrics. SitePromote / SiteRollback use h.Metrics directly;
-	// writeUpstreamError + AccessLog reach for the package-level handle
-	// installed via SetMetrics.
+	// writeUpstreamError reaches for the package-level handle installed
+	// via SetMetrics.
 	Metrics *Metrics
 }
 

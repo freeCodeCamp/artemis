@@ -131,17 +131,34 @@ func (r *Reader) run(ctx context.Context, events <-chan string, ttl time.Duratio
 			}
 			if err := r.Refresh(ctx); err != nil {
 				slog.Warn("valkey registry refresh failed (event-driven)", "err", err)
-				if r.OnRefreshError != nil {
-					r.OnRefreshError(err)
-				}
+				r.invokeOnRefreshError(err)
 			}
 		case <-ticker.C:
 			if err := r.Refresh(ctx); err != nil {
 				slog.Warn("valkey registry refresh failed (ttl fallback)", "err", err)
-				if r.OnRefreshError != nil {
-					r.OnRefreshError(err)
-				}
+				r.invokeOnRefreshError(err)
 			}
 		}
 	}
+}
+
+// invokeOnRefreshError fires the OnRefreshError callback (if set)
+// inside a panic-recovering shim. A panicking callback would
+// otherwise kill the run() goroutine and freeze the snapshot
+// indefinitely; recovering keeps the stale-read mode intact and
+// emits a structured log entry so the operator notices the broken
+// callback.
+func (r *Reader) invokeOnRefreshError(err error) {
+	if r.OnRefreshError == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("valkey registry OnRefreshError callback panicked",
+				"panic", p,
+				"refresh_err", err,
+			)
+		}
+	}()
+	r.OnRefreshError(err)
 }
