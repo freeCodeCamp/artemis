@@ -26,6 +26,12 @@ type Reader struct {
 
 	mu       sync.RWMutex
 	snapshot snapshot
+
+	// OnRefreshError, when non-nil, is invoked for every refresh that
+	// errored out of run(). The previous snapshot stays served; this
+	// hook is the only way an external metrics layer learns about the
+	// stale read. Set by the consumer after NewReader returns.
+	OnRefreshError func(error)
 }
 
 // snapshot is the immutable cached view returned to callers. It
@@ -125,10 +131,16 @@ func (r *Reader) run(ctx context.Context, events <-chan string, ttl time.Duratio
 			}
 			if err := r.Refresh(ctx); err != nil {
 				slog.Warn("valkey registry refresh failed (event-driven)", "err", err)
+				if r.OnRefreshError != nil {
+					r.OnRefreshError(err)
+				}
 			}
 		case <-ticker.C:
 			if err := r.Refresh(ctx); err != nil {
 				slog.Warn("valkey registry refresh failed (ttl fallback)", "err", err)
+				if r.OnRefreshError != nil {
+					r.OnRefreshError(err)
+				}
 			}
 		}
 	}

@@ -17,7 +17,7 @@ type stubHandlers struct {
 }
 
 func TestRouter_HealthzNoAuth(t *testing.T) {
-	r := New(&handler.Handlers{})
+	r := New(&handler.Handlers{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestRouter_HealthzNoAuth(t *testing.T) {
 }
 
 func TestRouter_WhoamiRequiresBearer(t *testing.T) {
-	r := New(&handler.Handlers{})
+	r := New(&handler.Handlers{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
 	w := httptest.NewRecorder()
@@ -38,7 +38,7 @@ func TestRouter_WhoamiRequiresBearer(t *testing.T) {
 }
 
 func TestRouter_UploadRequiresJWT(t *testing.T) {
-	r := New(&handler.Handlers{})
+	r := New(&handler.Handlers{}, nil)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/deploy/d1/upload?path=index.html", nil)
 	w := httptest.NewRecorder()
@@ -48,7 +48,7 @@ func TestRouter_UploadRequiresJWT(t *testing.T) {
 }
 
 func TestRouter_UnknownRoute_404(t *testing.T) {
-	r := New(&handler.Handlers{})
+	r := New(&handler.Handlers{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/nonsense", nil)
 	w := httptest.NewRecorder()
@@ -58,7 +58,7 @@ func TestRouter_UnknownRoute_404(t *testing.T) {
 }
 
 func TestRouter_RequestIDHeaderEcho(t *testing.T) {
-	r := New(&handler.Handlers{})
+	r := New(&handler.Handlers{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("X-Request-ID", "trace-7")

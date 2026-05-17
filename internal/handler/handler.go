@@ -89,6 +89,11 @@ type Handlers struct {
 	NewDeployID       func(sha string) string
 	Now               func() time.Time
 	PublicURLForSite  func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
+	// Metrics, if non-nil, drives the per-endpoint counters surfaced
+	// at /metrics. SitePromote / SiteRollback use h.Metrics directly;
+	// writeUpstreamError + AccessLog reach for the package-level handle
+	// installed via SetMetrics.
+	Metrics *Metrics
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.
@@ -121,6 +126,9 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 		"reqID", RequestIDFromContext(r.Context()),
 		"path", r.URL.Path,
 	)
+	if pkgMetrics != nil {
+		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
+	}
 	writeError(w, status, code, "upstream call failed")
 }
 

@@ -178,13 +178,26 @@ func Recoverer(next http.Handler) http.Handler {
 	})
 }
 
+// accessLogSkipPaths are request URIs that bypass AccessLog. Health
+// + readiness + metrics probes from k8s arrive every few seconds
+// and flood the log without operator value; status codes feed the
+// regular probe-result counters instead.
+var accessLogSkipPaths = map[string]struct{}{
+	"/healthz": {},
+	"/readyz":  {},
+	"/metrics": {},
+}
+
 // AccessLog emits one structured log line per request after the handler
-// returns.
+// returns. Probe paths in accessLogSkipPaths are silenced.
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		next.ServeHTTP(sw, r)
+		if _, skip := accessLogSkipPaths[r.URL.Path]; skip {
+			return
+		}
 		slog.Info("http",
 			"method", r.Method,
 			"path", r.URL.Path,
