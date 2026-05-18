@@ -1,0 +1,55 @@
+//go:build integration
+
+package integration_test
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+)
+
+// TestPublicRouteBlock asserts that the public Gateway HTTPRoute
+// rewrites /metrics + /readyz to /_artemis_blocked_path so external
+// callers see chi's catch-all 404 instead of operator-only payloads.
+// /healthz stays public for external liveness checks.
+//
+// The Gateway URLRewrite is configured in
+// k3s/gxy-management/apps/artemis/charts/artemis/templates/httproute.yaml.
+// Internal scrape and kubelet readiness still hit /metrics + /readyz
+// directly on Service:port and Pod IP respectively — those bypass the
+// Gateway and are exercised by handler-level unit tests in
+// internal/handler/{metrics_test.go,readyz_test.go}.
+func TestPublicRouteBlock(t *testing.T) {
+	c := loadCfg(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	t.Run("readyz_returns_404", func(t *testing.T) {
+		status, body := c.statusOnly(ctx, http.MethodGet, "/readyz", "", nil)
+		if status != 404 {
+			t.Fatalf("public /readyz: status=%d body=%s — want 404 (Gateway URLRewrite to /_artemis_blocked_path)", status, truncate(body, 200))
+		}
+	})
+
+	t.Run("metrics_returns_404", func(t *testing.T) {
+		status, body := c.statusOnly(ctx, http.MethodGet, "/metrics", "", nil)
+		if status != 404 {
+			t.Fatalf("public /metrics: status=%d body=%s — want 404 (Gateway URLRewrite to /_artemis_blocked_path)", status, truncate(body, 200))
+		}
+	})
+
+	t.Run("healthz_stays_public_200", func(t *testing.T) {
+		status, body := c.statusOnly(ctx, http.MethodGet, "/healthz", "", nil)
+		if status != 200 {
+			t.Fatalf("public /healthz: status=%d body=%s — want 200 (no rewrite, documented external liveness probe)", status, truncate(body, 200))
+		}
+	})
+
+	t.Run("rewrite_target_returns_404", func(t *testing.T) {
+		status, body := c.statusOnly(ctx, http.MethodGet, "/_artemis_blocked_path", "", nil)
+		if status != 404 {
+			t.Fatalf("/_artemis_blocked_path: status=%d body=%s — want 404 (chi catch-all on unknown path)", status, truncate(body, 200))
+		}
+	})
+}
