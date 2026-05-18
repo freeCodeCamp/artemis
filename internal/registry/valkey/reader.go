@@ -6,10 +6,16 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
 )
+
+// onRefreshErrorFn names the OnRefreshError callback type so it can
+// be stored inside atomic.Pointer (which requires a concrete type
+// parameter).
+type onRefreshErrorFn = func(error)
 
 // DefaultRefreshFallback is the cap on how long the in-memory cache
 // can stay stale without an explicit registry.changed event refresh.
@@ -27,11 +33,26 @@ type Reader struct {
 	mu       sync.RWMutex
 	snapshot snapshot
 
-	// OnRefreshError, when non-nil, is invoked for every refresh that
-	// errored out of run(). The previous snapshot stays served; this
-	// hook is the only way an external metrics layer learns about the
-	// stale read. Set by the consumer after NewReader returns.
-	OnRefreshError func(error)
+	// onRefreshError is invoked for every refresh that errored out of
+	// run(). The previous snapshot stays served; this hook is the only
+	// way an external metrics layer learns about the stale read. Set
+	// via SetOnRefreshError after NewReader returns. atomic.Pointer
+	// gives the test goroutine and the run() goroutine a documented
+	// happens-before edge — direct field access would race under -race.
+	onRefreshError atomic.Pointer[onRefreshErrorFn]
+}
+
+// SetOnRefreshError installs (or clears, with nil) the callback fired
+// when a registry refresh fails. Safe to call concurrently with a
+// running reader; in production cmd/artemis sets it once after
+// NewReader returns and never mutates.
+func (r *Reader) SetOnRefreshError(f func(error)) {
+	if f == nil {
+		r.onRefreshError.Store(nil)
+		return
+	}
+	fn := onRefreshErrorFn(f)
+	r.onRefreshError.Store(&fn)
 }
 
 // snapshot is the immutable cached view returned to callers. It
@@ -149,7 +170,8 @@ func (r *Reader) run(ctx context.Context, events <-chan string, ttl time.Duratio
 // emits a structured log entry so the operator notices the broken
 // callback.
 func (r *Reader) invokeOnRefreshError(err error) {
-	if r.OnRefreshError == nil {
+	fp := r.onRefreshError.Load()
+	if fp == nil {
 		return
 	}
 	defer func() {
@@ -160,5 +182,5 @@ func (r *Reader) invokeOnRefreshError(err error) {
 			)
 		}
 	}()
-	r.OnRefreshError(err)
+	(*fp)(err)
 }

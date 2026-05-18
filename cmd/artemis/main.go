@@ -96,7 +96,7 @@ func run() error {
 	metricsReg := prometheus.NewRegistry()
 	metrics := handler.NewMetrics(metricsReg)
 	handler.SetMetrics(metrics)
-	registryReader.OnRefreshError = func(error) { metrics.RegistryRefreshFailures.Inc() }
+	registryReader.SetOnRefreshError(func(error) { metrics.RegistryRefreshFailures.Inc() })
 
 	h := &handler.Handlers{
 		GH:                 ghClient,

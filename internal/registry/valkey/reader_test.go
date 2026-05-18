@@ -2,6 +2,7 @@ package valkey_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,4 +123,44 @@ func TestReader_RefreshRecoversFromTransientErrors(t *testing.T) {
 	require.NoError(t, r.Refresh(ctx))
 	second := r.Snapshot().Sites()
 	require.Equal(t, first, second)
+}
+
+// A panicking OnRefreshError callback must not kill run(). Without the
+// recover() shim a single misbehaving consumer would freeze the snapshot
+// indefinitely — subsequent refreshes would silently never fire. The
+// shim absorbs the panic, logs structured context, and lets the next
+// refresh proceed.
+func TestReader_OnRefreshErrorPanic_RecoversAndLogs(t *testing.T) {
+	t.Parallel()
+
+	s, mr, _ := newStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	r, err := valkey.NewReader(ctx, s, 50*time.Millisecond)
+	require.NoError(t, err)
+
+	var invocations atomic.Int32
+	r.SetOnRefreshError(func(error) {
+		n := invocations.Add(1)
+		if n == 1 {
+			panic("simulated callback panic")
+		}
+	})
+
+	// Force every subsequent Refresh to fail by closing miniredis. The
+	// run() goroutine's TTL tick (50ms) drives the first failure into
+	// OnRefreshError → panic → recover. If the shim works, the next
+	// tick fires a clean (non-panicking) invocation and the counter
+	// climbs above 1. If the shim is missing, run() dies on the panic
+	// and the counter stalls at 1.
+	mr.Close()
+
+	// 6s budget covers two complete refresh cycles even with the
+	// go-redis dial-retry chain (5 attempts × ~200ms each = ~1s per
+	// failed Refresh). Counter >= 2 proves run() survived the first
+	// panic: the second tick had to land on a live goroutine.
+	eventually(t, 6*time.Second, "OnRefreshError invoked >=2 times after panic-recovery", func() bool {
+		return invocations.Load() >= 2
+	})
 }
