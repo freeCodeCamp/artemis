@@ -24,6 +24,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Build-time identity, injected via -ldflags "-X main.version=... -X main.commit=...".
@@ -92,11 +93,17 @@ func run() error {
 		return fmt.Errorf("parse deploy prefix template: %w", err)
 	}
 
+	metricsReg := prometheus.NewRegistry()
+	metrics := handler.NewMetrics(metricsReg)
+	handler.SetMetrics(metrics)
+	registryReader.SetOnRefreshError(func(error) { metrics.RegistryRefreshFailures.Inc() })
+
 	h := &handler.Handlers{
 		GH:                 ghClient,
 		JWT:                signer,
 		Sites:              registryReader,
 		Registry:           registryStore,
+		Health:             registryStore,
 		R2:                 r2Client,
 		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
@@ -105,12 +112,13 @@ func run() error {
 		RegistryAuthzTeam:  cfg.Registry.AuthzTeam,
 		NewDeployID:        r2.NewDeployID,
 		Now:                time.Now,
+		Metrics:            metrics,
 	}
 
 	addr := ":" + strconv.Itoa(cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(h),
+		Handler:           server.New(h, metricsReg),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No global ReadTimeout — uploads are streamed and may run long.
 		WriteTimeout: 0,

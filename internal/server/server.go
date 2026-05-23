@@ -2,7 +2,9 @@
 //
 // Route table:
 //
-//	GET    /healthz                                       — no auth
+//	GET    /healthz                                       — no auth (liveness)
+//	GET    /readyz                                        — no auth (readiness; probes Valkey + R2)
+//	GET    /metrics                                       — no auth (prometheus exposition)
 //	GET    /api/whoami                                    — GitHub bearer
 //	POST   /api/deploy/init                               — GitHub bearer
 //	PUT    /api/deploy/{deployId}/upload                  — Deploy-session JWT
@@ -22,11 +24,14 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // New returns a chi router fully wired with the Handlers' endpoints +
 // the standard middleware chain (RequestID → AccessLog → Recoverer).
-func New(h *handler.Handlers) http.Handler {
+// metricsGatherer, when non-nil, is mounted at /metrics; pass nil to
+// disable the endpoint (useful for tests that don't care).
+func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler {
 	r := chi.NewRouter()
 	r.Use(handler.RequestID)
 	r.Use(handler.AccessLog)
@@ -34,6 +39,10 @@ func New(h *handler.Handlers) http.Handler {
 
 	// Public.
 	r.Get("/healthz", h.HealthZ)
+	r.Get("/readyz", h.ReadyZ)
+	if metricsGatherer != nil {
+		r.Method(http.MethodGet, "/metrics", handler.MetricsHandler(metricsGatherer))
+	}
 
 	// /api/* — GitHub bearer required for the human-driven endpoints.
 	r.Route("/api", func(r chi.Router) {

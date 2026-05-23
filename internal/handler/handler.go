@@ -58,12 +58,20 @@ type R2Store interface {
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
 }
 
+// RegistryHealth is the readiness probe contract for the registry
+// backend. *valkey.Store satisfies this; handler tests substitute a
+// fake that returns the desired error.
+type RegistryHealth interface {
+	Ping(ctx context.Context) error
+}
+
 // Handlers carries the dependencies needed by every endpoint in this package.
 type Handlers struct {
 	GH                 GitHubAuthenticator
 	JWT                DeployJWTSigner
 	Sites              SitesProvider
 	Registry           RegistryWriter
+	Health             RegistryHealth
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
@@ -81,6 +89,11 @@ type Handlers struct {
 	NewDeployID       func(sha string) string
 	Now               func() time.Time
 	PublicURLForSite  func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
+	// Metrics, if non-nil, drives the per-endpoint counters surfaced
+	// at /metrics. SitePromote / SiteRollback use h.Metrics directly;
+	// writeUpstreamError reaches for the package-level handle installed
+	// via SetMetrics.
+	Metrics *Metrics
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.
@@ -113,6 +126,9 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 		"reqID", RequestIDFromContext(r.Context()),
 		"path", r.URL.Path,
 	)
+	if pkgMetrics != nil {
+		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
+	}
 	writeError(w, status, code, "upstream call failed")
 }
 

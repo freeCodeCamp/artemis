@@ -77,6 +77,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			"site", site,
 			"remote", r.RemoteAddr,
 			"reqID", RequestIDFromContext(r.Context()))
+		if h.Metrics != nil {
+			h.Metrics.PromoteLegacyBare.Inc()
+		}
 	}
 
 	prodKey := h.aliasKey(site, "production")
@@ -92,6 +95,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		}
 		current = strings.TrimSpace(current)
 		if current != req.ExpectedCurrent {
+			if h.Metrics != nil {
+				h.Metrics.AliasDrift.Inc()
+			}
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": map[string]string{
 					"code":    "alias_drift",
@@ -195,6 +201,9 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		}
 		current = strings.TrimSpace(current)
 		if current != req.ExpectedCurrent {
+			if h.Metrics != nil {
+				h.Metrics.AliasDrift.Inc()
+			}
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": map[string]string{
 					"code":    "alias_drift",
