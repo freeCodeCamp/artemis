@@ -1,13 +1,15 @@
 # Changelog
 
-All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `RELEASING.md`.
+All notable changes to artemis are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+with the pre-1.0 caveat noted in `RELEASING.md`.
 
-## [Unreleased]
+## [0.3.0] - 2026-05-23
 
 ### Features
 
-- **handler:** Add `GET /readyz` probing Valkey + R2 reachability (k8s readiness; `/healthz` stays unconditional liveness)
-- **handler:** Add `GET /metrics` prometheus exposition with counters `artemis_{registry_refresh_failures,alias_drift,promote_legacy_bare,upstream_error}_total`; AccessLog skips `/healthz`/`/readyz`/`/metrics` probe paths
+- Universe platform QOL (#2) ([14fe3a0](https://github.com/freeCodeCamp/artemis/commit/14fe3a05c6a15cd59f5cacf3330a1fcec31733f9))
 - **config:** Warn on non-default GH_API_BASE at startup ([4338dd8](https://github.com/freeCodeCamp/artemis/commit/4338dd85c3305086e500c5b339fadbace80616d7))
 - **handler:** WriteUpstreamError swallows upstream strings, logs server-side ([042437a](https://github.com/freeCodeCamp/artemis/commit/042437abafa724eabb0a7aeff12fd8859ed9909d))
 
