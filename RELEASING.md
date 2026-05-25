@@ -67,9 +67,10 @@ git tag -a v0.2.0 HEAD~1 -m "v0.2.0 — <summary>"
 ### 4. Push
 
 ```bash
-git push origin main
-git push origin v0.2.0
+git push --atomic origin main v0.2.0
 ```
+
+`--atomic` pushes the branch update and the tag in a single transaction. Splitting the push into two commands (`git push origin main` followed by `git push origin v0.2.0`) can briefly expose the tag before the underlying commit has fully propagated across GitHub's edge nodes. When that race wins, `docker/metadata-action`'s default-branch lookup (`enable={{is_default_branch}}` → `repos.get()` Octokit call) intermittently returns `401 Bad credentials` even though the workflow's `GITHUB_TOKEN` scopes are correct. Atomic push avoids the race; see §6.
 
 The tag push fires `.github/workflows/docker-ghcr.yml` (trigger: `push.tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']`). The workflow:
 
@@ -97,6 +98,22 @@ docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:X.Y.Z \
 ```
 
 The pin format is `image.tag: "X.Y.Z@sha256:<digest>"` — bare semver (no `v`-prefix; docker/metadata-action strips it from the git tag per OCI convention) plus the `@sha256:<digest>` immutable anchor. Never use `tag: X.Y.Z` without the digest, and never use `tag: latest` in production. Deployment mechanics (helm/kustomize/ArgoCD/etc.) are operator-specific.
+
+## 6. CD remediation
+
+If `docker-ghcr.yml` fails at the **Derive image tags** step with `##[error]Bad credentials`, the cause is almost always a transient GitHub API race, not a credential or workflow bug. Check the **Set up job → GITHUB_TOKEN Permissions** group of the failed run — if it shows the expected scopes (`Contents: write`, `Metadata: read`, `Packages: write`), do not edit the workflow. Re-run the failed jobs:
+
+```bash
+gh run rerun <run-id> --failed
+```
+
+The replayed run reuses the same ref + commit, so `metadata-action`'s default-branch lookup has had time to converge across edge nodes and succeeds. Confirmed empirically on 2026-05-23: v0.3.0 push failed at metadata-action, `gh run rerun --failed` succeeded on the first replay with no code change. Adopting `git push --atomic` (step 4 above) makes this race vanishingly rare in the first place.
+
+If the rerun also fails, escalate — it is no longer a race:
+
+1. Compare `GITHUB_TOKEN Permissions` against the workflow's declared scopes.
+1. `gh api repos/freeCodeCamp/artemis/actions/permissions/workflow` to confirm `default_workflow_permissions: write`.
+1. Check for upstream regressions: `gh api repos/docker/metadata-action/releases` for fixes published after the failure timestamp.
 
 ## Active deprecations
 
