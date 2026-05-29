@@ -86,9 +86,20 @@ type Handlers struct {
 	// "staff" via config; production wiring sets it from
 	// REGISTRY_AUTHZ_TEAM env.
 	RegistryAuthzTeam string
-	NewDeployID       func(sha string) string
-	Now               func() time.Time
-	PublicURLForSite  func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
+	// Repo* drive the /api/repo* endpoints. RepoGH probes team
+	// membership in the Universe org (distinct from GH, which is scoped
+	// to GitHubConfig.Org) — see dossier §V4. Repos is the request
+	// queue; GitHubApp mints the Apollo-11 token + creates repos. These
+	// are nil when the feature is disabled (routes left unmounted).
+	RepoGH               GitHubAuthenticator
+	Repos                RepoStore
+	GitHubApp            RepoCreator
+	RepoOrg              string
+	RepoCreateAuthzTeam  string
+	RepoApproveAuthzTeam string
+	NewDeployID          func(sha string) string
+	Now                  func() time.Time
+	PublicURLForSite     func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
 	// Metrics, if non-nil, drives the per-endpoint counters surfaced
 	// at /metrics. SitePromote / SiteRollback use h.Metrics directly;
 	// writeUpstreamError reaches for the package-level handle installed
