@@ -83,7 +83,12 @@ func TestAppJWTSigner_Sign(t *testing.T) {
 	}
 
 	claims := jwt.RegisteredClaims{}
-	parsed, err := jwt.ParseWithClaims(tokenStr, &claims, func(tok *jwt.Token) (any, error) {
+	// Pin the verifier's clock to the same fixed time used to sign, so
+	// exp/iat are validated deterministically. Without WithTimeFunc the
+	// parser uses real wall-clock and the token (exp = fixed+600s) reads
+	// as expired whenever the suite runs >10min after `fixed` (CI flake).
+	parser := jwt.NewParser(jwt.WithTimeFunc(func() time.Time { return fixed }))
+	parsed, err := parser.ParseWithClaims(tokenStr, &claims, func(tok *jwt.Token) (any, error) {
 		if tok.Method.Alg() != "RS256" {
 			t.Errorf("alg = %s, want RS256", tok.Method.Alg())
 		}
