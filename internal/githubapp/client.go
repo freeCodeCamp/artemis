@@ -23,6 +23,11 @@ const (
 	listMaxPages   = 20
 	tokenSafetyPad = 60 * time.Second
 	defaultAPIBase = "https://api.github.com"
+	// templatesCacheTTL bounds how long an accessible-template list is
+	// reused. /api/repo/templates is open to any bearer and each miss
+	// probes /contents/ per candidate after paginating org repos, so a
+	// short cache caps the App's outbound rate-limit burn.
+	templatesCacheTTL = 5 * time.Minute
 )
 
 var reCouldNotClone = regexp.MustCompile(`(?i)could not clone`)
@@ -75,6 +80,11 @@ type Client struct {
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+
+	templatesMu    sync.Mutex
+	templatesVal   []string
+	templatesValid bool
+	templatesExp   time.Time
 }
 
 // NewClient validates config and returns a ready Client.
@@ -298,6 +308,14 @@ func (c *Client) disableActions(ctx context.Context, token, name string) {
 // error on any GitHub failure; the handler decides whether to fail-soft
 // to an empty list at the HTTP boundary.
 func (c *Client) ListTemplates(ctx context.Context) ([]string, error) {
+	c.templatesMu.Lock()
+	if c.templatesValid && c.now().Before(c.templatesExp) {
+		cached := append([]string(nil), c.templatesVal...)
+		c.templatesMu.Unlock()
+		return cached, nil
+	}
+	c.templatesMu.Unlock()
+
 	token, err := c.installationToken(ctx)
 	if err != nil {
 		return nil, err
@@ -338,6 +356,13 @@ func (c *Client) ListTemplates(ctx context.Context) ([]string, error) {
 		}
 	}
 	sort.Strings(accessible)
+
+	c.templatesMu.Lock()
+	c.templatesVal = append([]string(nil), accessible...)
+	c.templatesValid = true
+	c.templatesExp = c.now().Add(templatesCacheTTL)
+	c.templatesMu.Unlock()
+
 	return accessible, nil
 }
 

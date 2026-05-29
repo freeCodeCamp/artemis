@@ -191,6 +191,60 @@ func TestClient_TemplateCloneForbidden(t *testing.T) {
 	}
 }
 
+func TestClient_ListTemplatesCachesWithinTTL(t *testing.T) {
+	var listCalls, probeCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
+			tokenResponse(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/orgs/"+testOrg+"/repos":
+			atomic.AddInt32(&listCalls, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, `[{"name":"alpha","is_template":true}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+testOrg+"/alpha/contents/":
+			atomic.AddInt32(&probeCalls, 1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	now := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	c, err := NewClient(ClientConfig{
+		APIBase: srv.URL, Org: testOrg, InstallationID: "42", Signer: newSigner(t),
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		got, err := c.ListTemplates(context.Background())
+		if err != nil {
+			t.Fatalf("ListTemplates #%d: %v", i, err)
+		}
+		if len(got) != 1 || got[0] != "alpha" {
+			t.Fatalf("templates = %v, want [alpha]", got)
+		}
+	}
+	if listCalls != 1 {
+		t.Errorf("org repos list calls = %d, want 1 (cached within TTL)", listCalls)
+	}
+	if probeCalls != 1 {
+		t.Errorf("contents probe calls = %d, want 1 (cached within TTL)", probeCalls)
+	}
+
+	// Past the TTL the cache refreshes.
+	now = now.Add(templatesCacheTTL + time.Second)
+	if _, err := c.ListTemplates(context.Background()); err != nil {
+		t.Fatalf("ListTemplates after TTL: %v", err)
+	}
+	if listCalls != 2 {
+		t.Errorf("org repos list calls = %d, want 2 after TTL expiry", listCalls)
+	}
+}
+
 func TestClient_ListTemplatesFiltersAccessible(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
