@@ -40,6 +40,18 @@ func userFacingf(format string, args ...any) error {
 	return &UserFacingError{Msg: fmt.Sprintf(format, args...)}
 }
 
+// RepoExistsError reports that the target repo already exists in the org.
+// On a fresh approval the handler surfaces it to the admin
+// (approved_failed); on an approve-retry of a row stranded in `approved`
+// it is the prior creation, and the handler reconciles to active via URL.
+type RepoExistsError struct {
+	Org, Name, URL string
+}
+
+func (e *RepoExistsError) Error() string {
+	return fmt.Sprintf("repository %s/%s already exists", e.Org, e.Name)
+}
+
 // ClientConfig configures the GitHub App REST client.
 type ClientConfig struct {
 	APIBase        string // default https://api.github.com
@@ -183,12 +195,12 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 		return Created{}, err
 	}
 
-	exists, err := c.repoExists(ctx, token, spec.Name)
+	exists, existingURL, err := c.repoExists(ctx, token, spec.Name)
 	if err != nil {
 		return Created{}, err
 	}
 	if exists {
-		return Created{}, userFacingf("repository %s/%s already exists", c.org, spec.Name)
+		return Created{}, &RepoExistsError{Org: c.org, Name: spec.Name, URL: existingURL}
 	}
 
 	var url string
@@ -244,19 +256,23 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 	return Created{FullName: repo.FullName, URL: repo.HTMLURL, Visibility: vis}, nil
 }
 
-func (c *Client) repoExists(ctx context.Context, token, name string) (bool, error) {
+func (c *Client) repoExists(ctx context.Context, token, name string) (bool, string, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", c.apiBase, c.org, name)
-	resp, _, err := c.do(ctx, http.MethodGet, url, token, nil)
+	resp, body, err := c.do(ctx, http.MethodGet, url, token, nil)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return true, nil
+		var repo struct {
+			HTMLURL string `json:"html_url"`
+		}
+		_ = json.Unmarshal(body, &repo)
+		return true, repo.HTMLURL, nil
 	case http.StatusNotFound:
-		return false, nil
+		return false, "", nil
 	default:
-		return false, fmt.Errorf("githubapp: existence check status %d", resp.StatusCode)
+		return false, "", fmt.Errorf("githubapp: existence check status %d", resp.StatusCode)
 	}
 }
 

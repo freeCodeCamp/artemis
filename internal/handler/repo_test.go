@@ -23,12 +23,13 @@ import (
 // fakeRepoStore is an in-memory RepoStore with the same status semantics
 // as the valkey store: name-claim dedupe + CAS-on-pending resolution.
 type fakeRepoStore struct {
-	mu        sync.Mutex
-	byID      map[string]reporequest.Request
-	names     map[string]bool
-	seq       int
-	createErr error
-	listErr   error
+	mu                sync.Mutex
+	byID              map[string]reporequest.Request
+	names             map[string]bool
+	seq               int
+	createErr         error
+	listErr           error
+	lastMarkActiveCtx context.Context
 }
 
 func newFakeRepoStore() *fakeRepoStore {
@@ -124,7 +125,10 @@ func (f *fakeRepoStore) Reject(_ context.Context, id, approver, reason string) (
 	})
 }
 
-func (f *fakeRepoStore) MarkActive(_ context.Context, id, url string) (reporequest.Request, error) {
+func (f *fakeRepoStore) MarkActive(ctx context.Context, id, url string) (reporequest.Request, error) {
+	f.mu.Lock()
+	f.lastMarkActiveCtx = ctx
+	f.mu.Unlock()
 	return f.transition(id, func(r reporequest.Request) (reporequest.Request, bool, error) {
 		r.Status = reporequest.StatusActive
 		r.URL = url
@@ -395,6 +399,64 @@ func TestRepoApprove_AlreadyResolved(t *testing.T) {
 	second := approveReq(h, created.ID, "boss", "atok")
 	assert.Equal(t, http.StatusConflict, second.Code, second.Body.String())
 	assert.Equal(t, 1, creator.createCalls, "GitHub create must run exactly once")
+}
+
+func TestRepoApprove_DurableWriteIgnoresClientCancel(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "cancely", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	creator := &fakeRepoCreator{created: githubapp.Created{URL: "https://github.com/freeCodeCamp-Universe/cancely"}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	// Client disconnects: the request context is canceled before the
+	// post-creation durable write. MarkActive must still run on a
+	// cancel-immune context so the row cannot strand in `approved`.
+	ctx, cancel := context.WithCancel(contextWithLogin(context.Background(), "boss", "atok"))
+	r := withID(httptest.NewRequest(http.MethodPost, "/api/repo/"+created.ID+"/approve", nil).WithContext(ctx), created.ID)
+	cancel()
+	w := httptest.NewRecorder()
+	h.RepoApprove(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotNil(t, store.lastMarkActiveCtx)
+	assert.NoError(t, store.lastMarkActiveCtx.Err(), "durable MarkActive must run on a cancel-immune context")
+	got, _ := store.Get(context.Background(), created.ID)
+	assert.Equal(t, reporequest.StatusActive, got.Status)
+}
+
+func TestRepoApprove_ResumesStrandedApproved(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "live", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	// A prior approve created the repo but never recorded active: row is
+	// stranded in `approved`. A retry must reconcile, not 409.
+	_, err := store.Approve(context.Background(), created.ID, "boss")
+	require.NoError(t, err)
+	creator := &fakeRepoCreator{createErr: &githubapp.RepoExistsError{Org: "freeCodeCamp-Universe", Name: "live", URL: "https://github.com/freeCodeCamp-Universe/live"}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp RepoApproveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "ok", resp.Outcome)
+	assert.Equal(t, "active", resp.Request.Status)
+	assert.Equal(t, "https://github.com/freeCodeCamp-Universe/live", resp.Request.URL)
+}
+
+func TestRepoApprove_FirstAttemptExistsFails(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "dup", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	// Fresh approval where the name already exists in the org (not ours):
+	// must record approved_failed with a clean, user-facing message.
+	creator := &fakeRepoCreator{createErr: &githubapp.RepoExistsError{Org: "freeCodeCamp-Universe", Name: "dup", URL: "https://github.com/freeCodeCamp-Universe/dup"}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp RepoApproveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "approved_failed", resp.Outcome)
+	assert.Equal(t, "failed", resp.Request.Status)
+	assert.Contains(t, resp.Request.Error, "already exists")
 }
 
 func TestRepoApprove_RejectsNonAdmin(t *testing.T) {

@@ -236,18 +236,38 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	login := LoginFromContext(r.Context())
 
 	approved, err := h.Repos.Approve(r.Context(), id, login)
-	if err != nil {
-		switch {
-		case errors.Is(err, reporequest.ErrNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
-		case errors.Is(err, reporequest.ErrNotPending):
+	resume := false
+	switch {
+	case err == nil:
+		// fresh pending → approved transition
+	case errors.Is(err, reporequest.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "repo request not found")
+		return
+	case errors.Is(err, reporequest.ErrNotPending):
+		// The CAS rejected a non-pending row. If it is stranded in
+		// `approved` (a prior attempt created the repo but never recorded
+		// the outcome — e.g. a canceled durable write), resume and
+		// reconcile; otherwise it is genuinely resolved (PR freeCodeCamp/artemis#3, #7).
+		cur, gErr := h.Repos.Get(r.Context(), id)
+		if gErr != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", gErr)
+			return
+		}
+		if cur.Status != reporequest.StatusApproved {
 			writeError(w, http.StatusConflict, "already_resolved",
 				"request was already resolved by another admin")
-		default:
-			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.approve", err)
+			return
 		}
+		approved, resume = cur, true
+	default:
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.approve", err)
 		return
 	}
+
+	// Once GitHub has the side effect, the durable status write must
+	// complete even if the client disconnects, else the repo exists while
+	// the row stays `approved` with no resolution (PR freeCodeCamp/artemis#3, #2).
+	durCtx := context.WithoutCancel(r.Context())
 
 	created, ghErr := h.GitHubApp.CreateRepo(r.Context(), githubapp.CreateSpec{
 		Name:        approved.Name,
@@ -255,12 +275,20 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		Description: approved.Description,
 		Template:    approved.Template,
 	})
+	var existsErr *githubapp.RepoExistsError
+	if errors.As(ghErr, &existsErr) && resume {
+		// Our prior attempt already created the repo; finish the reconcile.
+		created, ghErr = githubapp.Created{URL: existsErr.URL}, nil
+	}
 	if ghErr != nil {
 		msg := "repository creation failed"
 		var uf *githubapp.UserFacingError
-		if errors.As(ghErr, &uf) {
+		switch {
+		case errors.As(ghErr, &existsErr):
+			msg = existsErr.Error()
+		case errors.As(ghErr, &uf):
 			msg = uf.Error()
-		} else {
+		default:
 			slog.Error("repo create upstream error",
 				"op", "githubapp.createrepo",
 				"err", ghErr,
@@ -268,7 +296,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 				"id", id,
 			)
 		}
-		failed, mErr := h.Repos.MarkFailed(r.Context(), id, msg)
+		failed, mErr := h.Repos.MarkFailed(durCtx, id, msg)
 		if mErr != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markfailed", mErr)
 			return
@@ -277,7 +305,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	active, mErr := h.Repos.MarkActive(r.Context(), id, created.URL)
+	active, mErr := h.Repos.MarkActive(durCtx, id, created.URL)
 	if mErr != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markactive", mErr)
 		return
