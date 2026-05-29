@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/freeCodeCamp/artemis/internal/reporequest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,3 +72,64 @@ func TestRouter_RequestIDHeaderEcho(t *testing.T) {
 }
 
 var _ = stubHandlers{}
+
+// --- repo feature route-mount wiring ---
+
+type stubRepoStore struct{}
+
+func (stubRepoStore) Create(context.Context, reporequest.Request) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+func (stubRepoStore) Get(context.Context, string) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+func (stubRepoStore) List(context.Context) ([]reporequest.Request, error) { return nil, nil }
+func (stubRepoStore) Approve(context.Context, string, string) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+func (stubRepoStore) Reject(context.Context, string, string, string) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+func (stubRepoStore) MarkActive(context.Context, string, string) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+func (stubRepoStore) MarkFailed(context.Context, string, string) (reporequest.Request, error) {
+	return reporequest.Request{}, nil
+}
+
+type stubRepoCreator struct{}
+
+func (stubRepoCreator) CreateRepo(context.Context, githubapp.CreateSpec) (githubapp.Created, error) {
+	return githubapp.Created{}, nil
+}
+func (stubRepoCreator) ListTemplates(context.Context) ([]string, error) { return nil, nil }
+
+type stubRepoGH struct{}
+
+func (stubRepoGH) ValidateToken(context.Context, string) (string, error) { return "", nil }
+func (stubRepoGH) AuthorizeForSite(context.Context, string, string, []string) (bool, error) {
+	return false, nil
+}
+func (stubRepoGH) UserTeams(context.Context, string) ([]string, error) { return nil, nil }
+
+func TestRouter_RepoRoutesUnmountedByDefault(t *testing.T) {
+	r := New(&handler.Handlers{}, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/repo", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, "repo routes must be absent when feature disabled")
+}
+
+func TestRouter_RepoRoutesMountedWhenEnabled(t *testing.T) {
+	h := &handler.Handlers{
+		Repos:     stubRepoStore{},
+		GitHubApp: stubRepoCreator{},
+		RepoGH:    stubRepoGH{},
+	}
+	r := New(h, nil)
+	// Route present but unauthenticated → bearer middleware returns 401.
+	req := httptest.NewRequest(http.MethodPost, "/api/repo", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "repo route must be mounted (bearer-guarded) when feature enabled")
+}

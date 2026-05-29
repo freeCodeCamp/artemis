@@ -20,9 +20,11 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -88,6 +90,49 @@ func run() error {
 		return fmt.Errorf("init jwt signer: %w", err)
 	}
 
+	// Repo-creation feature (optional). Wired only when the Apollo-11 App
+	// credentials are configured; absent → feature off, /api/repo*
+	// routes left unmounted. repoGH probes membership in the Universe org
+	// (cfg.Repo.Org), distinct from ghClient's site-registry org.
+	var (
+		repoStore *repovalkey.Store
+		repoGH    *auth.GitHubClient
+		appClient *githubapp.Client
+	)
+	if cfg.Repo.Enabled() {
+		appSigner, err := githubapp.NewAppJWTSigner(cfg.Repo.App.AppID, cfg.Repo.App.PrivateKeyPEM)
+		if err != nil {
+			return fmt.Errorf("init github app signer: %w", err)
+		}
+		appClient, err = githubapp.NewClient(githubapp.ClientConfig{
+			APIBase:        cfg.GitHub.APIBase,
+			Org:            cfg.Repo.Org,
+			InstallationID: cfg.Repo.App.InstallationID,
+			Signer:         appSigner,
+		})
+		if err != nil {
+			return fmt.Errorf("init github app client: %w", err)
+		}
+		repoStore, err = repovalkey.New(rootCtx, repovalkey.Config{
+			Addr:     cfg.Registry.Valkey.Addr,
+			Password: cfg.Registry.Valkey.Password,
+		})
+		if err != nil {
+			return fmt.Errorf("open repo-request store: %w", err)
+		}
+		defer func() { _ = repoStore.Close() }()
+		repoGH = auth.NewGitHubClient(auth.GitHubClientConfig{
+			APIBase:  cfg.GitHub.APIBase,
+			Org:      cfg.Repo.Org,
+			CacheTTL: cfg.GitHub.MembershipCacheTTL,
+		})
+		slog.Info("repo-creation feature enabled",
+			"org", cfg.Repo.Org,
+			"createTeam", cfg.Repo.CreateAuthzTeam,
+			"approveTeam", cfg.Repo.ApproveAuthzTeam,
+		)
+	}
+
 	deployPrefix, err := handler.NewDeployPrefixTemplate(cfg.DeployPrefixFormat)
 	if err != nil {
 		return fmt.Errorf("parse deploy prefix template: %w", err)
@@ -99,20 +144,32 @@ func run() error {
 	registryReader.SetOnRefreshError(func(error) { metrics.RegistryRefreshFailures.Inc() })
 
 	h := &handler.Handlers{
-		GH:                 ghClient,
-		JWT:                signer,
-		Sites:              registryReader,
-		Registry:           registryStore,
-		Health:             registryStore,
-		R2:                 r2Client,
-		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
-		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
-		DeployPrefix:       deployPrefix,
-		UploadMaxBytes:     cfg.UploadMaxBytes,
-		RegistryAuthzTeam:  cfg.Registry.AuthzTeam,
-		NewDeployID:        r2.NewDeployID,
-		Now:                time.Now,
-		Metrics:            metrics,
+		GH:                   ghClient,
+		JWT:                  signer,
+		Sites:                registryReader,
+		Registry:             registryStore,
+		Health:               registryStore,
+		R2:                   r2Client,
+		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
+		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
+		DeployPrefix:         deployPrefix,
+		UploadMaxBytes:       cfg.UploadMaxBytes,
+		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
+		RepoOrg:              cfg.Repo.Org,
+		RepoCreateAuthzTeam:  cfg.Repo.CreateAuthzTeam,
+		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
+		NewDeployID:          r2.NewDeployID,
+		Now:                  time.Now,
+		Metrics:              metrics,
+	}
+
+	// Assign the repo interface deps only when enabled — assigning a
+	// typed-nil pointer to an interface field would make RepoEnabled()
+	// (which compares != nil) true and mount routes onto nil deps.
+	if cfg.Repo.Enabled() {
+		h.RepoGH = repoGH
+		h.Repos = repoStore
+		h.GitHubApp = appClient
 	}
 
 	addr := ":" + strconv.Itoa(cfg.Port)

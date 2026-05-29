@@ -17,6 +17,12 @@
 //	GET    /api/site/{site}/alias/{mode}                  — GitHub bearer
 //	POST   /api/site/{site}/promote                       — GitHub bearer
 //	POST   /api/site/{site}/rollback                      — GitHub bearer
+//	POST   /api/repo                                      — GitHub bearer + repo-create team   (feature-gated)
+//	GET    /api/repos                                     — GitHub bearer                       (feature-gated)
+//	GET    /api/repo/templates                            — GitHub bearer                       (feature-gated)
+//	GET    /api/repo/{id}                                 — GitHub bearer                       (feature-gated)
+//	POST   /api/repo/{id}/approve                         — GitHub bearer + repo-approve team   (feature-gated)
+//	POST   /api/repo/{id}/reject                          — GitHub bearer + repo-approve team   (feature-gated)
 package server
 
 import (
@@ -58,6 +64,18 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 			r.Get("/site/{site}/alias/{mode}", h.AliasGet)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)
+
+			// Repo-creation feature — mounted only when the Apollo-11
+			// App credentials + queue store are wired (RepoEnabled).
+			// Per-handler authz gates create (staff) vs approve (admin).
+			if h.RepoEnabled() {
+				r.Post("/repo", h.RepoCreate)
+				r.Get("/repos", h.ReposList)
+				r.Get("/repo/templates", h.RepoTemplates)
+				r.Get("/repo/{id}", h.RepoGet)
+				r.Post("/repo/{id}/approve", h.RepoApprove)
+				r.Post("/repo/{id}/reject", h.RepoReject)
+			}
 		})
 
 		// Deploy-session JWT branch — scoped to (login, site, deployId).
