@@ -491,6 +491,42 @@ func TestRepoReject(t *testing.T) {
 	assert.Equal(t, "out of scope", got.RejectReason)
 }
 
+func TestRepoReject_MalformedBodyReturns400(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "rj", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h := repoHandlers(t, adminRepoGH(), store, &fakeRepoCreator{})
+
+	r := withID(httptest.NewRequest(http.MethodPost, "/api/repo/"+created.ID+"/reject", bytes.NewReader([]byte(`{"reason":`))).
+		WithContext(contextWithLogin(context.Background(), "boss", "atok")), created.ID)
+	w := httptest.NewRecorder()
+	h.RepoReject(w, r)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var env map[string]map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "bad_request", env["error"]["code"])
+	// State must be untouched — not silently rejected with an empty reason.
+	got, _ := store.Get(context.Background(), created.ID)
+	assert.Equal(t, reporequest.StatusPending, got.Status)
+}
+
+func TestRepoReject_EmptyBodyAllowed(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "rj2", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h := repoHandlers(t, adminRepoGH(), store, &fakeRepoCreator{})
+
+	// nil body → io.EOF on decode → still a valid reject with empty reason.
+	r := withID(httptest.NewRequest(http.MethodPost, "/api/repo/"+created.ID+"/reject", nil).
+		WithContext(contextWithLogin(context.Background(), "boss", "atok")), created.ID)
+	w := httptest.NewRecorder()
+	h.RepoReject(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, _ := store.Get(context.Background(), created.ID)
+	assert.Equal(t, reporequest.StatusRejected, got.Status)
+	assert.Equal(t, "", got.RejectReason)
+}
+
 func TestRepoTemplates_SuccessAndFailSoft(t *testing.T) {
 	h := repoHandlers(t, staffRepoGH(), newFakeRepoStore(), &fakeRepoCreator{templates: []string{"alpha", "beta"}})
 	w := doReq(h, http.MethodGet, "/api/repo/templates", nil, "alice", "tok", (*Handlers).RepoTemplates)

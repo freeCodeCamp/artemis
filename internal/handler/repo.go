@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -317,6 +318,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 // RepoApproveAuthzTeam. Optional body {reason}. CAS-guarded like approve.
 //
 //	200 OK          — body = RepoRow (status rejected)
+//	400 Bad Request — non-empty body that is not valid json
 //	403 Forbidden   — caller not on the approve team
 //	404 Not Found   — no request with that id
 //	409 Conflict    — already resolved by another admin
@@ -328,8 +330,12 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var body RepoRejectRequest
-	// Body is optional; ignore decode errors (empty body → zero reason).
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	// Body is optional (empty → zero reason), but a malformed non-empty
+	// body must not be silently discarded into a reject with no reason.
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return
+	}
 
 	login := LoginFromContext(r.Context())
 	rejected, err := h.Repos.Reject(r.Context(), id, login, body.Reason)
