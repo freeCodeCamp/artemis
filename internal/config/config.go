@@ -34,6 +34,7 @@ type Config struct {
 	UploadMaxBytes     int64 // single PUT /upload body cap; default 100 MiB
 	LogLevel           string
 	Registry           RegistryConfig
+	Repo               RepoConfig
 }
 
 // R2Config holds the Cloudflare R2 (S3-compatible) credentials and target bucket.
@@ -86,9 +87,50 @@ type ValkeyConfig struct {
 	Password string
 }
 
+// RepoConfig holds the repo-creation feature settings: the target org,
+// the GitHub teams that gate create vs approve, and the Apollo-11
+// GitHub App credentials used server-side to mint installation tokens.
+//
+// The App credentials are OPTIONAL at boot — when unset the feature is
+// disabled (Enabled() == false) and the /api/repo* routes are not
+// mounted, so artemis still runs in deploy-only deployments. When any
+// App field is set, all three are required (validate fails otherwise).
+type RepoConfig struct {
+	// Org is the GitHub org repos are created in AND whose teams gate
+	// repo authz. Distinct from GitHubConfig.Org (which scopes the
+	// site-registry team checks). Default "freeCodeCamp-Universe".
+	Org string
+
+	// CreateAuthzTeam gates POST /api/repo (and list/status). Default
+	// "staff". ApproveAuthzTeam gates approve/reject. Default
+	// "repo-admins". Both are slugs in Org.
+	CreateAuthzTeam  string
+	ApproveAuthzTeam string
+
+	App GitHubAppConfig
+}
+
+// GitHubAppConfig holds the Apollo-11 GitHub App credentials. The
+// private key is a cluster secret (sops / mounted env), the same secret
+// class as the R2 keys — it never reaches a staff laptop or the CLI.
+type GitHubAppConfig struct {
+	AppID          string // GH_APP_ID — numeric app id (issuer of the App JWT)
+	InstallationID string // GH_APP_INSTALLATION_ID
+	PrivateKeyPEM  string // GH_APP_PRIVATE_KEY — PEM (PKCS#1 or PKCS#8)
+}
+
+// Enabled reports whether the repo-creation feature has full App
+// credentials configured.
+func (r RepoConfig) Enabled() bool {
+	return r.App.AppID != "" && r.App.InstallationID != "" && r.App.PrivateKeyPEM != ""
+}
+
 const (
-	minSigningKeyBytes       = 32
-	defaultRegistryAuthzTeam = "staff"
+	minSigningKeyBytes          = 32
+	defaultRegistryAuthzTeam    = "staff"
+	defaultRepoOrg              = "freeCodeCamp-Universe"
+	defaultRepoCreateAuthzTeam  = "staff"
+	defaultRepoApproveAuthzTeam = "repo-admins"
 )
 
 var validLogLevels = map[string]struct{}{
@@ -124,6 +166,11 @@ func Load() (*Config, error) {
 		LogLevel:           "info",
 		Registry: RegistryConfig{
 			AuthzTeam: defaultRegistryAuthzTeam,
+		},
+		Repo: RepoConfig{
+			Org:              defaultRepoOrg,
+			CreateAuthzTeam:  defaultRepoCreateAuthzTeam,
+			ApproveAuthzTeam: defaultRepoApproveAuthzTeam,
 		},
 	}
 
@@ -195,6 +242,19 @@ func Load() (*Config, error) {
 		cfg.Registry.Valkey.Password = v
 	}
 
+	if v, ok := os.LookupEnv("GH_REPO_ORG"); ok && v != "" {
+		cfg.Repo.Org = v
+	}
+	if v, ok := os.LookupEnv("REPO_CREATE_AUTHZ_TEAM"); ok && v != "" {
+		cfg.Repo.CreateAuthzTeam = v
+	}
+	if v, ok := os.LookupEnv("REPO_APPROVE_AUTHZ_TEAM"); ok && v != "" {
+		cfg.Repo.ApproveAuthzTeam = v
+	}
+	cfg.Repo.App.AppID = os.Getenv("GH_APP_ID")
+	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
+	cfg.Repo.App.PrivateKeyPEM = os.Getenv("GH_APP_PRIVATE_KEY")
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -248,6 +308,27 @@ func (c *Config) validate() error {
 	}
 	if c.Registry.AuthzTeam == "" {
 		return fmt.Errorf("REGISTRY_AUTHZ_TEAM must not be empty")
+	}
+	if c.Repo.Org == "" {
+		return fmt.Errorf("GH_REPO_ORG must not be empty")
+	}
+	if c.Repo.CreateAuthzTeam == "" {
+		return fmt.Errorf("REPO_CREATE_AUTHZ_TEAM must not be empty")
+	}
+	if c.Repo.ApproveAuthzTeam == "" {
+		return fmt.Errorf("REPO_APPROVE_AUTHZ_TEAM must not be empty")
+	}
+	// Repo App credentials are optional (feature off when absent), but
+	// partial config is a misconfiguration — fail fast rather than boot
+	// a half-wired feature.
+	appSet := 0
+	for _, v := range []string{c.Repo.App.AppID, c.Repo.App.InstallationID, c.Repo.App.PrivateKeyPEM} {
+		if v != "" {
+			appSet++
+		}
+	}
+	if appSet != 0 && appSet != 3 {
+		return fmt.Errorf("repo app config is partial: set all of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY, or none")
 	}
 	return nil
 }
