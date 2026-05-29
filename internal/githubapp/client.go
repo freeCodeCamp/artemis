@@ -27,6 +27,19 @@ const (
 
 var reCouldNotClone = regexp.MustCompile(`(?i)could not clone`)
 
+// UserFacingError carries a message that is safe to surface to the
+// approving admin: curated GitHub copy with no internal endpoints,
+// installation tokens, or transport details. CreateRepo returns it on
+// the approved_failed path; every other error it returns is internal
+// and must be kept opaque at the HTTP boundary.
+type UserFacingError struct{ Msg string }
+
+func (e *UserFacingError) Error() string { return e.Msg }
+
+func userFacingf(format string, args ...any) error {
+	return &UserFacingError{Msg: fmt.Sprintf(format, args...)}
+}
+
 // ClientConfig configures the GitHub App REST client.
 type ClientConfig struct {
 	APIBase        string // default https://api.github.com
@@ -160,8 +173,10 @@ func (c *Client) installationToken(ctx context.Context) (string, error) {
 // CreateRepo creates a repo in the org — blank (POST /orgs/{org}/repos)
 // or from a template (POST /repos/{org}/{template}/generate). It checks
 // for an existing repo first, and disables Actions on private repos.
-// A non-nil error carries a user-facing message suitable for surfacing
-// to the approving admin (the dossier's approved_failed path).
+// On failure it returns a *UserFacingError when the message is safe to
+// surface to the approving admin (the approved_failed path); any other
+// error is internal (token mint, existence probe, transport, parse) and
+// the handler keeps it opaque at the HTTP boundary.
 func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, error) {
 	token, err := c.installationToken(ctx)
 	if err != nil {
@@ -173,7 +188,7 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 		return Created{}, err
 	}
 	if exists {
-		return Created{}, fmt.Errorf("repository %s/%s already exists", c.org, spec.Name)
+		return Created{}, userFacingf("repository %s/%s already exists", c.org, spec.Name)
 	}
 
 	var url string
@@ -363,17 +378,17 @@ func formatGitHubError(status int, body []byte, template string) error {
 	msg := parseGitHubMessage(body)
 	switch {
 	case status == http.StatusUnprocessableEntity && template != "" && msg != "" && reCouldNotClone.MatchString(msg):
-		return fmt.Errorf("template %q is not accessible to the Apollo-11 GitHub App (missing Contents:read); ask an org admin to grant the App access to the template repo", template)
+		return userFacingf("template %q is not accessible to the Apollo-11 GitHub App (missing Contents:read); ask an org admin to grant the App access to the template repo", template)
 	case status == http.StatusForbidden:
 		if msg != "" {
-			return fmt.Errorf("Apollo-11 GitHub App lacks permission: %s", msg)
+			return userFacingf("Apollo-11 GitHub App lacks permission: %s", msg)
 		}
-		return errors.New("Apollo-11 GitHub App lacks permission; contact an org admin")
+		return &UserFacingError{Msg: "Apollo-11 GitHub App lacks permission; contact an org admin"}
 	case status >= 500:
-		return errors.New("GitHub API temporarily unavailable; please retry shortly")
+		return &UserFacingError{Msg: "GitHub API temporarily unavailable; please retry shortly"}
 	case status >= 400 && msg != "":
-		return fmt.Errorf("GitHub API error (%d): %s", status, msg)
+		return userFacingf("GitHub API error (%d): %s", status, msg)
 	default:
-		return fmt.Errorf("GitHub API error (%d)", status)
+		return userFacingf("GitHub API error (%d)", status)
 	}
 }

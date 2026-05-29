@@ -350,7 +350,9 @@ func TestRepoApprove_OK(t *testing.T) {
 func TestRepoApprove_GitHubFailureYieldsApprovedFailed(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "boom", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
-	creator := &fakeRepoCreator{createErr: fmt.Errorf("template \"x\" is not accessible (Contents:read)")}
+	// A curated, user-facing error (*githubapp.UserFacingError) must pass
+	// through to the approving admin verbatim.
+	creator := &fakeRepoCreator{createErr: &githubapp.UserFacingError{Msg: "template \"x\" is not accessible (Contents:read)"}}
 	h := repoHandlers(t, adminRepoGH(), store, creator)
 
 	w := approveReq(h, created.ID, "boss", "atok")
@@ -360,6 +362,26 @@ func TestRepoApprove_GitHubFailureYieldsApprovedFailed(t *testing.T) {
 	assert.Equal(t, "approved_failed", resp.Outcome)
 	assert.Equal(t, "failed", resp.Request.Status)
 	assert.Contains(t, resp.Request.Error, "Contents:read")
+}
+
+func TestRepoApprove_InternalErrorSanitized(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "boom2", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	// A raw internal error from token minting / existence probe / transport
+	// (NOT a *githubapp.UserFacingError) must NOT leak to the client body.
+	creator := &fakeRepoCreator{createErr: fmt.Errorf("githubapp: token request: dial tcp 10.0.0.5:443: connect: connection refused")}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp RepoApproveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "approved_failed", resp.Outcome)
+	assert.Equal(t, "failed", resp.Request.Status)
+	assert.Equal(t, "repository creation failed", resp.Request.Error)
+	assert.NotContains(t, resp.Request.Error, "10.0.0.5")
+	assert.NotContains(t, resp.Request.Error, "dial tcp")
+	assert.NotContains(t, resp.Request.Error, "token request")
 }
 
 func TestRepoApprove_AlreadyResolved(t *testing.T) {

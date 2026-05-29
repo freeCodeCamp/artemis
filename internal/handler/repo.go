@@ -256,7 +256,19 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		Template:    approved.Template,
 	})
 	if ghErr != nil {
-		failed, mErr := h.Repos.MarkFailed(r.Context(), id, ghErr.Error())
+		msg := "repository creation failed"
+		var uf *githubapp.UserFacingError
+		if errors.As(ghErr, &uf) {
+			msg = uf.Error()
+		} else {
+			slog.Error("repo create upstream error",
+				"op", "githubapp.createrepo",
+				"err", ghErr,
+				"reqID", RequestIDFromContext(r.Context()),
+				"id", id,
+			)
+		}
+		failed, mErr := h.Repos.MarkFailed(r.Context(), id, msg)
 		if mErr != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markfailed", mErr)
 			return
