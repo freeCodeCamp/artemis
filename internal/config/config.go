@@ -101,9 +101,10 @@ type RepoConfig struct {
 	// site-registry team checks). Default "freeCodeCamp-Universe".
 	Org string
 
-	// CreateAuthzTeam gates POST /api/repo (and list/status). Default
-	// "staff". ApproveAuthzTeam gates approve/reject. Default
-	// "apollo-11-approvers". Both are slugs in Org.
+	// CreateAuthzTeam gates POST /api/repo. Default "staff". List, get,
+	// and templates are open to any GitHub bearer (no team gate).
+	// ApproveAuthzTeam gates approve/reject. Default "apollo-11-approvers".
+	// Both are slugs in Org.
 	CreateAuthzTeam  string
 	ApproveAuthzTeam string
 
