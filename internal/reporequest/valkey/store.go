@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -90,8 +91,13 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 // NewWithClient wraps an existing go-redis client (lets main.go share one
 // connection pool across the site registry and repo-request stores).
-func NewWithClient(c *redis.Client) *Store {
-	return &Store{client: c, Now: time.Now, NewID: defaultNewID}
+// Returns an error on a nil client rather than deferring to a nil-pointer
+// panic on the first store call.
+func NewWithClient(c *redis.Client) (*Store, error) {
+	if c == nil {
+		return nil, errors.New("reporequest/valkey: nil client")
+	}
+	return &Store{client: c, Now: time.Now, NewID: defaultNewID}, nil
 }
 
 // Ping verifies the connection. Cheap; safe on a liveness probe.
@@ -107,6 +113,12 @@ func defaultNewID() string {
 }
 
 func reqKey(id string) string { return "repo:" + id }
+
+// nameClaimKey normalizes a repo name for the dedupe claim set. GitHub
+// repo names are case-insensitive for uniqueness, so "MyRepo" and
+// "myrepo" must collide in the queue — claim on the lowercased name
+// (the row still stores the requester's original casing for creation).
+func nameClaimKey(name string) string { return strings.ToLower(name) }
 
 // Create writes a new pending request. Returns ErrAlreadyExists if a
 // request for the same repo name is already claimed (pending/approved/
@@ -124,7 +136,7 @@ func (s *Store) Create(ctx context.Context, req Request) (Request, error) {
 	req.UpdatedAt = now
 
 	txf := func(tx *redis.Tx) error {
-		claimed, err := tx.SIsMember(ctx, keyClaimedNames, req.Name).Result()
+		claimed, err := tx.SIsMember(ctx, keyClaimedNames, nameClaimKey(req.Name)).Result()
 		if err != nil {
 			return err
 		}
@@ -134,7 +146,7 @@ func (s *Store) Create(ctx context.Context, req Request) (Request, error) {
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.HSet(ctx, reqKey(req.ID), encodeFields(req)...)
 			pipe.SAdd(ctx, keyAllRequests, req.ID)
-			pipe.SAdd(ctx, keyClaimedNames, req.Name)
+			pipe.SAdd(ctx, keyClaimedNames, nameClaimKey(req.Name))
 			return nil
 		})
 		return err
@@ -269,7 +281,7 @@ func (s *Store) mutate(ctx context.Context, id string, fn func(Request) (Request
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.HSet(ctx, reqKey(id), encodeFields(next)...)
 			if release {
-				pipe.SRem(ctx, keyClaimedNames, next.Name)
+				pipe.SRem(ctx, keyClaimedNames, nameClaimKey(next.Name))
 			}
 			return nil
 		})

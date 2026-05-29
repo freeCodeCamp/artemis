@@ -176,3 +176,38 @@ func TestStore_ListSortedByCreatedAt(t *testing.T) {
 	assert.Equal(t, "a", list[1].Name)
 	assert.Equal(t, "b", list[2].Name)
 }
+
+func TestStore_CreateDedupeIsCaseInsensitive(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	_, err := s.Create(ctx, sampleReq("MyRepo"))
+	require.NoError(t, err)
+
+	// GitHub repo names are case-insensitive for uniqueness — differing
+	// only in case must collide in the queue, not slip through to fail
+	// at GitHub create time.
+	for _, dup := range []string{"myrepo", "MYREPO", "myRepo"} {
+		_, err := s.Create(ctx, sampleReq(dup))
+		assert.ErrorIsf(t, err, reporequest.ErrAlreadyExists,
+			"Create(%q) must collide with existing MyRepo", dup)
+	}
+}
+
+func TestStore_RejectFreesNameCaseInsensitively(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	r, err := s.Create(ctx, sampleReq("MixedCase"))
+	require.NoError(t, err)
+	_, err = s.Reject(ctx, r.ID, "admin1", "")
+	require.NoError(t, err)
+
+	// rejecting "MixedCase" frees the lowercased claim → a differently-
+	// cased resubmission succeeds.
+	_, err = s.Create(ctx, sampleReq("mixedcase"))
+	require.NoError(t, err)
+}
+
+func TestNewWithClient_NilClient(t *testing.T) {
+	_, err := valkey.NewWithClient(nil)
+	require.Error(t, err)
+}
