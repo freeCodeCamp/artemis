@@ -173,7 +173,7 @@ func repoHandlers(t *testing.T, repoGH *fakeGH, store RepoStore, creator RepoCre
 	h.GitHubApp = creator
 	h.RepoOrg = "freeCodeCamp-Universe"
 	h.RepoCreateAuthzTeam = "staff"
-	h.RepoApproveAuthzTeam = "repo-admins"
+	h.RepoApproveAuthzTeam = "apollo-11-approvers"
 	return h
 }
 
@@ -185,11 +185,11 @@ func staffRepoGH() *fakeGH {
 	}
 }
 
-// adminRepoGH: boss/atok is on the Universe "repo-admins" team.
+// adminRepoGH: boss/atok is on the Universe "apollo-11-approvers" team.
 func adminRepoGH() *fakeGH {
 	return &fakeGH{
 		tokenLogins: map[string]string{"atok": "boss"},
-		userTeams:   map[string]map[string]bool{"boss": {"repo-admins": true}},
+		userTeams:   map[string]map[string]bool{"boss": {"apollo-11-approvers": true}},
 	}
 }
 
@@ -378,7 +378,7 @@ func TestRepoApprove_AlreadyResolved(t *testing.T) {
 func TestRepoApprove_RejectsNonAdmin(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "x", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
-	// staff caller is NOT on repo-admins → 403, proving authz routes via RepoGH (§V4).
+	// staff caller is NOT on apollo-11-approvers → 403, proving authz routes via RepoGH (§V4).
 	h := repoHandlers(t, staffRepoGH(), store, &fakeRepoCreator{})
 	w := approveReq(h, created.ID, "alice", "tok")
 	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())

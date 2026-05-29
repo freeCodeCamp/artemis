@@ -17,7 +17,7 @@ func TestLoad_RepoDefaults(t *testing.T) {
 
 	assert.Equal(t, "freeCodeCamp-Universe", cfg.Repo.Org)
 	assert.Equal(t, "staff", cfg.Repo.CreateAuthzTeam)
-	assert.Equal(t, "repo-admins", cfg.Repo.ApproveAuthzTeam)
+	assert.Equal(t, "apollo-11-approvers", cfg.Repo.ApproveAuthzTeam)
 	assert.False(t, cfg.Repo.Enabled(), "repo feature must be disabled without App creds")
 }
 
@@ -66,5 +66,5 @@ func TestLoad_RepoEmptyTeamOverrideFails(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "repo-admins", cfg.Repo.ApproveAuthzTeam)
+	assert.Equal(t, "apollo-11-approvers", cfg.Repo.ApproveAuthzTeam)
 }

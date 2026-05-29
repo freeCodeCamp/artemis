@@ -103,7 +103,7 @@ type RepoConfig struct {
 
 	// CreateAuthzTeam gates POST /api/repo (and list/status). Default
 	// "staff". ApproveAuthzTeam gates approve/reject. Default
-	// "repo-admins". Both are slugs in Org.
+	// "apollo-11-approvers". Both are slugs in Org.
 	CreateAuthzTeam  string
 	ApproveAuthzTeam string
 
@@ -130,7 +130,7 @@ const (
 	defaultRegistryAuthzTeam    = "staff"
 	defaultRepoOrg              = "freeCodeCamp-Universe"
 	defaultRepoCreateAuthzTeam  = "staff"
-	defaultRepoApproveAuthzTeam = "repo-admins"
+	defaultRepoApproveAuthzTeam = "apollo-11-approvers"
 )
 
 var validLogLevels = map[string]struct{}{
