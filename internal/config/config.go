@@ -41,9 +41,8 @@ type Config struct {
 // SentryConfig holds the optional Sentry error-monitoring + tracing
 // settings. The feature is OFF unless DSN is set — an empty DSN leaves
 // the SDK uninitialised, so dev and test runs incur zero overhead and
-// no events leave the process. The DSN is not a secret (it only names
-// where to send events), so it may live in the chart values rather than
-// the sops envelope.
+// no events leave the process. The DSN is not a secret — it only names
+// where to send events.
 type SentryConfig struct {
 	// DSN is the Sentry Data Source Name. Empty disables the SDK.
 	DSN string
