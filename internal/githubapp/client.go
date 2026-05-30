@@ -168,6 +168,9 @@ func (c *Client) installationToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		if msg := parseGitHubMessage(body); msg != "" {
+			return "", fmt.Errorf("githubapp: installation token failed: status %d: %s", resp.StatusCode, msg)
+		}
 		return "", fmt.Errorf("githubapp: installation token failed: status %d", resp.StatusCode)
 	}
 	var data struct {

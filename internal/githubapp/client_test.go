@@ -75,6 +75,31 @@ func TestClient_InstallationTokenCached(t *testing.T) {
 	}
 }
 
+func TestClient_InstallationTokenSurfacesGitHubMessage(t *testing.T) {
+	const ghMsg = "'Expiration time' claim ('exp') is too far in the future"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"message":"`+ghMsg+`"}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv.URL)
+	_, err := c.installationToken(context.Background())
+	if err == nil {
+		t.Fatal("expected error on 401 token mint")
+	}
+	if !strings.Contains(err.Error(), ghMsg) {
+		t.Errorf("error %q does not surface the GitHub message %q", err.Error(), ghMsg)
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error %q should include the status code", err.Error())
+	}
+}
+
 func TestClient_CreateBlankPrivateDisablesActions(t *testing.T) {
 	var disabled int32
 	var createBody map[string]any
