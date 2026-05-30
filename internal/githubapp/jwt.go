@@ -46,13 +46,16 @@ func NewAppJWTSigner(appID, privateKeyPEM string) (*AppJWTSigner, error) {
 }
 
 // Sign returns a freshly minted App JWT. iat is back-dated by
-// appJWTClockSkew, exp is now+appJWTTTL.
+// appJWTClockSkew, exp is iat+appJWTTTL, keeping exp at now+540s — under
+// GitHub's now+600s cap so a small positive clock skew cannot trip the
+// "'exp' is too far in the future" rejection.
 func (s *AppJWTSigner) Sign() (string, error) {
 	now := s.now()
+	iat := now.Add(-appJWTClockSkew)
 	claims := jwt.RegisteredClaims{
 		Issuer:    s.appID,
-		IssuedAt:  jwt.NewNumericDate(now.Add(-appJWTClockSkew)),
-		ExpiresAt: jwt.NewNumericDate(now.Add(appJWTTTL)),
+		IssuedAt:  jwt.NewNumericDate(iat),
+		ExpiresAt: jwt.NewNumericDate(iat.Add(appJWTTTL)),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	signed, err := tok.SignedString(s.key)

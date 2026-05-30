@@ -85,7 +85,7 @@ func TestAppJWTSigner_Sign(t *testing.T) {
 	claims := jwt.RegisteredClaims{}
 	// Pin the verifier's clock to the same fixed time used to sign, so
 	// exp/iat are validated deterministically. Without WithTimeFunc the
-	// parser uses real wall-clock and the token (exp = fixed+600s) reads
+	// parser uses real wall-clock and the token (exp = fixed+540s) reads
 	// as expired whenever the suite runs >10min after `fixed` (CI flake).
 	parser := jwt.NewParser(jwt.WithTimeFunc(func() time.Time { return fixed }))
 	parsed, err := parser.ParseWithClaims(tokenStr, &claims, func(tok *jwt.Token) (any, error) {
@@ -106,7 +106,40 @@ func TestAppJWTSigner_Sign(t *testing.T) {
 	if got := claims.IssuedAt.Time; !got.Equal(fixed.Add(-60 * time.Second)) {
 		t.Errorf("iat = %v, want %v", got, fixed.Add(-60*time.Second))
 	}
-	if got := claims.ExpiresAt.Time; !got.Equal(fixed.Add(600 * time.Second)) {
-		t.Errorf("exp = %v, want %v", got, fixed.Add(600*time.Second))
+	if got := claims.ExpiresAt.Time; !got.Equal(fixed.Add(540 * time.Second)) {
+		t.Errorf("exp = %v, want %v", got, fixed.Add(540*time.Second))
+	}
+}
+
+func TestAppJWTSigner_ExpWithinGitHubTenMinuteCap(t *testing.T) {
+	key, pemStr := testRSAKeyPKCS1(t)
+	signer, err := NewAppJWTSigner("987654", pemStr)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	fixed := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	signer.now = func() time.Time { return fixed }
+
+	tokenStr, err := signer.Sign()
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	claims := jwt.RegisteredClaims{}
+	parser := jwt.NewParser(jwt.WithTimeFunc(func() time.Time { return fixed }))
+	if _, err := parser.ParseWithClaims(tokenStr, &claims, func(*jwt.Token) (any, error) {
+		return &key.PublicKey, nil
+	}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	iat := claims.IssuedAt.Time
+	exp := claims.ExpiresAt.Time
+	if d := exp.Sub(fixed); d > 600*time.Second {
+		t.Errorf("exp is %v ahead of now, exceeds GitHub's 600s cap", d)
+	}
+	if d := exp.Sub(fixed); d != 540*time.Second {
+		t.Errorf("exp-now = %v, want 540s (60s margin under the 600s cap)", d)
+	}
+	if d := exp.Sub(iat); d != 600*time.Second {
+		t.Errorf("exp-iat = %v, want 600s", d)
 	}
 }
