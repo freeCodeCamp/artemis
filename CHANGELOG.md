@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [0.5.0](https://github.com/freeCodeCamp/artemis/compare/v0.4.0...v0.5.0) (2026-05-30)
+
+
+### Features
+
+* **observability:** add Sentry monitoring ([83b5665](https://github.com/freeCodeCamp/artemis/commit/83b5665c5aa2e56b467a505dff28462868fae749))
+
 ## [0.4.0](https://github.com/freeCodeCamp/artemis/compare/v0.3.0...v0.4.0) (2026-05-30)
 
 
