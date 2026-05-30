@@ -2,6 +2,33 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [0.4.0](https://github.com/freeCodeCamp/artemis/compare/v0.3.0...v0.4.0) (2026-05-30)
+
+
+### Features
+
+* **config:** add repo-creation feature config ([a5405db](https://github.com/freeCodeCamp/artemis/commit/a5405db7b8afcfc997ad78f4faa57718a1db85fb))
+* **config:** default approve team to apollo-11-approvers ([46a26b1](https://github.com/freeCodeCamp/artemis/commit/46a26b126b8a9c71def615e805eed33e8fd94294))
+* **githubapp:** add repo-creation REST client ([af8fea1](https://github.com/freeCodeCamp/artemis/commit/af8fea1596b2de9387e6dec1a37dae7a380f57cc))
+* **githubapp:** mint Apollo-11 App JWT (RS256) ([4da60fb](https://github.com/freeCodeCamp/artemis/commit/4da60fb5b46e1df5d33f1247c708f512115f558b))
+* **handler:** add repo-request endpoints ([68c7fe8](https://github.com/freeCodeCamp/artemis/commit/68c7fe8a60c09659490029c5d5e4e945f118142a))
+* **reporequest:** add repo-request domain types ([bc0519a](https://github.com/freeCodeCamp/artemis/commit/bc0519a58b40d8b1b389a0532f34808f6bb1e03d))
+* **reporequest:** add valkey-backed request queue store ([27321bb](https://github.com/freeCodeCamp/artemis/commit/27321bbcb34f7fbdcd07afe6fca8a8838a75eb5d))
+* **server:** wire repo-request routes and app client ([6fad4ae](https://github.com/freeCodeCamp/artemis/commit/6fad4ae167ba3ccbbe5b8af3cfa56cfa19cc2a45))
+
+
+### Bug Fixes
+
+* **repo:** 400 on malformed reject body ([8b6ab04](https://github.com/freeCodeCamp/artemis/commit/8b6ab04edc75c55c9338e1790ca3c49939039c3c))
+* **repo:** keep internal GitHub errors out of approve body ([8af2d6c](https://github.com/freeCodeCamp/artemis/commit/8af2d6cc263c7714ea6d43649e20f426d33e6fd6))
+* **repo:** recover approvals stranded after repo creation ([1165559](https://github.com/freeCodeCamp/artemis/commit/11655591671ba636e1307f81a157d901078458d2))
+* **reporequest:** case-insensitive name dedupe + nil guard ([685c035](https://github.com/freeCodeCamp/artemis/commit/685c0350e4fb4f5735ee0155e628c59c91c76d0a))
+
+
+### Performance Improvements
+
+* **repo:** cache accessible template list with TTL ([3a8461a](https://github.com/freeCodeCamp/artemis/commit/3a8461a591c169df19e936d414f8afa0cd8a28d5))
+
 ## [0.3.0] - 2026-05-23
 
 ### Features
