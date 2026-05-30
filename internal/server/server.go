@@ -29,16 +29,28 @@ import (
 	"net/http"
 
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/getsentry/sentry-go"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // New returns a chi router fully wired with the Handlers' endpoints +
-// the standard middleware chain (RequestID → AccessLog → Recoverer).
+// the standard middleware chain (Sentry → RequestID → AccessLog →
+// Recoverer).
 // metricsGatherer, when non-nil, is mounted at /metrics; pass nil to
 // disable the endpoint (useful for tests that don't care).
 func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler {
 	r := chi.NewRouter()
+	// Mount the Sentry request middleware only when a client is actually
+	// configured (Init ran with a DSN). When Sentry is disabled this adds
+	// zero per-request overhead and the chain behaves exactly as before.
+	// Outermost so the hub + tracing transaction wrap everything;
+	// Repanic:false because the inner Recoverer owns panic->500 and
+	// captures the panic to the hub itself.
+	if sentry.CurrentHub().Client() != nil {
+		r.Use(sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle)
+	}
 	r.Use(handler.RequestID)
 	r.Use(handler.AccessLog)
 	r.Use(handler.Recoverer)

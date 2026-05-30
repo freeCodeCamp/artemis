@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
@@ -296,6 +297,13 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 				"reqID", RequestIDFromContext(r.Context()),
 				"id", id,
 			)
+			if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+				hub.WithScope(func(scope *sentry.Scope) {
+					scope.SetTag("op", "githubapp.createrepo")
+					scope.SetFingerprint([]string{"upstream", "githubapp.createrepo"})
+					hub.CaptureException(ghErr)
+				})
+			}
 		}
 		failed, mErr := h.Repos.MarkFailed(durCtx, id, msg)
 		if mErr != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
@@ -38,6 +39,7 @@ var (
 
 func main() {
 	if err := run(); err != nil {
+		observability.CaptureFatal(err) // no-op unless Sentry was initialised
 		slog.Error("artemis: fatal", "err", err)
 		os.Exit(1)
 	}
@@ -54,7 +56,35 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	configureLogger(cfg.LogLevel)
+	// Sentry must come up before the logger so the slog bridge can tee
+	// into it. Release ties every event to the build identity already
+	// injected via -ldflags. Empty DSN => disabled, flush is a no-op.
+	release := fmt.Sprintf("artemis@%s+%s", version, commit)
+	flushSentry, sentryEnabled, err := observability.Init(observability.Config{
+		DSN:              cfg.Sentry.DSN,
+		Environment:      cfg.Sentry.Environment,
+		Release:          release,
+		TracesSampleRate: cfg.Sentry.TracesSampleRate,
+		Debug:            cfg.Sentry.Debug,
+	})
+	if err != nil {
+		return fmt.Errorf("init sentry: %w", err)
+	}
+	defer flushSentry()
+
+	logLevel := parseLogLevel(cfg.LogLevel)
+	var sentryLog slog.Handler
+	if sentryEnabled {
+		sentryLog = observability.NewSlogHandler(logLevel)
+	}
+	configureLogger(logLevel, sentryLog)
+	if sentryEnabled {
+		slog.Info("sentry enabled",
+			"environment", cfg.Sentry.Environment,
+			"release", release,
+			"tracesSampleRate", cfg.Sentry.TracesSampleRate,
+		)
+	}
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -141,7 +171,10 @@ func run() error {
 	metricsReg := prometheus.NewRegistry()
 	metrics := handler.NewMetrics(metricsReg)
 	handler.SetMetrics(metrics)
-	registryReader.SetOnRefreshError(func(error) { metrics.RegistryRefreshFailures.Inc() })
+	registryReader.SetOnRefreshError(func(err error) {
+		metrics.RegistryRefreshFailures.Inc()
+		observability.CaptureBackground("registry.refresh", err)
+	})
 
 	h := &handler.Handlers{
 		GH:                   ghClient,
@@ -226,18 +259,26 @@ func openRegistry(ctx context.Context, cfg *config.Config) (*valkey.Store, *valk
 	return store, reader, func() { _ = store.Close() }, nil
 }
 
-func configureLogger(level string) {
-	var lvl slog.Level
+func parseLogLevel(level string) slog.Level {
 	switch level {
 	case "debug":
-		lvl = slog.LevelDebug
+		return slog.LevelDebug
 	case "warn":
-		lvl = slog.LevelWarn
+		return slog.LevelWarn
 	case "error":
-		lvl = slog.LevelError
+		return slog.LevelError
 	default:
-		lvl = slog.LevelInfo
+		return slog.LevelInfo
 	}
-	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+}
+
+// configureLogger installs the JSON stdout handler. When extra is
+// non-nil (the Sentry Logs bridge) records are teed to both — stdout
+// stays the source of truth for Loki while Sentry mirrors them.
+func configureLogger(lvl slog.Level, extra slog.Handler) {
+	var h slog.Handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+	if extra != nil {
+		h = observability.NewMultiHandler(h, extra)
+	}
 	slog.SetDefault(slog.New(h))
 }

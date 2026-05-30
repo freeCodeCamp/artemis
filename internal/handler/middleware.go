@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/getsentry/sentry-go"
 )
 
 // Per-key unexported struct{} types are the idiomatic Go pattern for
@@ -112,6 +113,12 @@ func (h *Handlers) RequireGitHubBearer(next http.Handler) http.Handler {
 		}
 		ctx := context.WithValue(r.Context(), ctxKeyLogin, login)
 		ctx = context.WithValue(ctx, ctxKeyToken, token)
+		// Identify the caller on the request-scoped Sentry hub by GitHub
+		// login only — never the bearer token. SendDefaultPII is off, so
+		// no IP/headers are attached automatically.
+		if hub := sentry.GetHubFromContext(ctx); hub != nil {
+			hub.Scope().SetUser(sentry.User{Username: login})
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -157,6 +164,12 @@ func RequestID(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-ID", id)
 		ctx := context.WithValue(r.Context(), ctxKeyReqID, id)
+		// Tag the per-request Sentry hub so every event/transaction is
+		// filterable by request id — the join key across Sentry, the
+		// stdout logs, and the X-Request-ID response header.
+		if hub := sentry.GetHubFromContext(ctx); hub != nil {
+			hub.Scope().SetTag("request_id", id)
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -166,6 +179,11 @@ func Recoverer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				// Capture to the request-scoped Sentry hub with a full
+				// stacktrace before we swallow the panic into a 500.
+				if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+					hub.RecoverWithContext(r.Context(), rec)
+				}
 				slog.Error("panic in handler",
 					"path", r.URL.Path,
 					"reqID", RequestIDFromContext(r.Context()),

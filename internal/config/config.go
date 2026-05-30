@@ -35,6 +35,31 @@ type Config struct {
 	LogLevel           string
 	Registry           RegistryConfig
 	Repo               RepoConfig
+	Sentry             SentryConfig
+}
+
+// SentryConfig holds the optional Sentry error-monitoring + tracing
+// settings. The feature is OFF unless DSN is set — an empty DSN leaves
+// the SDK uninitialised, so dev and test runs incur zero overhead and
+// no events leave the process. The DSN is not a secret (it only names
+// where to send events), so it may live in the chart values rather than
+// the sops envelope.
+type SentryConfig struct {
+	// DSN is the Sentry Data Source Name. Empty disables the SDK.
+	DSN string
+
+	// Environment tags every event (e.g. "production", "staging").
+	// Maps to the standard ENVIRONMENT env var; empty is allowed.
+	Environment string
+
+	// TracesSampleRate is the fraction of transactions sampled for
+	// performance monitoring, in [0,1]. Default 0.2. Health, readiness
+	// and metrics probes are always dropped regardless of this value.
+	TracesSampleRate float64
+
+	// Debug turns on the SDK's own debug logging to stderr. Off by
+	// default; useful when diagnosing why events are not arriving.
+	Debug bool
 }
 
 // R2Config holds the Cloudflare R2 (S3-compatible) credentials and target bucket.
@@ -127,11 +152,12 @@ func (r RepoConfig) Enabled() bool {
 }
 
 const (
-	minSigningKeyBytes          = 32
-	defaultRegistryAuthzTeam    = "staff"
-	defaultRepoOrg              = "freeCodeCamp-Universe"
-	defaultRepoCreateAuthzTeam  = "staff"
-	defaultRepoApproveAuthzTeam = "apollo-11-approvers"
+	minSigningKeyBytes            = 32
+	defaultRegistryAuthzTeam      = "staff"
+	defaultRepoOrg                = "freeCodeCamp-Universe"
+	defaultRepoCreateAuthzTeam    = "staff"
+	defaultRepoApproveAuthzTeam   = "apollo-11-approvers"
+	defaultSentryTracesSampleRate = 0.2
 )
 
 var validLogLevels = map[string]struct{}{
@@ -172,6 +198,9 @@ func Load() (*Config, error) {
 			Org:              defaultRepoOrg,
 			CreateAuthzTeam:  defaultRepoCreateAuthzTeam,
 			ApproveAuthzTeam: defaultRepoApproveAuthzTeam,
+		},
+		Sentry: SentryConfig{
+			TracesSampleRate: defaultSentryTracesSampleRate,
 		},
 	}
 
@@ -256,6 +285,19 @@ func Load() (*Config, error) {
 	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
 	cfg.Repo.App.PrivateKeyPEM = os.Getenv("GH_APP_PRIVATE_KEY")
 
+	cfg.Sentry.DSN = os.Getenv("SENTRY_DSN")
+	cfg.Sentry.Environment = os.Getenv("ENVIRONMENT")
+	if v, ok := os.LookupEnv("SENTRY_TRACES_SAMPLE_RATE"); ok {
+		rate, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SENTRY_TRACES_SAMPLE_RATE %q: must be a number in [0,1]", v)
+		}
+		cfg.Sentry.TracesSampleRate = rate
+	}
+	if v, ok := os.LookupEnv("SENTRY_DEBUG"); ok {
+		cfg.Sentry.Debug = v == "1" || strings.EqualFold(v, "true")
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -330,6 +372,9 @@ func (c *Config) validate() error {
 	}
 	if appSet != 0 && appSet != 3 {
 		return fmt.Errorf("repo app config is partial: set all of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY, or none")
+	}
+	if c.Sentry.TracesSampleRate < 0 || c.Sentry.TracesSampleRate > 1 {
+		return fmt.Errorf("invalid SENTRY_TRACES_SAMPLE_RATE %v: must be in [0,1]", c.Sentry.TracesSampleRate)
 	}
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/getsentry/sentry-go"
 )
 
 // GitHubAuthenticator is the subset of *auth.GitHubClient used by the
@@ -139,6 +140,19 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 	)
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
+	}
+	// Capture as a Sentry issue grouped by op, so r2.put.upload failures
+	// cluster apart from valkey.register etc. The raw err goes to Sentry
+	// (internal, access-controlled) even though the client sees only the
+	// opaque message; request headers carrying tokens are scrubbed in
+	// observability.scrubEvent before delivery.
+	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+		hub.WithScope(func(scope *sentry.Scope) {
+			scope.SetTag("op", op)
+			scope.SetTag("error_code", code)
+			scope.SetFingerprint([]string{"upstream", op})
+			hub.CaptureException(err)
+		})
 	}
 	writeError(w, status, code, "upstream call failed")
 }

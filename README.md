@@ -46,6 +46,34 @@ Auth headers (`/api/*` except `/healthz`):
 | `ALIAS_PREVIEW_KEY_FORMAT`    | `<site>/preview`             | R2 alias key for preview env                   |
 | `DEPLOY_PREFIX_FORMAT`        | `<site>/deploys/<ts>-<sha>/` | R2 prefix per immutable deploy                 |
 | `LOG_LEVEL`                   | `info`                       | `debug`, `info`, `warn`, `error`               |
+| `SENTRY_DSN`                  | _(empty → off)_              | Sentry DSN; empty disables the SDK entirely    |
+| `ENVIRONMENT`                 | _(empty)_                    | Sentry environment tag (`production`, …)       |
+| `SENTRY_TRACES_SAMPLE_RATE`   | `0.2`                        | Tracing sample rate `[0,1]`; probes dropped    |
+| `SENTRY_DEBUG`                | `false`                      | Log SDK internals to stderr (`1`/`true`)       |
+
+## Observability
+
+Three signals, all optional and independently degradable:
+
+- **Structured logs** — JSON to stdout via `log/slog` (`LOG_LEVEL`). Source of truth; scraped by Loki. Probe paths (`/healthz`, `/readyz`, `/metrics`) are silenced.
+- **Prometheus** — `/metrics` exposes deploy/promote counters, `artemis_upstream_error_total{op}`, `artemis_alias_drift_total`, and `artemis_registry_refresh_failures_total`.
+- **Sentry** — errors, panics, performance traces, and a slog→Sentry Logs tee. **Off unless `SENTRY_DSN` is set**, so dev/test runs send nothing.
+
+When enabled, Sentry captures:
+
+| Signal              | Source                                                             |
+| ------------------- | ------------------------------------------------------------------ |
+| Issues (errors)     | `writeUpstreamError` (tagged + fingerprinted by `op`), repo create |
+| Issues (panics)     | the `Recoverer` middleware, with stacktrace                        |
+| Issues (background) | registry refresh failures; boot/fatal errors                       |
+| Performance traces  | per request (`SENTRY_TRACES_SAMPLE_RATE`; probes always dropped)   |
+| Logs                | every slog record (`>= LOG_LEVEL`), teed alongside stdout          |
+
+Each event carries `release = artemis@<version>+<commit>`, the GitHub `login` as user, and the `request_id` tag — the same value returned in the `X-Request-ID` response header, so a Sentry issue joins directly to the stdout log line and the caller's request.
+
+**Secrets never leave the process.** `SendDefaultPII` is off, and each of the three egress channels has its own scrubber (sharing one secret-aware core so they cannot diverge). Issues + transactions (`BeforeSend` / `BeforeSendTransaction`) strip the `Authorization`, `Cookie`, `Proxy-Authorization`, and `X-Forwarded-For` headers, the request body, the query string, and breadcrumbs, and redact secret-shaped substrings from exception values and messages. Logs (`BeforeSendLog` — the SDK does **not** run `BeforeSend` on log envelopes) redact the body and drop attributes keyed as secret or client IP. So GitHub bearer tokens, deploy-session JWTs, and upload bytes never ship on any channel. The R2 admin key, JWT signing key, and GitHub App private key are never attached (the SDK does not send the process env); the redaction pass is defense in depth over already-audited error wrapping.
+
+> Deployment note: the artemis pod needs egress to the Sentry ingest host. If a Cilium network policy restricts egress, add the host to the allowlist in the `infra` chart.
 
 ## R2 layout
 
