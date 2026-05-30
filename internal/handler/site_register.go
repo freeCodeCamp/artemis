@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"time"
@@ -106,6 +107,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("site.register", "slug", req.Slug, "teams", teams, "by", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusCreated, toSiteRow(site))
 }
 
@@ -200,6 +202,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	slog.Info("site.delete", "slug", slug, "reqID", RequestIDFromContext(r.Context()))
 	w.WriteHeader(http.StatusNoContent)
 }
 

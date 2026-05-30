@@ -166,6 +166,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.create", err)
 		return
 	}
+	slog.Info("repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "requestedBy", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusCreated, toRepoRow(created))
 }
 
@@ -244,6 +245,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	login := LoginFromContext(r.Context())
+	slog.Info("repo.approve.start", "id", id, "approver", login, "reqID", RequestIDFromContext(r.Context()))
 
 	approved, err := h.Repos.Approve(r.Context(), id, login)
 	resume := false
@@ -269,6 +271,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		approved, resume = cur, true
+		slog.Warn("repo.approve.resume_stranded_approved", "id", id, "reqID", RequestIDFromContext(r.Context()))
 	default:
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.approve", err)
 		return
@@ -300,8 +303,10 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.As(ghErr, &existsErr):
 			msg = existsErr.Error()
+			slog.Warn("repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", "repo_exists", "reqID", RequestIDFromContext(r.Context()))
 		case errors.As(ghErr, &uf):
 			msg = uf.Error()
+			slog.Warn("repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", uf.Error(), "reqID", RequestIDFromContext(r.Context()))
 		default:
 			slog.Error("repo create upstream error",
 				"op", "githubapp.createrepo",
@@ -331,6 +336,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markactive", mErr)
 		return
 	}
+	slog.Info("repo.approve.created", "id", id, "name", active.Name, "url", created.URL, "approver", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: toRepoRow(active)})
 }
 
@@ -371,6 +377,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	slog.Info("repo.reject.recorded", "id", id, "approver", login, "reason", body.Reason, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
 }
 

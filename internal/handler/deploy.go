@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
@@ -210,6 +211,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("deploy.finalize.live", "site", claims.Site, "deployId", deployID, "mode", mode, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(claims.Site, mode),
 		"deployId": deployID,
