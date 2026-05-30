@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # release-please reads Conventional Commits on main and maintains a release
+  # PR that bumps version.txt + CHANGELOG.md. Merging that PR cuts the git tag
+  # + GitHub Release, sets release_created, and triggers the publish job below.
+  # bump-minor-pre-major (config) keeps the pre-1.0 "MINOR may break" caveat.
+  release-please:
+    name: Maintain release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      version: ${{ steps.rp.outputs.version }}
+      major: ${{ steps.rp.outputs.major }}
+      minor: ${{ steps.rp.outputs.minor }}
+      sha: ${{ steps.rp.outputs.sha }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-and-push:
+    name: Build & Push Image
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Build the exact commit release-please tagged, not the branch HEAD,
+          # so the image content matches the published tag + GitHub Release.
+          ref: ${{ needs.release-please.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+
+      - name: Log in to the GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5
+        with:
+          images: ghcr.io/freecodecamp/artemis
+          # Registry tags are bare semver (no leading "v") per OCI convention;
+          # release-please's `version`/`major`/`minor` outputs are already
+          # v-stripped (the git tag keeps the "v": vX.Y.Z). sha-<full-sha> is
+          # the immutable audit anchor; latest tracks the newest release.
+          tags: |
+            type=raw,value=${{ needs.release-please.outputs.version }}
+            type=raw,value=${{ needs.release-please.outputs.major }}.${{ needs.release-please.outputs.minor }}
+            type=sha,format=long
+            type=raw,value=latest
+
+      - name: Cache Docker layers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-artemis-${{ needs.release-please.outputs.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-artemis-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          # VERSION = bare semver, COMMIT = the tagged release commit SHA.
+          # Embedded via -X main.version / -X main.commit (startup log line
+          # `artemis: starting version=X.Y.Z commit=<sha>`).
+          build-args: |
+            VERSION=${{ needs.release-please.outputs.version }}
+            COMMIT=${{ needs.release-please.outputs.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache

@@ -1,10 +1,12 @@
 # Releasing artemis
 
-This file is the operator playbook for cutting a new version of artemis. Reader: a maintainer with push rights to the artemis repo. Downstream-deployment pin updates (helm/kustomize/ArgoCD/etc.) are operator-specific and live outside this file.
+This file is the operator playbook for cutting a new version of artemis. Reader: a maintainer with merge rights to the artemis repo. Downstream-deployment pin updates (helm/kustomize/ArgoCD/etc.) are operator-specific and live outside this file.
+
+Releases are driven by [release-please](https://github.com/googleapis/release-please) in **manifest mode**. The operator does not tag by hand — release-please reads Conventional Commits on `main` and maintains a standing **release PR**; merging that PR cuts the tag, publishes the GitHub Release, and triggers the image build.
 
 ## Versioning rule
 
-artemis follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) with a single **pre-1.0 caveat**: until `v1.0.0` is cut, a `MINOR` bump may introduce a backwards-incompatible API change. Each such change is called out in the changelog with a `**[BREAKING]**` marker and a one-line migration note.
+artemis follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) with a single **pre-1.0 caveat**: until `v1.0.0` is cut, a `MINOR` bump may introduce a backwards-incompatible API change. This caveat is enforced mechanically by `bump-minor-pre-major: true` in `release-please-config.json` — a `BREAKING CHANGE` commit on a `0.x` line bumps `MINOR`, not `MAJOR`.
 
 Post-1.0, the standard semver contract applies: `MAJOR` for breaks, `MINOR` for additive features, `PATCH` for fixes.
 
@@ -16,77 +18,56 @@ Post-1.0, the standard semver contract applies: `MAJOR` for breaks, `MINOR` for 
 | `chore(deps):`                                                                     | `PATCH`      | `PATCH`       |
 | `test(*):`, `docs(*):`, `ci(*):`, `chore(*):` (non-deps), `style(*):`, `build(*):` | _no release_ | _no release_  |
 
-A release is cut **only** when the unreleased section contains at least one `feat`, `fix`, `perf`, `refactor`, or `chore(deps)` commit. Pure test/docs/chore drift accumulates until a behaviour-bearing commit ships alongside it.
+`feat:` deliberately bumps `MINOR` even pre-1.0 — `bump-patch-for-minor-pre-major` is left **off**. A release PR is opened **only** when the unreleased commits contain at least one releasable change (`feat`, `fix`, `perf`, `refactor`, `chore(deps)`); pure test/docs/chore drift accumulates silently until a behaviour-bearing commit ships alongside it.
 
 ### `v1.0.0` trigger
 
-Cut `v1.0.0` when the API surface is declared frozen — practically, after `GET /api/site/{site}/alias/{mode}`, the sites-registry CRUD, and the deploy/promote/rollback verbs have settled in production CLI use without breaking changes for two consecutive minor releases.
+Cut `v1.0.0` when the API surface is declared frozen — practically, after `GET /api/site/{site}/alias/{mode}`, the sites-registry CRUD, and the deploy/promote/rollback verbs have settled in production CLI use without breaking changes for two consecutive minor releases. Force it with a `Release-As: 1.0.0` footer (see step 2) or by editing the release PR.
 
 ## Release flow
 
-The flow is operator-driven, not CI-driven. CI only validates and publishes; the human picks the bump.
+The flow is PR-driven. release-please computes the bump from commit history; the operator owns the **merge** and may override the version before merging.
 
-### 1. Audit the unreleased section
+### 1. Review the release PR
 
-```bash
-# What would the next release contain?
-git-cliff --unreleased
+Every push to `main` runs `.github/workflows/release.yml`. The `release-please` job opens or updates a PR titled `chore(main): release X.Y.Z` that:
 
-# What does git-cliff think the next version should be?
-git-cliff --bumped-version
-```
+- bumps `version.txt` and `.release-please-manifest.json` to the computed version, and
+- regenerates the `CHANGELOG.md` section from the Conventional Commits since the last release.
 
-`--bumped-version` reads `[bump]` rules in `cliff.toml`. Use it as a sanity check, not as the authoritative bump — the operator owns the final call (e.g. `--bumped-version` cannot detect a quiet behaviour break behind a `refactor` prefix).
+Read the PR. The diff **is** the proposed release: the version bump and the rendered changelog. Edit the changelog body directly in the PR if wording needs work — release-please preserves manual edits to its PR.
 
-### 2. Tag locally
+### 2. (Optional) Override the version
 
-```bash
-# Replace v0.2.0 with the version chosen in step 1.
-git tag -a v0.2.0 -m "v0.2.0 — <one-line summary>"
-```
-
-Tags are **annotated** (`-a`), never lightweight, so the tag carries authorship + a message that survives `git describe`.
-
-### 3. Regenerate `CHANGELOG.md`
+release-please's computed bump is a strong default, not gospel — it cannot detect a quiet behaviour break hidden behind a `refactor:` prefix. To force a specific version, add a `Release-As:` footer to any commit that lands on `main` (e.g. an empty commit), then let release-please re-groom the PR:
 
 ```bash
-git-cliff -o CHANGELOG.md
-git add CHANGELOG.md
-git commit -m "chore(release): v0.2.0"
+git commit --allow-empty -m "chore: release 0.4.0" -m "Release-As: 0.4.0"
+git push origin main
 ```
 
-The release-chore commit lands on `main` **after** the tag so the tag itself points at the last behaviour-bearing commit (operators looking at `helm list` will see a release version that ties cleanly to the deployed code, not to a doc commit).
+### 3. Merge the PR
 
-If the tag now points at the wrong commit because step 3 was committed first, fix with:
+Merging the release PR is the release. release-please then:
 
-```bash
-git tag -d v0.2.0
-git tag -a v0.2.0 HEAD~1 -m "v0.2.0 — <summary>"
-```
+- creates the **annotated git tag** `vX.Y.Z` at the merge commit (`include-v-in-tags` defaults true — git tags carry the `v`),
+- publishes the **GitHub Release** with the changelog body, and
+- emits `release_created=true`, which gates the `build-and-push` job in the same workflow run.
 
-### 4. Push
+> **Note — tag points at the release commit.** Unlike a hand-tagged flow, the tag sits on the release-PR merge commit (version bump + changelog), not on the last behaviour-bearing commit. The image is still built from that exact commit (`checkout` uses `ref: ${{ needs.release-please.outputs.sha }}`), so `helm list` version ↔ deployed code stays consistent.
 
-```bash
-git push --atomic origin main v0.2.0
-```
+### 4. Image build (automatic)
 
-`--atomic` pushes the branch update and the tag in a single transaction. Splitting the push into two commands (`git push origin main` followed by `git push origin v0.2.0`) can briefly expose the tag before the underlying commit has fully propagated across GitHub's edge nodes. When that race wins, `docker/metadata-action`'s default-branch lookup (`enable={{is_default_branch}}` → `repos.get()` Octokit call) intermittently returns `401 Bad credentials` even though the workflow's `GITHUB_TOKEN` scopes are correct. Atomic push avoids the race; see §6.
+The `build-and-push` job builds and pushes to `ghcr.io/freecodecamp/artemis`, emitting tags:
 
-The tag push fires `.github/workflows/docker-ghcr.yml` (trigger: `push.tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']`). The workflow:
+- `0.2.0` (full semver — release-please's `version` output is already **v-stripped**; the registry tag is the bare semver),
+- `0.2` (major.minor, for floating point-release pins — same bare form),
+- `sha-<full-sha>` (immutable audit anchor; always emitted),
+- `latest` (newest release; the job only runs on a real release, so `latest` always maps to a published version).
 
-- builds + pushes the image to `ghcr.io/freecodecamp/artemis`, emitting tags
-  - `0.2.0` (full semver — `docker/metadata-action` `type=semver,pattern={{version}}` **strips the leading `v`** from the git tag; the registry tag is the bare semver)
-  - `0.2` (major.minor, for floating point-release pins — same `v`-stripping)
-  - `sha-<full-sha>` (immutable audit anchor; always emitted)
-- embeds `VERSION=0.2.0` + `COMMIT=<full-sha>` into the binary via `-X main.version=… -X main.commit=…` (visible in the startup log line `artemis: starting version=0.2.0 commit=<sha>`).
+It embeds `VERSION=0.2.0` + `COMMIT=<full-sha>` into the binary via `-X main.version=… -X main.commit=…` (visible in the startup log line `artemis: starting version=0.2.0 commit=<sha>`).
 
-Git tag (`v0.2.0`) and registry tag (`0.2.0`) intentionally differ by the `v` prefix — this is the docker/metadata-action default and the broader OCI-registry convention. Don't try to "fix" the asymmetry by adding `pattern=v{{version}}`; downstream tooling (helm, kustomize, ArgoCD image-updater) expects the bare semver.
-
-The same workflow is also `workflow_dispatch`-able for ad-hoc builds off `main`; those emit only `sha-<full-sha>`, `main`, and `latest` — never a semver tag.
-
-GitHub Release notes are auto-published as part of the same `docker-ghcr.yml` run. After the build+push job finishes the image, two extra steps fire only on tag push: `Generate release notes` invokes `orhun/git-cliff-action` with `--current --strip all` to render the body for the tag directly from the commit log + `cliff.toml`, and `Publish GitHub Release` (softprops/action-gh-release pinned to v3.0.0) creates / updates the Release object with that body. The action is idempotent — re-running against an existing release updates rather than failing.
-
-The notes come from the git history walked between the previous tag and the current one — **not** from `CHANGELOG.md` state at the tagged commit. Decoupling them lets the release-chore commit (`chore(release): vX.Y.Z`) land **after** the tag without breaking the workflow: the tag can keep pointing at the last behaviour-bearing commit per step 2 while still publishing a populated GH Release body. The checkout step uses `fetch-depth: 0` + `fetch-tags: true` so git-cliff can resolve `--current` against the full ref graph.
+Git tag (`v0.2.0`) and registry tag (`0.2.0`) intentionally differ by the `v` prefix — release-please's git-tag default plus the OCI-registry convention. Do **not** "fix" the asymmetry; downstream tooling (helm, kustomize, ArgoCD image-updater) expects the bare semver.
 
 ### 5. Downstream deployment pin
 
@@ -97,23 +78,26 @@ docker buildx imagetools inspect ghcr.io/freecodecamp/artemis:X.Y.Z \
   --format '{{.Manifest.Digest}}'
 ```
 
-The pin format is `image.tag: "X.Y.Z@sha256:<digest>"` — bare semver (no `v`-prefix; docker/metadata-action strips it from the git tag per OCI convention) plus the `@sha256:<digest>` immutable anchor. Never use `tag: X.Y.Z` without the digest, and never use `tag: latest` in production. Deployment mechanics (helm/kustomize/ArgoCD/etc.) are operator-specific.
+The pin format is `image.tag: "X.Y.Z@sha256:<digest>"` — bare semver (no `v`-prefix) plus the `@sha256:<digest>` immutable anchor. Never use `tag: X.Y.Z` without the digest, and never use `tag: latest` in production. Deployment mechanics (helm/kustomize/ArgoCD/etc.) are operator-specific.
 
-## 6. CD remediation
+## Configuration
 
-If `docker-ghcr.yml` fails at the **Derive image tags** step with `##[error]Bad credentials`, the cause is almost always a transient GitHub API race, not a credential or workflow bug. Check the **Set up job → GITHUB_TOKEN Permissions** group of the failed run — if it shows the expected scopes (`Contents: write`, `Metadata: read`, `Packages: write`), do not edit the workflow. Re-run the failed jobs:
+| File                            | Role                                                                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `release-please-config.json`    | `release-type: simple`, `bump-minor-pre-major: true`. Language-agnostic — no Node/JS toolchain pulled in.                                  |
+| `.release-please-manifest.json` | Source of truth for the current released version (`{".": "X.Y.Z"}`). release-please reads + bumps this.                                    |
+| `version.txt`                   | The `simple` strategy mirrors the current version here; embedded nowhere at runtime (build identity comes from the workflow's build-args). |
+| `.github/workflows/release.yml` | The `release-please` + `build-and-push` two-job workflow.                                                                                  |
+
+## CD remediation
+
+Because the build runs in the **same workflow run** as release-please (gated on `release_created`), the older tag-push race that produced intermittent `Bad credentials` at the metadata step no longer applies. If `build-and-push` fails for a transient reason, re-run the failed jobs — the tag and release already exist, so the replay is idempotent:
 
 ```bash
 gh run rerun <run-id> --failed
 ```
 
-The replayed run reuses the same ref + commit, so `metadata-action`'s default-branch lookup has had time to converge across edge nodes and succeeds. Confirmed empirically on 2026-05-23: v0.3.0 push failed at metadata-action, `gh run rerun --failed` succeeded on the first replay with no code change. Adopting `git push --atomic` (step 4 above) makes this race vanishingly rare in the first place.
-
-If the rerun also fails, escalate — it is no longer a race:
-
-1. Compare `GITHUB_TOKEN Permissions` against the workflow's declared scopes.
-1. `gh api repos/freeCodeCamp/artemis/actions/permissions/workflow` to confirm `default_workflow_permissions: write`.
-1. Check for upstream regressions: `gh api repos/docker/metadata-action/releases` for fixes published after the failure timestamp.
+If release-please itself fails to open or update the PR, confirm the `release-please` job has `contents: write` + `pull-requests: write` and that repo settings allow Actions to create PRs (`Settings → Actions → General → Allow GitHub Actions to create and approve pull requests`).
 
 ## Active deprecations
 
@@ -127,20 +111,19 @@ Telemetry consumers can grep `event=promote.legacy_bare` in the artemis access l
 
 ## Hotfix on an older release line
 
-If `v0.3.x` is current but `v0.2.x` is still pinned in some downstream deployment and needs a fix:
+If `v0.3.x` is current but `v0.2.x` is still pinned in some downstream deployment and needs a fix, run release-please against a maintenance branch:
 
-1. `git checkout -b release/v0.2.x v0.2.0`
-1. Cherry-pick the fix commit.
-1. `git tag -a v0.2.1 -m "v0.2.1 — <hotfix summary>"`
-1. Push branch + tag. Open a PR to merge `release/v0.2.x` back into `main` (so the fix also lands forward).
+1. `git checkout -b release/v0.2.x v0.2.0` and push the branch.
+1. Cherry-pick the fix commit(s) onto it.
+1. Point a release-please run at that branch via the `target-branch` input (a dedicated `workflow_dispatch` invocation or a branch-scoped workflow). release-please opens a release PR against `release/v0.2.x`; merging it cuts `v0.2.1` and builds the image off that branch.
+1. Open a PR to merge `release/v0.2.x` back into `main` so the fix also lands forward.
 
 ## Tooling
 
-- **`git-cliff`** (Rust): reads Conventional Commits, emits `CHANGELOG.md`. Install via `brew install git-cliff` (macOS) or `cargo install git-cliff`. Config: [`cliff.toml`](./cliff.toml) at repo root.
-- **No Node toolchain** is required. `release-please` was evaluated and rejected to keep this Go service free of JS dev-deps.
+- **`release-please`** runs entirely in CI via [`googleapis/release-please-action`](https://github.com/googleapis/release-please-action) (pinned by SHA in `release.yml`). **No local tool and no Node toolchain** are required for a release — the action is a runner-side dependency, not a repo dev-dep. `release-please` (the `node`/`go`/etc. release-types) was configured as `simple` precisely to keep this Go service free of language-specific manifest coupling.
 
 ## Why this shape
 
-- Operators map deployed releases back to changelog entries via the semver portion of `image.tag`. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) gives a `grep`-able human anchor that survives future tag-format migrations. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — intentional, consistent with docker/metadata-action defaults.
-- Tags are local-cheap, push-discoverable. CI builds run only on `v*` tag push, so a typo in step 2 is a soft failure (the tag can be deleted before step 4).
-- `MINOR-may-break` pre-1.0 is preserved in this file (not just in `cliff.toml` comments) because operators reading `CHANGELOG.md` need to see the caveat without diving into the tooling config.
+- Operators map deployed releases back to changelog entries via the semver portion of `image.tag`. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) gives a `grep`-able human anchor. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — intentional, consistent with release-please + docker/metadata-action defaults.
+- The release decision is a **PR review**, not a local tag. The diff under review is exactly what ships (version + changelog), so a mistaken bump is caught before merge, and the version can be overridden with a `Release-As:` footer.
+- `MINOR-may-break` pre-1.0 is enforced by `bump-minor-pre-major: true` and documented here so operators reading `CHANGELOG.md` see the caveat without diving into the tooling config.
