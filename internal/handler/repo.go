@@ -279,7 +279,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	// the row stays `approved` with no resolution (PR freeCodeCamp/artemis#3, #2).
 	durCtx := context.WithoutCancel(r.Context())
 
-	created, ghErr := h.GitHubApp.CreateRepo(r.Context(), githubapp.CreateSpec{
+	created, ghErr := h.GitHubApp.CreateRepo(durCtx, githubapp.CreateSpec{
 		Name:        approved.Name,
 		Private:     approved.Visibility == reporequest.VisibilityPrivate,
 		Description: approved.Description,

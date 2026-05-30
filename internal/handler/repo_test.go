@@ -153,11 +153,13 @@ type fakeRepoCreator struct {
 	templatesErr error
 	lastSpec     githubapp.CreateSpec
 	createCalls  int
+	createCtxErr error
 }
 
-func (f *fakeRepoCreator) CreateRepo(_ context.Context, spec githubapp.CreateSpec) (githubapp.Created, error) {
+func (f *fakeRepoCreator) CreateRepo(ctx context.Context, spec githubapp.CreateSpec) (githubapp.Created, error) {
 	f.lastSpec = spec
 	f.createCalls++
+	f.createCtxErr = ctx.Err()
 	if f.createErr != nil {
 		return githubapp.Created{}, f.createErr
 	}
@@ -419,6 +421,7 @@ func TestRepoApprove_DurableWriteIgnoresClientCancel(t *testing.T) {
 	h.RepoApprove(w, r)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NoError(t, creator.createCtxErr, "CreateRepo must run on a cancel-immune context")
 	require.NotNil(t, store.lastMarkActiveCtx)
 	assert.NoError(t, store.lastMarkActiveCtx.Err(), "durable MarkActive must run on a cancel-immune context")
 	got, _ := store.Get(context.Background(), created.ID)
