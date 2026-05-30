@@ -100,6 +100,34 @@ func TestClient_InstallationTokenSurfacesGitHubMessage(t *testing.T) {
 	}
 }
 
+func TestClient_ListTemplatesSurfacesGitHubMessageNoLeak(t *testing.T) {
+	const ghMsg = "Resource not accessible by integration"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
+			tokenResponse(w)
+		case strings.Contains(r.URL.Path, "/repos"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"message":"`+ghMsg+`"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv.URL)
+	_, err := c.ListTemplates(context.Background())
+	if err == nil {
+		t.Fatal("expected error on 403 list repos")
+	}
+	if !strings.Contains(err.Error(), ghMsg) {
+		t.Errorf("error %q does not surface the GitHub message", err.Error())
+	}
+	if strings.Contains(err.Error(), "Bearer ") || strings.Contains(err.Error(), "ghs_") {
+		t.Errorf("error %q leaks a secret", err.Error())
+	}
+}
+
 func TestClient_CreateBlankPrivateDisablesActions(t *testing.T) {
 	var disabled int32
 	var createBody map[string]any

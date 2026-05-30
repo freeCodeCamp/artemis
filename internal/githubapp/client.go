@@ -296,6 +296,9 @@ func (c *Client) repoExists(ctx context.Context, token, name string) (bool, stri
 	case http.StatusNotFound:
 		return false, "", nil
 	default:
+		if msg := parseGitHubMessage(body); msg != "" {
+			return false, "", fmt.Errorf("githubapp: existence check status %d: %s", resp.StatusCode, msg)
+		}
 		return false, "", fmt.Errorf("githubapp: existence check status %d", resp.StatusCode)
 	}
 }
@@ -306,13 +309,13 @@ func (c *Client) repoExists(ctx context.Context, token, name string) (bool, stri
 func (c *Client) disableActions(ctx context.Context, token, name string) {
 	url := fmt.Sprintf("%s/repos/%s/%s/actions/permissions", c.apiBase, c.org, name)
 	body, _ := json.Marshal(map[string]any{"enabled": false})
-	resp, _, err := c.do(ctx, http.MethodPut, url, token, body)
+	resp, respBody, err := c.do(ctx, http.MethodPut, url, token, body)
 	if err != nil {
 		slog.Warn("githubapp: disable actions request failed", "repo", name, "err", err)
 		return
 	}
 	if resp.StatusCode >= 300 {
-		slog.Warn("githubapp: disable actions non-2xx", "repo", name, "status", resp.StatusCode)
+		slog.Warn("githubapp: disable actions non-2xx", "repo", name, "status", resp.StatusCode, "ghMessage", parseGitHubMessage(respBody))
 	}
 }
 
@@ -344,6 +347,9 @@ func (c *Client) ListTemplates(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusOK {
+			if msg := parseGitHubMessage(body); msg != "" {
+				return nil, fmt.Errorf("githubapp: list repos status %d: %s", resp.StatusCode, msg)
+			}
 			return nil, fmt.Errorf("githubapp: list repos status %d", resp.StatusCode)
 		}
 		var repos []struct {
@@ -441,9 +447,10 @@ func formatGitHubError(status int, body []byte, template string) error {
 		return &UserFacingError{Msg: "Apollo-11 GitHub App lacks permission; contact an org admin"}
 	case status >= 500:
 		return &UserFacingError{Msg: "GitHub API temporarily unavailable; please retry shortly", Retryable: true}
-	case status >= 400 && msg != "":
-		return userFacingf("GitHub API error (%d): %s", status, msg)
 	default:
+		if msg != "" {
+			return userFacingf("GitHub API error (%d): %s", status, msg)
+		}
 		return userFacingf("GitHub API error (%d)", status)
 	}
 }
