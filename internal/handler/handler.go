@@ -117,6 +117,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError writes a JSON error envelope.
 func writeError(w http.ResponseWriter, status int, code, message string) {
+	if sw, ok := w.(*statusWriter); ok {
+		sw.errCode = code
+	}
 	writeJSON(w, status, map[string]any{
 		"error": map[string]string{
 			"code":    code,

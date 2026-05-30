@@ -213,3 +213,10 @@ func TestExtractBearer_MalformedHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteError_StashesErrCodeForAccessLog(t *testing.T) {
+	sw := &statusWriter{ResponseWriter: httptest.NewRecorder(), code: 200}
+	writeError(sw, http.StatusForbidden, "user_unauthorized", "nope")
+	assert.Equal(t, "user_unauthorized", sw.errCode)
+	assert.Equal(t, http.StatusForbidden, sw.code)
+}

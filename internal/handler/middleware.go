@@ -216,20 +216,25 @@ func AccessLog(next http.Handler) http.Handler {
 		if _, skip := accessLogSkipPaths[r.URL.Path]; skip {
 			return
 		}
-		slog.Info("http",
+		args := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.code,
 			"durMS", time.Since(start).Milliseconds(),
 			"reqID", RequestIDFromContext(r.Context()),
 			"login", LoginFromContext(r.Context()),
-		)
+		}
+		if sw.code >= 400 && sw.errCode != "" {
+			args = append(args, "errCode", sw.errCode)
+		}
+		slog.Info("http", args...)
 	})
 }
 
 type statusWriter struct {
 	http.ResponseWriter
-	code int
+	code    int
+	errCode string
 }
 
 func (s *statusWriter) WriteHeader(code int) {
