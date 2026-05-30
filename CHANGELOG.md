@@ -2,6 +2,24 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [0.6.0](https://github.com/freeCodeCamp/artemis/compare/v0.5.0...v0.6.0) (2026-05-30)
+
+
+### Features
+
+* **githubapp:** surface GitHub message across remaining error paths ([5412053](https://github.com/freeCodeCamp/artemis/commit/5412053ead3f570d28f6ed3746f04a90e46e59a5))
+* **githubapp:** surface GitHub message in install-token error ([ae39198](https://github.com/freeCodeCamp/artemis/commit/ae3919815776c4cddb727b57c8f94dd75a52ee20))
+* **handler:** structured outcome logs across repo/site/deploy endpoints ([0304df7](https://github.com/freeCodeCamp/artemis/commit/0304df7dcee038a92fa5bf71413713c74ce12b1a))
+* **handler:** surface error code on every request access log line ([703b102](https://github.com/freeCodeCamp/artemis/commit/703b102d17328adf65db8f16898965fe1430d4a9))
+* **repo:** bound description length server-side ([02036d8](https://github.com/freeCodeCamp/artemis/commit/02036d808ff963337648652b16ee94c883832564))
+
+
+### Bug Fixes
+
+* **githubapp:** cap App JWT exp at now+540s under GitHub 600s limit ([afca8af](https://github.com/freeCodeCamp/artemis/commit/afca8afc2690c746d1ada379d71cd21f77e2c878))
+* **repo:** create repo on durable context, surviving client disconnect ([f02bf42](https://github.com/freeCodeCamp/artemis/commit/f02bf4245d536df599fd21be59d5b8eb104cea74))
+* **repo:** leave row approved on transient error during resume ([fc46e35](https://github.com/freeCodeCamp/artemis/commit/fc46e35b8d567e4b814703ecb9f8e76b5b70e975))
+
 ## [0.5.0](https://github.com/freeCodeCamp/artemis/compare/v0.4.0...v0.5.0) (2026-05-30)
 
 
