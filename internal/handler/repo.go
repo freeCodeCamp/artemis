@@ -291,6 +291,10 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		created, ghErr = githubapp.Created{URL: existsErr.URL}, nil
 	}
 	if ghErr != nil {
+		if resume && githubapp.IsTransient(ghErr) {
+			writeUpstreamError(w, r, http.StatusServiceUnavailable, "repo_create_retryable", "githubapp.createrepo.transient", ghErr)
+			return
+		}
 		msg := "repository creation failed"
 		var uf *githubapp.UserFacingError
 		switch {

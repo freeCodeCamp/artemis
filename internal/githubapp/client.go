@@ -37,9 +37,20 @@ var reCouldNotClone = regexp.MustCompile(`(?i)could not clone`)
 // installation tokens, or transport details. CreateRepo returns it on
 // the approved_failed path; every other error it returns is internal
 // and must be kept opaque at the HTTP boundary.
-type UserFacingError struct{ Msg string }
+type UserFacingError struct {
+	Msg       string
+	Retryable bool
+}
 
 func (e *UserFacingError) Error() string { return e.Msg }
+
+func IsTransient(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var uf *UserFacingError
+	return errors.As(err, &uf) && uf.Retryable
+}
 
 func userFacingf(format string, args ...any) error {
 	return &UserFacingError{Msg: fmt.Sprintf(format, args...)}
@@ -429,7 +440,7 @@ func formatGitHubError(status int, body []byte, template string) error {
 		}
 		return &UserFacingError{Msg: "Apollo-11 GitHub App lacks permission; contact an org admin"}
 	case status >= 500:
-		return &UserFacingError{Msg: "GitHub API temporarily unavailable; please retry shortly"}
+		return &UserFacingError{Msg: "GitHub API temporarily unavailable; please retry shortly", Retryable: true}
 	case status >= 400 && msg != "":
 		return userFacingf("GitHub API error (%d): %s", status, msg)
 	default:

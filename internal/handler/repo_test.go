@@ -447,6 +447,20 @@ func TestRepoApprove_ResumesStrandedApproved(t *testing.T) {
 	assert.Equal(t, "https://github.com/freeCodeCamp-Universe/live", resp.Request.URL)
 }
 
+func TestRepoApprove_ResumeTransientErrorLeavesApproved(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "transient", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	_, err := store.Approve(context.Background(), created.ID, "boss")
+	require.NoError(t, err)
+	creator := &fakeRepoCreator{createErr: &githubapp.UserFacingError{Msg: "GitHub API temporarily unavailable; please retry shortly", Retryable: true}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	got, _ := store.Get(context.Background(), created.ID)
+	assert.Equal(t, reporequest.StatusApproved, got.Status, "transient error must leave the row approved for a later retry")
+}
+
 func TestRepoApprove_FirstAttemptExistsFails(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "dup", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
