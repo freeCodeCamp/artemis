@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -251,6 +252,7 @@ func TestRepoCreate_ValidationErrors(t *testing.T) {
 		{"bad name", RepoCreateRequest{Name: "-bad"}, "invalid_name"},
 		{"bad visibility", RepoCreateRequest{Name: "ok", Visibility: "secret"}, "invalid_visibility"},
 		{"bad template", RepoCreateRequest{Name: "ok", Template: "../escape"}, "invalid_template"},
+		{"long description", RepoCreateRequest{Name: "ok", Description: strings.Repeat("d", 351)}, "invalid_description"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

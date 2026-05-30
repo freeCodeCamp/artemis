@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/reporequest"
 )
+
+const maxRepoDescriptionLen = 350
 
 // RepoStore is the repo-request queue contract used by the repo handlers.
 type RepoStore interface {
@@ -137,6 +140,11 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Template != "" && !reporequest.ValidName(req.Template) {
 		writeError(w, http.StatusBadRequest, "invalid_template", "template must be an existing org repo name")
+		return
+	}
+	if utf8.RuneCountInString(req.Description) > maxRepoDescriptionLen {
+		writeError(w, http.StatusBadRequest, "invalid_description",
+			"description must be 350 characters or fewer")
 		return
 	}
 
