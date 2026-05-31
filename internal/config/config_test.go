@@ -269,3 +269,43 @@ func TestLoad_GHAPIBaseOverrideWarn(t *testing.T) {
 	assert.Contains(t, out, override)
 	assert.Contains(t, out, defaultGitHubAPIBase)
 }
+
+func TestLoad_RejectsNonNumericAppIDs(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("GH_APP_ID", "3.287718e+06")
+	t.Setenv("GH_APP_INSTALLATION_ID", "121700722")
+	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GH_APP_ID")
+}
+
+func TestLoad_RejectsNonNumericInstallationID(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("GH_APP_ID", "3287718")
+	t.Setenv("GH_APP_INSTALLATION_ID", "1.21700722e+08")
+	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GH_APP_INSTALLATION_ID")
+}
+
+func TestLoad_AcceptsNumericAppIDs(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("GH_APP_ID", "3287718")
+	t.Setenv("GH_APP_INSTALLATION_ID", "121700722")
+	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, "3287718", cfg.Repo.App.AppID)
+	assert.Equal(t, "121700722", cfg.Repo.App.InstallationID)
+}

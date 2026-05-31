@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -165,6 +166,8 @@ var validLogLevels = map[string]struct{}{
 	"warn":  {},
 	"error": {},
 }
+
+var ghAppNumericIDRe = regexp.MustCompile(`^[0-9]+$`)
 
 // Load reads environment variables, applies defaults, validates required
 // fields, and returns a populated Config. It returns an error naming the
@@ -371,6 +374,14 @@ func (c *Config) validate() error {
 	}
 	if appSet != 0 && appSet != 3 {
 		return fmt.Errorf("repo app config is partial: set all of GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY, or none")
+	}
+	if appSet == 3 {
+		if !ghAppNumericIDRe.MatchString(c.Repo.App.AppID) {
+			return fmt.Errorf("GH_APP_ID must be digits only, got %q (seal it as a string in sops; a YAML int renders as scientific notation through Helm quote)", c.Repo.App.AppID)
+		}
+		if !ghAppNumericIDRe.MatchString(c.Repo.App.InstallationID) {
+			return fmt.Errorf("GH_APP_INSTALLATION_ID must be digits only, got %q", c.Repo.App.InstallationID)
+		}
 	}
 	if c.Sentry.TracesSampleRate < 0 || c.Sentry.TracesSampleRate > 1 {
 		return fmt.Errorf("invalid SENTRY_TRACES_SAMPLE_RATE %v: must be in [0,1]", c.Sentry.TracesSampleRate)
