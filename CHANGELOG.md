@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `RELEASING.md`.
 
+## [0.6.1](https://github.com/freeCodeCamp/artemis/compare/v0.6.0...v0.6.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **config:** reject non-numeric GH App ids at boot ([a6635c2](https://github.com/freeCodeCamp/artemis/commit/a6635c233f42f1d5edba12b9ab7506918bab599f))
+
 ## [0.6.0](https://github.com/freeCodeCamp/artemis/compare/v0.5.0...v0.6.0) (2026-05-30)
 
 
