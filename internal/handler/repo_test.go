@@ -145,6 +145,18 @@ func (f *fakeRepoStore) MarkFailed(_ context.Context, id, msg string) (reporeque
 	})
 }
 
+func (f *fakeRepoStore) Delete(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.byID[id]
+	if !ok {
+		return reporequest.ErrNotFound
+	}
+	delete(f.byID, id)
+	delete(f.names, r.Name)
+	return nil
+}
+
 // fakeRepoCreator is a stub RepoCreator.
 type fakeRepoCreator struct {
 	created      githubapp.Created
@@ -154,6 +166,15 @@ type fakeRepoCreator struct {
 	lastSpec     githubapp.CreateSpec
 	createCalls  int
 	createCtxErr error
+	exists       bool
+	existsURL    string
+	existsErr    error
+	existsCalls  int
+}
+
+func (f *fakeRepoCreator) RepoExists(_ context.Context, _ string) (bool, string, error) {
+	f.existsCalls++
+	return f.exists, f.existsURL, f.existsErr
 }
 
 func (f *fakeRepoCreator) CreateRepo(ctx context.Context, spec githubapp.CreateSpec) (githubapp.Created, error) {
@@ -560,4 +581,94 @@ func TestRepoTemplates_SuccessAndFailSoft(t *testing.T) {
 	var fs RepoTemplatesResponse
 	require.NoError(t, json.Unmarshal(wErr.Body.Bytes(), &fs))
 	assert.Empty(t, fs.Templates)
+}
+
+func deleteReq(h *Handlers, id, login, token string) *httptest.ResponseRecorder {
+	r := withID(httptest.NewRequest(http.MethodDelete, "/api/repo/"+id, nil).
+		WithContext(contextWithLogin(context.Background(), login, token)), id)
+	w := httptest.NewRecorder()
+	h.RepoDelete(w, r)
+	return w
+}
+
+func seedActive(t *testing.T, store *fakeRepoStore, name string) reporequest.Request {
+	t.Helper()
+	ctx := context.Background()
+	created, err := store.Create(ctx, reporequest.Request{Name: name, Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	require.NoError(t, err)
+	active, err := store.MarkActive(ctx, created.ID, "https://github.com/freeCodeCamp-Universe/"+name)
+	require.NoError(t, err)
+	return active
+}
+
+func TestRepoDelete_RemovesAndReleasesClaim(t *testing.T) {
+	store := newFakeRepoStore()
+	ctx := context.Background()
+	created, _ := store.Create(ctx, reporequest.Request{Name: "x", Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	h := repoHandlers(t, adminRepoGH(), store, &fakeRepoCreator{})
+
+	w := deleteReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	_, err := store.Get(ctx, created.ID)
+	assert.ErrorIs(t, err, reporequest.ErrNotFound)
+
+	_, err = store.Create(ctx, reporequest.Request{Name: "x", Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	assert.NoError(t, err)
+}
+
+func TestRepoDelete_RejectsNonApprover(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "x", Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	h := repoHandlers(t, staffRepoGH(), store, &fakeRepoCreator{})
+
+	w := deleteReq(h, created.ID, "alice", "tok")
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
+func TestRepoDelete_NotFound(t *testing.T) {
+	h := repoHandlers(t, adminRepoGH(), newFakeRepoStore(), &fakeRepoCreator{})
+	w := deleteReq(h, "req_missing", "boss", "atok")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestRepoCreate_ReconcilesStaleActiveClaim(t *testing.T) {
+	store := newFakeRepoStore()
+	stale := seedActive(t, store, "ghost")
+	creator := &fakeRepoCreator{exists: false}
+	h := repoHandlers(t, staffRepoGH(), store, creator)
+
+	body, _ := json.Marshal(RepoCreateRequest{Name: "ghost"})
+	w := doReq(h, http.MethodPost, "/api/repo", body, "alice", "tok", (*Handlers).RepoCreate)
+
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Equal(t, 1, creator.existsCalls)
+	_, err := store.Get(context.Background(), stale.ID)
+	assert.ErrorIs(t, err, reporequest.ErrNotFound)
+}
+
+func TestRepoCreate_KeepsClaimWhenRepoStillExists(t *testing.T) {
+	store := newFakeRepoStore()
+	seedActive(t, store, "live")
+	creator := &fakeRepoCreator{exists: true, existsURL: "https://github.com/freeCodeCamp-Universe/live"}
+	h := repoHandlers(t, staffRepoGH(), store, creator)
+
+	body, _ := json.Marshal(RepoCreateRequest{Name: "live"})
+	w := doReq(h, http.MethodPost, "/api/repo", body, "alice", "tok", (*Handlers).RepoCreate)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, 1, creator.existsCalls)
+}
+
+func TestRepoCreate_KeepsPendingClaimWithoutProbe(t *testing.T) {
+	store := newFakeRepoStore()
+	_, _ = store.Create(context.Background(), reporequest.Request{Name: "pend", Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	creator := &fakeRepoCreator{}
+	h := repoHandlers(t, staffRepoGH(), store, creator)
+
+	body, _ := json.Marshal(RepoCreateRequest{Name: "pend"})
+	w := doReq(h, http.MethodPost, "/api/repo", body, "alice", "tok", (*Handlers).RepoCreate)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, 0, creator.existsCalls)
 }

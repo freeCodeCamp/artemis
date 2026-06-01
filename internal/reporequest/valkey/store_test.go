@@ -77,6 +77,30 @@ func TestStore_CreateDuplicateName(t *testing.T) {
 	assert.ErrorIs(t, err, reporequest.ErrAlreadyExists)
 }
 
+func TestStore_Delete(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	created, err := s.Create(ctx, sampleReq("gone"))
+	require.NoError(t, err)
+
+	require.NoError(t, s.Delete(ctx, created.ID))
+
+	_, err = s.Get(ctx, created.ID)
+	assert.ErrorIs(t, err, reporequest.ErrNotFound)
+
+	_, err = s.Create(ctx, sampleReq("gone"))
+	assert.NoError(t, err)
+}
+
+func TestStore_DeleteNotFound(t *testing.T) {
+	s := newStore(t)
+	assert.ErrorIs(
+		t,
+		s.Delete(context.Background(), "req_missing"),
+		reporequest.ErrNotFound,
+	)
+}
+
 func TestStore_RejectReleasesName(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -26,12 +27,14 @@ type RepoStore interface {
 	Reject(ctx context.Context, id, approver, reason string) (reporequest.Request, error)
 	MarkActive(ctx context.Context, id, url string) (reporequest.Request, error)
 	MarkFailed(ctx context.Context, id, errMsg string) (reporequest.Request, error)
+	Delete(ctx context.Context, id string) error
 }
 
 // RepoCreator is the GitHub App contract used on approve + templates.
 type RepoCreator interface {
 	CreateRepo(ctx context.Context, spec githubapp.CreateSpec) (githubapp.Created, error)
 	ListTemplates(ctx context.Context) ([]string, error)
+	RepoExists(ctx context.Context, name string) (bool, string, error)
 }
 
 // RepoRow is the camelCase JSON shape for a repo request — stable across
@@ -146,14 +149,18 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	login := LoginFromContext(r.Context())
-	created, err := h.Repos.Create(r.Context(), reporequest.Request{
+	newReq := reporequest.Request{
 		Name:        req.Name,
 		Owner:       h.RepoOrg,
 		Visibility:  vis,
 		Description: req.Description,
 		Template:    req.Template,
 		RequestedBy: login,
-	})
+	}
+	created, err := h.Repos.Create(r.Context(), newReq)
+	if errors.Is(err, reporequest.ErrAlreadyExists) && h.reconcileStaleClaim(r, req.Name) {
+		created, err = h.Repos.Create(r.Context(), newReq)
+	}
 	if err != nil {
 		if errors.Is(err, reporequest.ErrAlreadyExists) {
 			writeError(w, http.StatusConflict, "already_exists",
@@ -165,6 +172,33 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "requestedBy", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusCreated, toRepoRow(created))
+}
+
+func (h *Handlers) reconcileStaleClaim(r *http.Request, name string) bool {
+	all, err := h.Repos.List(r.Context())
+	if err != nil {
+		return false
+	}
+	for _, req := range all {
+		if !strings.EqualFold(req.Name, name) {
+			continue
+		}
+		switch req.Status {
+		case reporequest.StatusActive:
+			exists, _, gErr := h.GitHubApp.RepoExists(r.Context(), req.Name)
+			if gErr != nil || exists {
+				return false
+			}
+			if dErr := h.Repos.Delete(r.Context(), req.ID); dErr != nil {
+				return false
+			}
+			slog.Warn("repo.create.reconciled_stale_claim", "id", req.ID, "name", req.Name, "reqID", RequestIDFromContext(r.Context()))
+			return true
+		case reporequest.StatusPending, reporequest.StatusApproved:
+			return false
+		}
+	}
+	return false
 }
 
 // ReposList implements GET /api/repos — lists requests. Query params:
@@ -375,6 +409,23 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("repo.reject.recorded", "id", id, "approver", login, "reason", body.Reason, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
+}
+
+func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
+	if err := h.requireRepoTeam(w, r, h.RepoApproveAuthzTeam); err != nil {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.Repos.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, reporequest.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
+			return
+		}
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.delete", err)
+		return
+	}
+	slog.Info("repo.delete.removed", "id", id, "approver", LoginFromContext(r.Context()), "reqID", RequestIDFromContext(r.Context()))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // RepoTemplates implements GET /api/repo/templates — the allowlisted

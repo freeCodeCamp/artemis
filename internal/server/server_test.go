@@ -96,6 +96,7 @@ func (stubRepoStore) MarkActive(context.Context, string, string) (reporequest.Re
 func (stubRepoStore) MarkFailed(context.Context, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+func (stubRepoStore) Delete(context.Context, string) error { return nil }
 
 type stubRepoCreator struct{}
 
@@ -103,6 +104,9 @@ func (stubRepoCreator) CreateRepo(context.Context, githubapp.CreateSpec) (github
 	return githubapp.Created{}, nil
 }
 func (stubRepoCreator) ListTemplates(context.Context) ([]string, error) { return nil, nil }
+func (stubRepoCreator) RepoExists(context.Context, string) (bool, string, error) {
+	return false, "", nil
+}
 
 type stubRepoGH struct{}
 

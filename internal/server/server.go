@@ -87,6 +87,7 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 				r.Get("/repo/{id}", h.RepoGet)
 				r.Post("/repo/{id}/approve", h.RepoApprove)
 				r.Post("/repo/{id}/reject", h.RepoReject)
+				r.Delete("/repo/{id}", h.RepoDelete)
 			}
 		})
 

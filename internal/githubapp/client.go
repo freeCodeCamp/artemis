@@ -280,6 +280,14 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 	return Created{FullName: repo.FullName, URL: repo.HTMLURL, Visibility: vis}, nil
 }
 
+func (c *Client) RepoExists(ctx context.Context, name string) (bool, string, error) {
+	token, err := c.installationToken(ctx)
+	if err != nil {
+		return false, "", err
+	}
+	return c.repoExists(ctx, token, name)
+}
+
 func (c *Client) repoExists(ctx context.Context, token, name string) (bool, string, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", c.apiBase, c.org, name)
 	resp, body, err := c.do(ctx, http.MethodGet, url, token, nil)

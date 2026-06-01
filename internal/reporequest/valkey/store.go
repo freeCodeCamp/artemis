@@ -256,6 +256,30 @@ func (s *Store) MarkFailed(ctx context.Context, id, errMsg string) (Request, err
 	})
 }
 
+func (s *Store) Delete(ctx context.Context, id string) error {
+	txf := func(tx *redis.Tx) error {
+		vals, err := tx.HGetAll(ctx, reqKey(id)).Result()
+		if err != nil {
+			return err
+		}
+		if len(vals) == 0 {
+			return ErrNotFound
+		}
+		cur, err := decodeRequest(id, vals)
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Del(ctx, reqKey(id))
+			pipe.SRem(ctx, keyAllRequests, id)
+			pipe.SRem(ctx, keyClaimedNames, nameClaimKey(cur.Name))
+			return nil
+		})
+		return err
+	}
+	return s.watch(ctx, txf, reqKey(id), keyClaimedNames)
+}
+
 // mutate applies fn to the current row inside a WATCH/MULTI transaction.
 // fn returns the next row, whether to release the name claim, and an
 // error to abort. updated_at is stamped automatically.
