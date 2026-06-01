@@ -2,6 +2,16 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [0.7.1](https://github.com/freeCodeCamp/artemis/compare/v0.7.0...v0.7.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **handler:** cap json request body sizes ([2859d1f](https://github.com/freeCodeCamp/artemis/commit/2859d1fab3788f6e098b36f098384c853e57d6fd))
+* **handler:** raise readyz probe timeout to 5s ([7490776](https://github.com/freeCodeCamp/artemis/commit/749077638779fbb390db0f99e7897472430bc5b2))
+* **handler:** run readyz probes concurrently ([238c51e](https://github.com/freeCodeCamp/artemis/commit/238c51e45ab679e99ce4287985666800e964cbcb))
+* **handler:** validate rollback target deploy id ([c5bd8c1](https://github.com/freeCodeCamp/artemis/commit/c5bd8c1edc6fe0c3149ba2e623327f6d674224fa))
+
 ## [0.7.0](https://github.com/freeCodeCamp/artemis/compare/v0.6.1...v0.7.0) (2026-06-01)
 
 
