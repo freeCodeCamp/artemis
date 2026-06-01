@@ -73,6 +73,10 @@ lint: ## go vet (CI also runs golangci-lint)
 run: ## Boot artemis locally — expects .env (loaded by direnv)
 	$(GO) run ./cmd/artemis
 
+.PHONY: preflight
+preflight: ## Smoke-test Apollo-11 App creds against GitHub (reads GH_APP_* env)
+	$(GO) run ./cmd/preflight
+
 .PHONY: image
 image: ## docker build — multi-stage distroless
 	docker build \
