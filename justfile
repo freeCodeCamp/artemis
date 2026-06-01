@@ -76,6 +76,22 @@ run:
 preflight:
     {{go}} run ./cmd/preflight
 
+# Boot the full local stack (valkey + minio + fakegithub + artemis)
+compose-up:
+    docker compose up -d --build
+
+# Tear down the local stack and its volumes
+compose-down:
+    docker compose down -v
+
+# Tail artemis logs from the running local stack
+compose-logs:
+    docker compose logs -f artemis
+
+# Full repo create->approve->list E2E against the local stack
+smoke:
+    ./scripts/smoke.sh
+
 # docker build — multi-stage distroless
 image:
     docker build \

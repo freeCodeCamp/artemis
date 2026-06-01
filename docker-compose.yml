@@ -1,0 +1,73 @@
+name: artemis-local
+
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --address ":9000"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until mc alias set local http://minio:9000 minioadmin minioadmin; do
+          echo 'waiting for minio'; sleep 1;
+        done;
+        mc mb --ignore-existing local/universe-static-apps-01;
+        echo 'bucket ready';
+
+  fakegithub:
+    build:
+      context: .
+      dockerfile: Dockerfile.fakegithub
+    environment:
+      FAKE_GH_ADDR: ":9001"
+      FAKE_GH_ORG: "freeCodeCamp-Universe"
+      FAKE_GH_USER: "smoke-bot"
+      FAKE_GH_TEAMS: "staff,apollo-11-approvers"
+      FAKE_GH_APP_ID: "123"
+      FAKE_GH_APP_PUBLIC_KEY: "${FAKE_GH_APP_PUBLIC_KEY:-}"
+      FAKE_GH_TEMPLATES: "universe-static-template"
+
+  artemis:
+    build:
+      context: .
+    depends_on:
+      valkey:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+      fakegithub:
+        condition: service_started
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "debug"
+      R2_ENDPOINT: "http://minio:9000"
+      R2_ACCESS_KEY_ID: "minioadmin"
+      R2_SECRET_ACCESS_KEY: "minioadmin"
+      R2_BUCKET: "universe-static-apps-01"
+      VALKEY_ADDR: "valkey:6379"
+      GH_API_BASE: "http://fakegithub:9001"
+      GH_ORG: "freeCodeCamp-Universe"
+      GH_REPO_ORG: "freeCodeCamp-Universe"
+      GH_CLIENT_ID: "Iv1.fakelocalclientid"
+      JWT_SIGNING_KEY: "local-smoke-jwt-signing-key-not-secret-32b"
+      GH_APP_ID: "123"
+      GH_APP_INSTALLATION_ID: "456"
+      GH_APP_PRIVATE_KEY: "${GH_APP_PRIVATE_KEY:-}"
+    ports:
+      - "8080:8080"

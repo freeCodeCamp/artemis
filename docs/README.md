@@ -128,6 +128,28 @@ just image            # docker build
 just                  # list all recipes
 ```
 
+## Local stack (docker-compose)
+
+A fully offline stack — no real GitHub, no real R2, no secrets — for exercising the repo command surface end to end. `docker-compose.yml` wires four services:
+
+| Service      | Image / build            | Role                                                               |
+| ------------ | ------------------------ | ------------------------------------------------------------------ |
+| `valkey`     | `valkey/valkey:8-alpine` | Registry + name-claim store                                        |
+| `minio`      | `minio/minio`            | S3-compatible R2 stand-in (path-style; `minio-setup` seeds bucket) |
+| `fakegithub` | `Dockerfile.fakegithub`  | In-memory GitHub API double (`cmd/fakegithub`)                     |
+| `artemis`    | `Dockerfile`             | The service under test, pointed at the three fakes via env         |
+
+`cmd/fakegithub` validates the App JWT (RS256 signature + `iss` + ≤600s `exp` cap, like real GitHub) and serves the identity (`/user`, `/user/teams`, team membership) and App (`access_tokens`, repo create/generate/get/list/contents) endpoints artemis calls. One staff user (`smoke-bot`) is a member of `staff` + `apollo-11-approvers`.
+
+```sh
+just smoke         # mint ephemeral App keypair, boot stack, run E2E, tear down
+just compose-up    # boot the stack and leave it running
+just compose-logs  # tail artemis logs
+just compose-down  # tear down + drop volumes
+```
+
+`just smoke` mints a throwaway RSA keypair (private → artemis `GH_APP_PRIVATE_KEY`, public → `fakegithub`), then asserts `readyz → whoami → templates → repo create (pending) → approve (App creates repo → active) → list`. Set `KEEP_STACK=1` to leave the stack up after the run for inspection.
+
 ## Integration testing
 
 End-to-end suite under `internal/integration/`. Build-tagged behind `integration` so it stays out of `just test`. Hits a live, deployed artemis over HTTPS and exercises the full deploy lifecycle:
