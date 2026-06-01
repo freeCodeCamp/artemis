@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -58,8 +55,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SitePromoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSONOptional(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
 	req.DeployID = strings.TrimSpace(req.DeployID)
@@ -167,8 +163,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SiteRollbackRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
 	req.To = strings.TrimSpace(req.To)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,6 +51,17 @@ func TestSiteRegister_HappyPath(t *testing.T) {
 	assert.Equal(t, "alice", got.CreatedBy)
 	assert.False(t, got.CreatedAt.IsZero())
 	assert.True(t, got.CreatedAt.Equal(got.UpdatedAt))
+}
+
+func TestSiteRegister_413OnOversizedBody(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+
+	pad := strings.Repeat("a", 70<<10)
+	body := []byte(`{"slug":"example","teams":["` + pad + `"]}`)
+	w := callRegister(h, body, "alice", "tok")
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"code":"too_large"`)
 }
 
 func TestSiteRegister_DefaultsToAuthzTeamWhenTeamsEmpty(t *testing.T) {

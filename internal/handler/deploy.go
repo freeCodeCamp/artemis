@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"mime"
@@ -38,8 +37,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	token := GitHubTokenFromContext(r.Context())
 
 	var req DeployInitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxManifestBodyBytes) {
 		return
 	}
 	if req.Site == "" || req.SHA == "" {
@@ -173,8 +171,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req DeployFinalizeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxManifestBodyBytes) {
 		return
 	}
 	mode, err := normalizeMode(req.Mode)

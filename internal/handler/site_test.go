@@ -188,6 +188,23 @@ func TestSiteRollback_MissingTo(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestSitePromote_413OnOversizedBody(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	h, _ := newTestHandlers(t, gh, standardSites(), newFakeR2())
+
+	pad := strings.Repeat("a", 70<<10)
+	body := []byte(`{"deployId":"` + pad + `"}`)
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
+}
+
 func TestSiteRollback_RejectsInvalidDeployID(t *testing.T) {
 	gh := &fakeGH{
 		tokenLogins: map[string]string{"tok": "alice"},

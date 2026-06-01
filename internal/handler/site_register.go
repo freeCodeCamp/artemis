@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -73,8 +72,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SiteRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
 	if !slugRe.MatchString(req.Slug) {
@@ -139,8 +137,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SiteUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
 	if len(req.Teams) == 0 {

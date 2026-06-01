@@ -162,3 +162,36 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 
 // errBadRequest is a sentinel for malformed bodies.
 var errBadRequest = errors.New("bad request")
+
+const (
+	maxJSONBodyBytes     = 64 << 10
+	maxManifestBodyBytes = 8 << 20
+)
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "request body too large")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return false
+	}
+	return true
+}
+
+func decodeJSONOptional(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil && !errors.Is(err, io.EOF) {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "request body too large")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+		return false
+	}
+	return true
+}

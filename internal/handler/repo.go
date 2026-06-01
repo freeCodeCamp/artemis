@@ -2,9 +2,7 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -121,8 +119,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req RepoCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSON(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
 	if !reporequest.ValidName(req.Name) {
@@ -358,8 +355,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 	var body RepoRejectRequest
 	// Body is optional (empty → zero reason), but a malformed non-empty
 	// body must not be silently discarded into a reject with no reason.
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid json body")
+	if !decodeJSONOptional(w, r, &body, maxJSONBodyBytes) {
 		return
 	}
 
