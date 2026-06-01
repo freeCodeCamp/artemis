@@ -13,7 +13,7 @@ const readyZProbePrefix = "_artemis_readyz_probe_no_match"
 
 // readyZProbeTimeout caps each upstream probe. Two probes (Valkey,
 // R2) sequential — total budget = 2 × readyZProbeTimeout.
-const readyZProbeTimeout = 3 * time.Second
+const readyZProbeTimeout = 5 * time.Second
 
 // ReadyZ implements GET /readyz. Returns {"ready":true} when both
 // Valkey and R2 are reachable, otherwise 503 with a code naming the
