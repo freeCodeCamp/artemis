@@ -63,9 +63,9 @@ func TestReadyZ_R2Down_Returns503_R2Unreachable(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"r2_unreachable"`)
 }
 
-func TestReadyZ_ValkeyFailureSurfacesBeforeR2Probe(t *testing.T) {
+func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
 	r2 := newFakeR2()
-	r2.listErr = errors.New("should-not-be-reached")
+	r2.listErr = errors.New("r2 also down")
 	h := &Handlers{
 		Health: &fakeHealth{err: errors.New("valkey down")},
 		R2:     r2,
@@ -77,5 +77,4 @@ func TestReadyZ_ValkeyFailureSurfacesBeforeR2Probe(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
-	assert.Equal(t, 0, r2.hasPrefixCalls, "R2 must not be probed after Valkey fails")
 }

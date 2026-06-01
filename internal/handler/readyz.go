@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -11,8 +12,6 @@ import (
 // real listings, and returns (false, nil) when the bucket is reachable.
 const readyZProbePrefix = "_artemis_readyz_probe_no_match"
 
-// readyZProbeTimeout caps each upstream probe. Two probes (Valkey,
-// R2) sequential — total budget = 2 × readyZProbeTimeout.
 const readyZProbeTimeout = 5 * time.Second
 
 // ReadyZ implements GET /readyz. Returns {"ready":true} when both
@@ -20,25 +19,37 @@ const readyZProbeTimeout = 5 * time.Second
 // failing upstream. No auth, no cache; intended for k8s readiness
 // probes.
 func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
+	var wg sync.WaitGroup
+	var valkeyErr, r2Err error
+
 	if h.Health != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
-		if err := h.Health.Ping(ctx); err != nil {
-			cancel()
-			writeUpstreamError(w, r, http.StatusServiceUnavailable, "valkey_unreachable", "valkey.ping", err)
-			return
-		}
-		cancel()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
+			defer cancel()
+			valkeyErr = h.Health.Ping(ctx)
+		}()
 	}
 
 	if h.R2 != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
-		if _, err := h.R2.HasPrefix(ctx, readyZProbePrefix); err != nil {
-			cancel()
-			writeUpstreamError(w, r, http.StatusServiceUnavailable, "r2_unreachable", "r2.has_prefix", err)
-			return
-		}
-		cancel()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
+			defer cancel()
+			_, r2Err = h.R2.HasPrefix(ctx, readyZProbePrefix)
+		}()
 	}
 
-	writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
+	wg.Wait()
+
+	switch {
+	case valkeyErr != nil:
+		writeUpstreamError(w, r, http.StatusServiceUnavailable, "valkey_unreachable", "valkey.ping", valkeyErr)
+	case r2Err != nil:
+		writeUpstreamError(w, r, http.StatusServiceUnavailable, "r2_unreachable", "r2.has_prefix", r2Err)
+	default:
+		writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
+	}
 }
