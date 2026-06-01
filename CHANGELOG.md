@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [0.7.0](https://github.com/freeCodeCamp/artemis/compare/v0.6.1...v0.7.0) (2026-06-01)
+
+
+### Features
+
+* **preflight:** add Apollo-11 App credential smoke command ([5cf4287](https://github.com/freeCodeCamp/artemis/commit/5cf4287eed708f50075ee2267e6f86a0c7714198))
+
 ## [0.6.1](https://github.com/freeCodeCamp/artemis/compare/v0.6.0...v0.6.1) (2026-05-31)
 
 ### Bug Fixes
