@@ -12,7 +12,7 @@
 //
 // or:
 //
-//	make integration
+//	just integration
 //
 // Required environment:
 //

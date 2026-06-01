@@ -42,7 +42,7 @@ Then re-run with:
 
   go test -v -tags=integration ./internal/integration/...
   # or
-  make integration
+  just integration
 `
 
 func loadCfg(t *testing.T) cfg {

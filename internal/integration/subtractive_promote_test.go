@@ -36,7 +36,7 @@ import (
 //
 // No R2 creds needed — assertions are HTTP only.
 //
-// Slow test (60-90s in practice) — gated under `make integration`
+// Slow test (60-90s in practice) — gated under `just integration`
 // like every other integration test. Suite-level teardown restores
 // baseline prod after the test runs.
 func TestSubtractivePromote(t *testing.T) {

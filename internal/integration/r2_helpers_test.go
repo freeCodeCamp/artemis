@@ -175,7 +175,7 @@ func (r r2Probe) headObject(ctx context.Context, key string) error {
 // r2Client + aliasKey + getAlias actually talk to R2. Reads the current
 // production alias body for SITE and asserts it parses as a deploy id.
 // Skips cleanly if R2_* env unset (per r2Client semantics) so
-// `make integration` regression-free without R2 creds.
+// `just integration` regression-free without R2 creds.
 func TestR2ProbeWiring(t *testing.T) {
 	c := loadCfg(t)
 	r := r2Client(t)
