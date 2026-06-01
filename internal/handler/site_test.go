@@ -97,10 +97,10 @@ func TestSiteRollback_ValidatesTargetExists(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/old-deploy/index.html"] = []byte("ok")
+	store.objects["www/deploys/20260420-141522-old/index.html"] = []byte("ok")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "old-deploy"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260420-141522-old"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -111,7 +111,7 @@ func TestSiteRollback_ValidatesTargetExists(t *testing.T) {
 	store.mu.Lock()
 	alias := store.aliases["www/production"]
 	store.mu.Unlock()
-	assert.Equal(t, "old-deploy", alias)
+	assert.Equal(t, "20260420-141522-old", alias)
 }
 
 func TestSiteRollback_RejectsMissingTarget(t *testing.T) {
@@ -122,7 +122,7 @@ func TestSiteRollback_RejectsMissingTarget(t *testing.T) {
 	store := newFakeR2()
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "swept-deploy"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260420-141522-swept"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -139,11 +139,11 @@ func TestSiteRollback_UsesHasPrefix(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/old-deploy/index.html"] = []byte("a")
-	store.objects["www/deploys/old-deploy/page.html"] = []byte("b")
+	store.objects["www/deploys/20260420-141522-old/index.html"] = []byte("a")
+	store.objects["www/deploys/20260420-141522-old/page.html"] = []byte("b")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "old-deploy"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260420-141522-old"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -186,6 +186,22 @@ func TestSiteRollback_MissingTo(t *testing.T) {
 		h.SiteRollback,
 	)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSiteRollback_RejectsInvalidDeployID(t *testing.T) {
+	gh := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
+	}
+	h, _ := newTestHandlers(t, gh, standardSites(), newFakeR2())
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: "../../etc/passwd"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }
 
 func TestSitePromote_UnregisteredSite(t *testing.T) {
@@ -499,11 +515,11 @@ func TestSiteRollback_CAS_HappyPath(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.objects["www/deploys/20260419-090000-d2/index.html"] = []byte("ok")
 	store.aliases["www/production"] = "d1-current"
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d1-current"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260419-090000-d2", ExpectedCurrent: "d1-current"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -513,7 +529,7 @@ func TestSiteRollback_CAS_HappyPath(t *testing.T) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.Equal(t, "d2-old-deploy", store.aliases["www/production"])
+	assert.Equal(t, "20260419-090000-d2", store.aliases["www/production"])
 	assert.Contains(t, store.getAliasKeys, "www/production", "CAS branch must read prod alias")
 }
 
@@ -525,11 +541,11 @@ func TestSiteRollback_CAS_DriftReturns409(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.objects["www/deploys/20260419-090000-d2/index.html"] = []byte("ok")
 	store.aliases["www/production"] = "d1-current"
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d0-stale"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260419-090000-d2", ExpectedCurrent: "d0-stale"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -559,11 +575,11 @@ func TestSiteRollback_NoCAS_LegacyPath(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.objects["www/deploys/20260419-090000-d2/index.html"] = []byte("ok")
 	store.aliases["www/production"] = "d1-current"
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260419-090000-d2"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),
@@ -573,7 +589,7 @@ func TestSiteRollback_NoCAS_LegacyPath(t *testing.T) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.Equal(t, "d2-old-deploy", store.aliases["www/production"])
+	assert.Equal(t, "20260419-090000-d2", store.aliases["www/production"])
 	assert.NotContains(t, store.getAliasKeys, "www/production", "legacy path must not read prod alias")
 }
 
@@ -586,10 +602,10 @@ func TestSiteRollback_CAS_NoExistingProdRejectsExpectation(t *testing.T) {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	store := newFakeR2()
-	store.objects["www/deploys/d2-old-deploy/index.html"] = []byte("ok")
+	store.objects["www/deploys/20260419-090000-d2/index.html"] = []byte("ok")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
-	body, _ := json.Marshal(SiteRollbackRequest{To: "d2-old-deploy", ExpectedCurrent: "d-anything"})
+	body, _ := json.Marshal(SiteRollbackRequest{To: "20260419-090000-d2", ExpectedCurrent: "d-anything"})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", body,
 		contextWithLogin(context.Background(), "alice", "tok"),

@@ -177,6 +177,10 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "to is required")
 		return
 	}
+	if !deployIDPattern.MatchString(req.To) {
+		writeError(w, http.StatusBadRequest, "bad_request", "to is not a valid artemis deploy id")
+		return
+	}
 
 	prefix := h.deployPrefix(site, req.To)
 	exists, err := h.R2.HasPrefix(r.Context(), prefix)
