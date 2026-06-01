@@ -2,7 +2,9 @@ package githubapp
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const testOrg = "freeCodeCamp-Universe"
@@ -327,5 +331,106 @@ func TestClient_ListTemplatesFiltersAccessible(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "alpha" {
 		t.Errorf("templates = %v, want [alpha] (gamma inaccessible, beta not template)", got)
+	}
+}
+
+func writeGitHubJWTError(w http.ResponseWriter, msg string) {
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = io.WriteString(w, fmt.Sprintf(`{"message":%q}`, msg))
+}
+
+func githubTokenHandlerValidatingJWT(
+	t *testing.T,
+	pub *rsa.PublicKey,
+	appID string,
+	now func() time.Time,
+) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		claims := &jwt.RegisteredClaims{}
+		tok, err := jwt.ParseWithClaims(raw, claims, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected alg %v", token.Header["alg"])
+			}
+			return pub, nil
+		}, jwt.WithoutClaimsValidation())
+		if err != nil || !tok.Valid || claims.Issuer != appID {
+			writeGitHubJWTError(w, "A JSON web token could not be decoded")
+			return
+		}
+		if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(now().Add(600*time.Second)) {
+			writeGitHubJWTError(w, "'Expiration time' claim ('exp') is too far in the future")
+			return
+		}
+		tokenResponse(w)
+	}
+}
+
+func TestClient_InstallationToken_AppJWTPassesGitHubValidation(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC) }
+	key, pem := testRSAKeyPKCS1(t)
+	signer, err := NewAppJWTSigner("123", pem)
+	if err != nil {
+		t.Fatalf("new signer: %v", err)
+	}
+	signer.now = now
+
+	srv := httptest.NewServer(githubTokenHandlerValidatingJWT(t, &key.PublicKey, "123", now))
+	defer srv.Close()
+
+	c, err := NewClient(ClientConfig{
+		APIBase:        srv.URL,
+		Org:            testOrg,
+		InstallationID: "42",
+		Signer:         signer,
+		Now:            now,
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	tok, err := c.installationToken(context.Background())
+	if err != nil {
+		t.Fatalf("installationToken rejected by validating fake: %v", err)
+	}
+	if tok != "ghs_inst" {
+		t.Errorf("token = %q, want ghs_inst", tok)
+	}
+}
+
+func TestGitHubTokenHandler_RejectsOverCapAppJWT(t *testing.T) {
+	now := func() time.Time { return time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC) }
+	key, _ := testRSAKeyPKCS1(t)
+
+	overCap := jwt.RegisteredClaims{
+		Issuer:    "123",
+		IssuedAt:  jwt.NewNumericDate(now()),
+		ExpiresAt: jwt.NewNumericDate(now().Add(700 * time.Second)),
+	}
+	raw, err := jwt.NewWithClaims(jwt.SigningMethodRS256, overCap).SignedString(key)
+	if err != nil {
+		t.Fatalf("sign over-cap jwt: %v", err)
+	}
+
+	srv := httptest.NewServer(githubTokenHandlerValidatingJWT(t, &key.PublicKey, "123", now))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/app/installations/42/access_tokens", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for over-cap App JWT (B6 regression guard)", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "too far in the future") {
+		t.Errorf("body = %q, want exp-too-far rejection", body)
 	}
 }
