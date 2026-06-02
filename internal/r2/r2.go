@@ -22,6 +22,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithy "github.com/aws/smithy-go"
 )
 
@@ -175,6 +176,77 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 		token = page.NextContinuationToken
 	}
 	return out, nil
+}
+
+func (c *Client) DeleteObject(ctx context.Context, key string) error {
+	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: awsv2.String(c.bucket),
+		Key:    awsv2.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("r2 delete %s: %w", key, err)
+	}
+	return nil
+}
+
+const deleteBatchMax = 1000
+
+func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
+	var deleted int
+	var token *string
+	for {
+		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            awsv2.String(c.bucket),
+			Prefix:            awsv2.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return deleted, fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err)
+		}
+		ids := make([]s3types.ObjectIdentifier, 0, len(page.Contents))
+		for _, obj := range page.Contents {
+			if obj.Key != nil {
+				ids = append(ids, s3types.ObjectIdentifier{Key: obj.Key})
+			}
+		}
+		for start := 0; start < len(ids); start += deleteBatchMax {
+			end := min(start+deleteBatchMax, len(ids))
+			n, err := c.deleteBatch(ctx, ids[start:end])
+			deleted += n
+			if err != nil {
+				return deleted, err
+			}
+		}
+		if page.IsTruncated == nil || !*page.IsTruncated {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	return deleted, nil
+}
+
+func (c *Client) deleteBatch(ctx context.Context, ids []s3types.ObjectIdentifier) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	out, err := c.s3.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		Bucket: awsv2.String(c.bucket),
+		Delete: &s3types.Delete{Objects: ids, Quiet: awsv2.Bool(true)},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("r2 deleteobjects: %w", err)
+	}
+	if len(out.Errors) > 0 {
+		key, msg := "", ""
+		if out.Errors[0].Key != nil {
+			key = *out.Errors[0].Key
+		}
+		if out.Errors[0].Message != nil {
+			msg = *out.Errors[0].Message
+		}
+		return len(ids) - len(out.Errors), fmt.Errorf("r2 deleteobjects: %d of %d failed (first %s: %s)", len(out.Errors), len(ids), key, msg)
+	}
+	return len(ids), nil
 }
 
 // VerifyError is returned when VerifyDeployComplete finds expected files

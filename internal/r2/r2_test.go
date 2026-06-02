@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,10 @@ type fakeS3 struct {
 	// lastPutTransferEncoding captures the Transfer-Encoding header.
 	// Aws-sdk-go-v2 sends "chunked" when ContentLength is unknown.
 	lastPutTransferEncoding string
+
+	pageSize           int
+	deleteObjectsCalls int
+	lastDeleteBatch    int
 }
 
 func newFakeS3(t *testing.T, bucket string) *fakeS3 {
@@ -71,6 +76,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		// /<bucket>?list-type=2&prefix=...
 		if r.URL.Query().Get("list-type") == "2" {
 			f.listV2(w, r)
+			return
+		}
+		if r.URL.Query().Has("delete") && r.Method == http.MethodPost {
+			f.deleteObjects(w, r)
 			return
 		}
 		http.Error(w, "unsupported bucket op", http.StatusBadRequest)
@@ -110,11 +119,14 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 type listResult struct {
-	XMLName  xml.Name      `xml:"ListBucketResult"`
-	Name     string        `xml:"Name"`
-	Prefix   string        `xml:"Prefix"`
-	KeyCount int           `xml:"KeyCount"`
-	Contents []listContent `xml:"Contents"`
+	XMLName               xml.Name       `xml:"ListBucketResult"`
+	Name                  string         `xml:"Name"`
+	Prefix                string         `xml:"Prefix"`
+	KeyCount              int            `xml:"KeyCount"`
+	IsTruncated           bool           `xml:"IsTruncated"`
+	NextContinuationToken string         `xml:"NextContinuationToken,omitempty"`
+	Contents              []listContent  `xml:"Contents"`
+	CommonPrefixes        []commonPrefix `xml:"CommonPrefixes"`
 }
 
 type listContent struct {
@@ -122,13 +134,21 @@ type listContent struct {
 	Size int    `xml:"Size"`
 }
 
+type commonPrefix struct {
+	Prefix string `xml:"Prefix"`
+}
+
 func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
-	prefix := r.URL.Query().Get("prefix")
-	maxKeys := r.URL.Query().Get("max-keys")
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	delimiter := q.Get("delimiter")
+	maxKeys := q.Get("max-keys")
+	contToken := q.Get("continuation-token")
+
 	f.mu.Lock()
 	f.lastListMaxKeys = maxKeys
-	var contents []listContent
-	for k, v := range f.objects {
+	var keys []string
+	for k := range f.objects {
 		if !strings.HasPrefix(k, f.bucket+"/") {
 			continue
 		}
@@ -136,18 +156,101 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" && !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		contents = append(contents, listContent{Key: key, Size: len(v)})
+		keys = append(keys, key)
+	}
+	sizes := make(map[string]int, len(keys))
+	for _, key := range keys {
+		sizes[key] = len(f.objects[f.bucket+"/"+key])
+	}
+	f.mu.Unlock()
+	sort.Strings(keys)
+
+	var contents []listContent
+	commonSet := map[string]struct{}{}
+	var common []string
+	for _, key := range keys {
+		if delimiter != "" {
+			rest := strings.TrimPrefix(key, prefix)
+			if i := strings.Index(rest, delimiter); i >= 0 {
+				cp := prefix + rest[:i+len(delimiter)]
+				if _, ok := commonSet[cp]; !ok {
+					commonSet[cp] = struct{}{}
+					common = append(common, cp)
+				}
+				continue
+			}
+		}
+		contents = append(contents, listContent{Key: key, Size: sizes[key]})
+	}
+	sort.Strings(common)
+
+	pageSize := f.pageSize
+	if maxKeys != "" {
+		if n, err := strconv.Atoi(maxKeys); err == nil && n >= 0 {
+			pageSize = n
+		}
+	}
+	start := 0
+	if contToken != "" {
+		start = sort.Search(len(contents), func(i int) bool { return contents[i].Key > contToken })
+	}
+	end := len(contents)
+	if pageSize > 0 && start+pageSize < end {
+		end = start + pageSize
+	}
+	truncated := end < len(contents)
+	page := contents[start:end]
+
+	res := listResult{
+		Name:        f.bucket,
+		Prefix:      prefix,
+		KeyCount:    len(page),
+		IsTruncated: truncated,
+		Contents:    page,
+	}
+	if truncated && len(page) > 0 {
+		res.NextContinuationToken = page[len(page)-1].Key
+	}
+	for _, cp := range common {
+		res.CommonPrefixes = append(res.CommonPrefixes, commonPrefix{Prefix: cp})
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	_ = xml.NewEncoder(w).Encode(res)
+}
+
+func (f *fakeS3) deleteObjects(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	var req struct {
+		XMLName xml.Name `xml:"Delete"`
+		Objects []struct {
+			Key string `xml:"Key"`
+		} `xml:"Object"`
+		Quiet bool `xml:"Quiet"`
+	}
+	_ = xml.Unmarshal(body, &req)
+
+	f.mu.Lock()
+	f.deleteObjectsCalls++
+	f.lastDeleteBatch = len(req.Objects)
+	var deleted []string
+	for _, o := range req.Objects {
+		delete(f.objects, f.bucket+"/"+o.Key)
+		deleted = append(deleted, o.Key)
 	}
 	f.mu.Unlock()
 
-	// Honor max-keys param (string-typed in S3 wire format).
-	if maxKeys != "" {
-		if n, err := strconv.Atoi(maxKeys); err == nil && n >= 0 && n < len(contents) {
-			contents = contents[:n]
+	type deletedEntry struct {
+		Key string `xml:"Key"`
+	}
+	var res struct {
+		XMLName xml.Name       `xml:"DeleteResult"`
+		Deleted []deletedEntry `xml:"Deleted"`
+	}
+	if !req.Quiet {
+		for _, k := range deleted {
+			res.Deleted = append(res.Deleted, deletedEntry{Key: k})
 		}
 	}
-
-	res := listResult{Name: f.bucket, Prefix: prefix, KeyCount: len(contents), Contents: contents}
 	w.Header().Set("Content-Type", "application/xml")
 	_ = xml.NewEncoder(w).Encode(res)
 }
@@ -335,6 +438,82 @@ func TestHasPrefix_RequestsMaxKeysOne(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "1", fake.lastListMaxKeys,
 		"HasPrefix must send max-keys=1 to bound R2 cost")
+}
+
+func TestDeleteObject_Idempotent(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	require.NoError(t, c.PutObject(context.Background(), "www/x", bytes.NewReader([]byte("y")), "text/plain", 1))
+
+	require.NoError(t, c.DeleteObject(context.Background(), "www/x"))
+	fake.mu.Lock()
+	_, present := fake.objects["b/www/x"]
+	fake.mu.Unlock()
+	assert.False(t, present, "object should be gone after delete")
+
+	require.NoError(t, c.DeleteObject(context.Background(), "www/x"), "re-delete is a no-op")
+	require.NoError(t, c.DeleteObject(context.Background(), "never-existed"), "delete of missing key is a no-op")
+}
+
+func TestDeletePrefix(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/index.html",
+		"www/deploys/d1/assets/app.js",
+		"www/deploys/d1/style.css",
+		"www/deploys/d2/index.html",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+
+	gone, err := c.HasPrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.False(t, gone, "d1 prefix must be empty after DeletePrefix")
+	kept, err := c.HasPrefix(context.Background(), "www/deploys/d2/")
+	require.NoError(t, err)
+	assert.True(t, kept, "sibling prefix d2 must be untouched")
+}
+
+func TestDeletePrefix_Paginates(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.pageSize = 2
+	c := newClient(t, fake)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, c.PutObject(context.Background(),
+			fmtKey("s/deploys/d/f%02d.html", i), bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "s/deploys/d/")
+	require.NoError(t, err)
+	assert.Equal(t, 5, n)
+
+	gone, err := c.HasPrefix(context.Background(), "s/deploys/d/")
+	require.NoError(t, err)
+	assert.False(t, gone)
+
+	fake.mu.Lock()
+	calls := fake.deleteObjectsCalls
+	fake.mu.Unlock()
+	assert.GreaterOrEqual(t, calls, 3, "5 objects at pageSize 2 must span >=3 delete batches")
+}
+
+func TestDeletePrefix_EmptyNoop(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	n, err := c.DeletePrefix(context.Background(), "absent/")
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	fake.mu.Lock()
+	calls := fake.deleteObjectsCalls
+	fake.mu.Unlock()
+	assert.Equal(t, 0, calls, "no objects under prefix -> no delete batch issued")
 }
 
 func TestVerifyDeployComplete_PassFail(t *testing.T) {
