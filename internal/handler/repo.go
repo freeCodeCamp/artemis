@@ -27,6 +27,7 @@ type RepoStore interface {
 	Reject(ctx context.Context, id, approver, reason string) (reporequest.Request, error)
 	MarkActive(ctx context.Context, id, url string) (reporequest.Request, error)
 	MarkFailed(ctx context.Context, id, errMsg string) (reporequest.Request, error)
+	MarkStale(ctx context.Context, id, reason string) (reporequest.Request, error)
 	Delete(ctx context.Context, id string) error
 }
 
@@ -189,7 +190,7 @@ func (h *Handlers) reconcileStaleClaim(r *http.Request, name string) bool {
 			if gErr != nil || exists {
 				return false
 			}
-			if dErr := h.Repos.Delete(r.Context(), req.ID); dErr != nil {
+			if _, mErr := h.Repos.MarkStale(r.Context(), req.ID, "repository no longer exists on GitHub; name claim reconciled"); mErr != nil {
 				return false
 			}
 			slog.Warn("repo.create.reconciled_stale_claim", "id", req.ID, "name", req.Name, "reqID", RequestIDFromContext(r.Context()))

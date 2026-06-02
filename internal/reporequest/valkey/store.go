@@ -272,12 +272,25 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.Del(ctx, reqKey(id))
 			pipe.SRem(ctx, keyAllRequests, id)
-			pipe.SRem(ctx, keyClaimedNames, nameClaimKey(cur.Name))
+			if cur.Status.HoldsName() {
+				pipe.SRem(ctx, keyClaimedNames, nameClaimKey(cur.Name))
+			}
 			return nil
 		})
 		return err
 	}
 	return s.watch(ctx, txf, reqKey(id), keyClaimedNames)
+}
+
+func (s *Store) MarkStale(ctx context.Context, id, reason string) (Request, error) {
+	return s.mutate(ctx, id, func(cur Request) (Request, bool, error) {
+		if cur.Status != reporequest.StatusActive {
+			return Request{}, false, reporequest.ErrNotActive
+		}
+		cur.Status = reporequest.StatusFailed
+		cur.Error = reason
+		return cur, true, nil
+	})
 }
 
 // mutate applies fn to the current row inside a WATCH/MULTI transaction.

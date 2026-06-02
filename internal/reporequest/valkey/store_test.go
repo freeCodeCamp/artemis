@@ -101,6 +101,56 @@ func TestStore_DeleteNotFound(t *testing.T) {
 	)
 }
 
+func TestStore_DeleteResolvedRowKeepsNewerClaim(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a, err := s.Create(ctx, sampleReq("x"))
+	require.NoError(t, err)
+	_, err = s.Reject(ctx, a.ID, "admin", "no")
+	require.NoError(t, err)
+
+	b, err := s.Create(ctx, sampleReq("x"))
+	require.NoError(t, err)
+	require.NotEqual(t, a.ID, b.ID)
+
+	require.NoError(t, s.Delete(ctx, a.ID))
+
+	_, err = s.Create(ctx, sampleReq("x"))
+	assert.ErrorIs(t, err, reporequest.ErrAlreadyExists)
+
+	got, err := s.Get(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "x", got.Name)
+}
+
+func TestStore_MarkStaleReleasesClaimKeepsRecord(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	a, _ := s.Create(ctx, sampleReq("x"))
+	_, err := s.Approve(ctx, a.ID, "admin")
+	require.NoError(t, err)
+	_, err = s.MarkActive(ctx, a.ID, "https://github.com/freeCodeCamp-Universe/x")
+	require.NoError(t, err)
+
+	stale, err := s.MarkStale(ctx, a.ID, "gone")
+	require.NoError(t, err)
+	assert.Equal(t, reporequest.StatusFailed, stale.Status)
+
+	got, err := s.Get(ctx, a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "gone", got.Error)
+
+	_, err = s.Create(ctx, sampleReq("x"))
+	assert.NoError(t, err)
+}
+
+func TestStore_MarkStaleRequiresActive(t *testing.T) {
+	s := newStore(t)
+	a, _ := s.Create(context.Background(), sampleReq("x"))
+	_, err := s.MarkStale(context.Background(), a.ID, "gone")
+	assert.ErrorIs(t, err, reporequest.ErrNotActive)
+}
+
 func TestStore_RejectReleasesName(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()

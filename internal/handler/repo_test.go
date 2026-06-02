@@ -145,6 +145,17 @@ func (f *fakeRepoStore) MarkFailed(_ context.Context, id, msg string) (reporeque
 	})
 }
 
+func (f *fakeRepoStore) MarkStale(_ context.Context, id, reason string) (reporequest.Request, error) {
+	return f.transition(id, func(r reporequest.Request) (reporequest.Request, bool, error) {
+		if r.Status != reporequest.StatusActive {
+			return reporequest.Request{}, false, reporequest.ErrNotActive
+		}
+		r.Status = reporequest.StatusFailed
+		r.Error = reason
+		return r, true, nil
+	})
+}
+
 func (f *fakeRepoStore) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -643,8 +654,9 @@ func TestRepoCreate_ReconcilesStaleActiveClaim(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	assert.Equal(t, 1, creator.existsCalls)
-	_, err := store.Get(context.Background(), stale.ID)
-	assert.ErrorIs(t, err, reporequest.ErrNotFound)
+	got, err := store.Get(context.Background(), stale.ID)
+	require.NoError(t, err)
+	assert.Equal(t, reporequest.StatusFailed, got.Status)
 }
 
 func TestRepoCreate_KeepsClaimWhenRepoStillExists(t *testing.T) {

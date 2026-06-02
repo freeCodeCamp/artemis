@@ -61,6 +61,15 @@ func (s Status) CanResolve() bool {
 	return s == StatusPending
 }
 
+func (s Status) HoldsName() bool {
+	switch s {
+	case StatusPending, StatusApproved, StatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Visibility is the GitHub repo visibility.
 type Visibility string
 
@@ -118,4 +127,6 @@ var (
 	// ErrNotPending — an approve/reject targeted a request that is no
 	// longer pending (resolved by another admin). → 409 already_resolved.
 	ErrNotPending = errors.New("reporequest: request is not pending")
+
+	ErrNotActive = errors.New("reporequest: request is not active")
 )
