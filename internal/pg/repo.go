@@ -141,6 +141,13 @@ func (r *Repo) ExpiredTombstones(ctx context.Context, before time.Time) ([]gc.To
 	return out, rows.Err()
 }
 
+func (r *Repo) PruneDeploy(ctx context.Context, site, id string) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM deploys WHERE site = $1 AND id = $2`, site, id); err != nil {
+		return fmt.Errorf("pg prune deploy %s/%s: %w", site, id, err)
+	}
+	return nil
+}
+
 func (r *Repo) ClearTombstone(ctx context.Context, site, id string) error {
 	if _, err := r.pool.Exec(ctx,
 		`DELETE FROM tombstones WHERE site = $1 AND id = $2`, site, id); err != nil {
