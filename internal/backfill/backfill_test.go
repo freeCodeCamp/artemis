@@ -97,3 +97,26 @@ func TestBackfill(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 4, 20, 14, 15, 22, 0, time.UTC), byID["20260420-141522-abc1234"].mtime,
 		"mtime parsed from deploy-id timestamp")
 }
+
+func TestBackfill_HonorsAliasKeyFormat(t *testing.T) {
+	lister := &fakeLister{
+		sites: []string{"www"},
+		byPfx: map[string][]string{"www/deploys/": {"www/deploys/20260420-141522-abc1234/index.html"}},
+		aliases: map[string]string{
+			"www/prod":    "20260420-141522-abc1234",
+			"www/staging": "20260420-141522-abc1234",
+		},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{
+		Lister:           lister,
+		Indexer:          idx,
+		Now:              func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) },
+		ProductionKeyFmt: "<site>/prod",
+		PreviewKeyFmt:    "<site>/staging",
+	}
+
+	res, err := b.Run(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.Aliases, "backfill reads aliases at the configured (non-default) key format")
+}
