@@ -219,6 +219,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitSiteChanged(r.Context(), claims.Site)
 	slog.Info("deploy.finalize.live", "site", claims.Site, "deployId", deployID, "mode", mode, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(claims.Site, mode),

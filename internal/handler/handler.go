@@ -64,6 +64,10 @@ type TombstoneStore interface {
 	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
 }
 
+type SiteChangeEmitter interface {
+	EnqueueSiteChanged(ctx context.Context, site string) error
+}
+
 // RegistryHealth is the readiness probe contract for the registry
 // backend. *valkey.Store satisfies this; handler tests substitute a
 // fake that returns the desired error.
@@ -83,6 +87,7 @@ type Handlers struct {
 	AliasPreviewFmt    string // e.g. "<site>/preview"
 	Tombstones         TombstoneStore
 	TrashPrefixBase    string // e.g. "_trash/"
+	Outbox             SiteChangeEmitter
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or
@@ -113,6 +118,15 @@ type Handlers struct {
 	// writeUpstreamError reaches for the package-level handle installed
 	// via SetMetrics.
 	Metrics *Metrics
+}
+
+func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
+	if h.Outbox == nil {
+		return
+	}
+	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {
+		slog.Error("outbox enqueue site.changed failed", "site", site, "err", err)
+	}
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.

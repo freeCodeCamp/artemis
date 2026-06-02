@@ -132,6 +132,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitSiteChanged(r.Context(), site)
 	slog.Info("site.promote", "site", site, "deployId", deployID, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
@@ -221,6 +222,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.emitSiteChanged(r.Context(), site)
 	slog.Info("site.rollback", "site", site, "to", req.To, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
