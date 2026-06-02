@@ -11,6 +11,7 @@ type Metrics struct {
 	DeploysTombstoned prometheus.Counter
 	BytesReclaimed    prometheus.Counter
 	Runs              *prometheus.CounterVec
+	Drift             *prometheus.CounterVec
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -27,9 +28,20 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_gc_runs_total",
 			Help: "Count of GC workflow runs, labelled by workflow and outcome.",
 		}, []string{"workflow", "outcome"}),
+		Drift: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "artemis_gc_drift_total",
+			Help: "Reconcile drift events, labelled by kind (reindexed, orphan, pruned, aliased_missing).",
+		}, []string{"kind"}),
 	}
-	reg.MustRegister(m.DeploysTombstoned, m.BytesReclaimed, m.Runs)
+	reg.MustRegister(m.DeploysTombstoned, m.BytesReclaimed, m.Runs, m.Drift)
 	return m
+}
+
+func (m *Metrics) drift(kind string, n int) {
+	if m == nil || n == 0 {
+		return
+	}
+	m.Drift.WithLabelValues(kind).Add(float64(n))
 }
 
 func (m *Metrics) tombstoned(n int) {

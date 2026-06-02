@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -123,6 +125,21 @@ func TestReconcile_AliasedMissingNotPruned(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, report.PGPruned, "an aliased deploy whose bytes vanished is alerted, never silently pruned")
 	assert.Equal(t, []string{"live"}, report.AliasedMissing)
+}
+
+func TestReconcile_DriftMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+	orphan := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + orphan + "/index.html"}}
+	store := &fakeReconcileStore{deploys: map[string][]Deploy{"www": {{ID: "ghost", Mtime: ago(time.Hour)}}}, aliases: map[string]struct{}{}}
+	rc := newReconciler(lister, store, &fakeMover{})
+	rc.Metrics = m
+
+	_, err := rc.ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, testutil.ToFloat64(m.Drift.WithLabelValues("orphan")))
+	assert.EqualValues(t, 1, testutil.ToFloat64(m.Drift.WithLabelValues("pruned")))
 }
 
 func TestReconcile_ConsistentNoDrift(t *testing.T) {
