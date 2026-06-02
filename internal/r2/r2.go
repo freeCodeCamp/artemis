@@ -288,6 +288,36 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 	return moved, nil
 }
 
+func (c *Client) ListSites(ctx context.Context) ([]string, error) {
+	var sites []string
+	var token *string
+	for {
+		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            awsv2.String(c.bucket),
+			Delimiter:         awsv2.String("/"),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("r2 listsites: %w", err)
+		}
+		for _, cp := range page.CommonPrefixes {
+			if cp.Prefix == nil {
+				continue
+			}
+			site := strings.TrimSuffix(*cp.Prefix, "/")
+			if site == "" || strings.HasPrefix(site, "_") {
+				continue
+			}
+			sites = append(sites, site)
+		}
+		if page.IsTruncated == nil || !*page.IsTruncated {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	return sites, nil
+}
+
 // VerifyError is returned when VerifyDeployComplete finds expected files
 // missing from the deploy prefix. The Missing field lists the files that
 // did not surface in the listing.

@@ -580,6 +580,25 @@ func TestMovePrefix_EmptyNoop(t *testing.T) {
 	assert.Equal(t, 0, n)
 }
 
+func TestListSites(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/index.html",
+		"www/production",
+		"learn/deploys/d2/x",
+		"_trash/www/d9/old.html",
+		"_artemis_meta.json",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("x")), "text/plain", 1))
+	}
+
+	sites, err := c.ListSites(context.Background())
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"www", "learn"}, sites,
+		"top-level prefixes only; _* (e.g. _trash) excluded, bare objects ignored")
+}
+
 func TestVerifyDeployComplete_PassFail(t *testing.T) {
 	fake := newFakeS3(t, "b")
 	c := newClient(t, fake)
