@@ -2,6 +2,19 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [0.8.0](https://github.com/freeCodeCamp/artemis/compare/v0.7.1...v0.8.0) (2026-06-02)
+
+
+### Features
+
+* **repo:** delete endpoint + stale-claim reconcile ([c3a7271](https://github.com/freeCodeCamp/artemis/commit/c3a72711a08ce270953f41395d57158187273ca0))
+
+
+### Bug Fixes
+
+* **repo:** correct delete claim-release + reconcile ([0259bdb](https://github.com/freeCodeCamp/artemis/commit/0259bdb54586b22117754b83edb89031f9e7eb70))
+* **repo:** log reconcile probe failure ([493a60c](https://github.com/freeCodeCamp/artemis/commit/493a60c7f36d65ef5ef1bb41128b654161db8a05))
+
 ## [0.7.1](https://github.com/freeCodeCamp/artemis/compare/v0.7.0...v0.7.1) (2026-06-01)
 
 
