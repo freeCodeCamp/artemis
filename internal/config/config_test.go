@@ -97,6 +97,79 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 // TestLoad_UploadMaxBytes_RejectsNonPositive — env var is additive but
 // when set must be a positive integer. Empty/absent → default; explicit
 // "0" or negative → boot-time error.
+func TestConfigLoad(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.GCEnabled(), "no DATABASE_URL -> GC disabled")
+	assert.Equal(t, 7, cfg.Cleanup.RetentionDays)
+	assert.Equal(t, 3, cfg.Cleanup.RecentKeep)
+	assert.Equal(t, time.Hour, cfg.Cleanup.Grace)
+	assert.Equal(t, 0, cfg.Cleanup.BlastCap)
+	assert.Equal(t, "_trash/", cfg.Cleanup.TrashPrefix)
+	assert.Equal(t, 7, cfg.Cleanup.RecoveryDays)
+	assert.False(t, cfg.Cleanup.DryRun)
+	assert.Equal(t, 15*time.Second, cfg.Cleanup.ServeCacheTTL)
+}
+
+func TestConfigLoad_Overrides(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("DATABASE_URL", "postgres://artemis@pg/artemis")
+	t.Setenv("HATCHET_CLIENT_TOKEN", "ht-token")
+	t.Setenv("HATCHET_ADDR", "hatchet.svc:7077")
+	t.Setenv("CLEANUP_RETENTION_DAYS", "14")
+	t.Setenv("CLEANUP_RECENT_KEEP", "5")
+	t.Setenv("CLEANUP_GRACE", "2h")
+	t.Setenv("CLEANUP_BLAST_CAP", "100")
+	t.Setenv("CLEANUP_TRASH_PREFIX", "_graveyard")
+	t.Setenv("CLEANUP_RECOVERY_DAYS", "30")
+	t.Setenv("CLEANUP_DRY_RUN", "true")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.GCEnabled())
+	assert.Equal(t, "postgres://artemis@pg/artemis", cfg.DatabaseURL)
+	assert.Equal(t, "ht-token", cfg.Hatchet.ClientToken)
+	assert.Equal(t, "hatchet.svc:7077", cfg.Hatchet.Addr)
+	assert.Equal(t, 14, cfg.Cleanup.RetentionDays)
+	assert.Equal(t, 5, cfg.Cleanup.RecentKeep)
+	assert.Equal(t, 2*time.Hour, cfg.Cleanup.Grace)
+	assert.Equal(t, 100, cfg.Cleanup.BlastCap)
+	assert.Equal(t, "_graveyard/", cfg.Cleanup.TrashPrefix, "trailing slash normalized in")
+	assert.Equal(t, 30, cfg.Cleanup.RecoveryDays)
+	assert.True(t, cfg.Cleanup.DryRun)
+}
+
+func TestConfigLoad_GraceBelowJWTTTLFails(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("JWT_TTL_SECONDS", "3600")
+	t.Setenv("CLEANUP_GRACE", "30m")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "CLEANUP_GRACE")
+}
+
+func TestConfigLoad_GraceBelowServeCacheTTLFails(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	t.Setenv("JWT_TTL_SECONDS", "5")
+	t.Setenv("CLEANUP_GRACE", "10s")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "serve-cache")
+}
+
 func TestLoad_UploadMaxBytes_RejectsNonPositive(t *testing.T) {
 	for _, bad := range []string{"0", "-1", "not-a-number", ""} {
 		t.Run("v="+bad, func(t *testing.T) {

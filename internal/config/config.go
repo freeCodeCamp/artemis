@@ -37,6 +37,25 @@ type Config struct {
 	Registry           RegistryConfig
 	Repo               RepoConfig
 	Sentry             SentryConfig
+	DatabaseURL        string
+	Hatchet            HatchetConfig
+	Cleanup            CleanupConfig
+}
+
+type HatchetConfig struct {
+	ClientToken string
+	Addr        string
+}
+
+type CleanupConfig struct {
+	RetentionDays int
+	RecentKeep    int
+	Grace         time.Duration
+	BlastCap      int
+	TrashPrefix   string
+	RecoveryDays  int
+	DryRun        bool
+	ServeCacheTTL time.Duration
 }
 
 // SentryConfig holds the optional Sentry error-monitoring + tracing
@@ -151,6 +170,12 @@ func (r RepoConfig) Enabled() bool {
 }
 
 const (
+	serveCacheTTL                 = 15 * time.Second
+	defaultCleanupRetentionDays   = 7
+	defaultCleanupRecentKeep      = 3
+	defaultCleanupGrace           = time.Hour
+	defaultCleanupRecoveryDays    = 7
+	defaultCleanupTrashPrefix     = "_trash/"
 	minSigningKeyBytes            = 32
 	defaultRegistryAuthzTeam      = "staff"
 	defaultRepoOrg                = "freeCodeCamp-Universe"
@@ -202,6 +227,14 @@ func Load() (*Config, error) {
 		},
 		Sentry: SentryConfig{
 			TracesSampleRate: defaultSentryTracesSampleRate,
+		},
+		Cleanup: CleanupConfig{
+			RetentionDays: defaultCleanupRetentionDays,
+			RecentKeep:    defaultCleanupRecentKeep,
+			Grace:         defaultCleanupGrace,
+			TrashPrefix:   defaultCleanupTrashPrefix,
+			RecoveryDays:  defaultCleanupRecoveryDays,
+			ServeCacheTTL: serveCacheTTL,
 		},
 	}
 
@@ -299,6 +332,14 @@ func Load() (*Config, error) {
 		cfg.Sentry.Debug = v == "1" || strings.EqualFold(v, "true")
 	}
 
+	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+	cfg.Hatchet.ClientToken = os.Getenv("HATCHET_CLIENT_TOKEN")
+	cfg.Hatchet.Addr = os.Getenv("HATCHET_ADDR")
+
+	if err := loadCleanup(&cfg.Cleanup); err != nil {
+		return nil, err
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -385,6 +426,12 @@ func (c *Config) validate() error {
 	if c.Sentry.TracesSampleRate < 0 || c.Sentry.TracesSampleRate > 1 {
 		return fmt.Errorf("invalid SENTRY_TRACES_SAMPLE_RATE %v: must be in [0,1]", c.Sentry.TracesSampleRate)
 	}
+	if c.Cleanup.Grace < c.JWT.TTL {
+		return fmt.Errorf("CLEANUP_GRACE (%s) must be >= JWT TTL (%s): an in-flight upload must never be GC'd before its deploy session expires", c.Cleanup.Grace, c.JWT.TTL)
+	}
+	if c.Cleanup.Grace < c.Cleanup.ServeCacheTTL {
+		return fmt.Errorf("CLEANUP_GRACE (%s) must be >= serve-cache TTL (%s): a just-superseded deploy must outlive the Caddy alias cache", c.Cleanup.Grace, c.Cleanup.ServeCacheTTL)
+	}
 	return nil
 }
 
@@ -402,6 +449,56 @@ func validateDeployPrefixFormat(fmtStr string) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: must contain %s",
 			fmtStr, strings.Join(missing, " and "))
+	}
+	return nil
+}
+
+func (c *Config) GCEnabled() bool { return c.DatabaseURL != "" }
+
+func loadCleanup(c *CleanupConfig) error {
+	if v, ok := os.LookupEnv("CLEANUP_RETENTION_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("invalid CLEANUP_RETENTION_DAYS %q: must be positive integer (days)", v)
+		}
+		c.RetentionDays = n
+	}
+	if v, ok := os.LookupEnv("CLEANUP_RECENT_KEEP"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("invalid CLEANUP_RECENT_KEEP %q: must be non-negative integer", v)
+		}
+		c.RecentKeep = n
+	}
+	if v, ok := os.LookupEnv("CLEANUP_GRACE"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("invalid CLEANUP_GRACE %q: must be a positive Go duration (e.g. 1h)", v)
+		}
+		c.Grace = d
+	}
+	if v, ok := os.LookupEnv("CLEANUP_BLAST_CAP"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("invalid CLEANUP_BLAST_CAP %q: must be non-negative integer (0 disables)", v)
+		}
+		c.BlastCap = n
+	}
+	if v, ok := os.LookupEnv("CLEANUP_TRASH_PREFIX"); ok && v != "" {
+		if !strings.HasSuffix(v, "/") {
+			v += "/"
+		}
+		c.TrashPrefix = v
+	}
+	if v, ok := os.LookupEnv("CLEANUP_RECOVERY_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("invalid CLEANUP_RECOVERY_DAYS %q: must be positive integer (days)", v)
+		}
+		c.RecoveryDays = n
+	}
+	if v, ok := os.LookupEnv("CLEANUP_DRY_RUN"); ok {
+		c.DryRun = v == "1" || strings.EqualFold(v, "true")
 	}
 	return nil
 }
