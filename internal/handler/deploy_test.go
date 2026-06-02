@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -323,6 +324,43 @@ func TestDeployFinalize_VerifyThenAlias(t *testing.T) {
 	alias := store.aliases["www/preview"]
 	store.mu.Unlock()
 	assert.Equal(t, deployID, alias)
+}
+
+func TestFinalizeMarker(t *testing.T) {
+	store := newFakeR2()
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
+
+	deployID := "20260420-141522-abc1234"
+	prefix := "www/deploys/" + deployID + "/"
+	store.objects[prefix+"index.html"] = []byte("<h1>hi</h1>")
+
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(DeployFinalizeRequest{Mode: "production", Files: []string{"index.html"}})
+	w := withChiRoute(http.MethodPost, "/api/deploy/{deployId}/finalize",
+		"/api/deploy/"+deployID+"/finalize",
+		body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployFinalize)).ServeHTTP,
+		context.Background(),
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	store.mu.Lock()
+	raw, ok := store.objects[prefix+gc.MarkerObjectName]
+	store.mu.Unlock()
+	require.True(t, ok, "finalize must write the _artemis_meta.json marker under the deploy prefix")
+
+	var meta struct {
+		Site     string `json:"site"`
+		DeployID string `json:"deployId"`
+		Mode     string `json:"mode"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &meta))
+	assert.Equal(t, "www", meta.Site)
+	assert.Equal(t, deployID, meta.DeployID)
+	assert.Equal(t, "production", meta.Mode)
 }
 
 func TestDeployFinalize_VerifyMissing_DoesNotWriteAlias(t *testing.T) {

@@ -2,12 +2,15 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/go-chi/chi/v5"
 )
@@ -199,6 +202,14 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.verify", err)
+		return
+	}
+
+	markerKey := prefix + gc.MarkerObjectName
+	meta := fmt.Sprintf(`{"site":%q,"deployId":%q,"mode":%q,"finalizedAt":%q}`,
+		claims.Site, deployID, mode, time.Now().UTC().Format(time.RFC3339))
+	if err := h.R2.PutObject(r.Context(), markerKey, strings.NewReader(meta), "application/json", int64(len(meta))); err != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.marker.finalize", err)
 		return
 	}
 
