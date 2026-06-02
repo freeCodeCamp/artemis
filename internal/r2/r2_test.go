@@ -88,6 +88,10 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 	key := parts[1]
 	switch r.Method {
 	case http.MethodPut:
+		if src := r.Header.Get("X-Amz-Copy-Source"); src != "" {
+			f.copyObject(w, key, src)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
 		f.objects[f.bucket+"/"+key] = body
@@ -216,6 +220,30 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_ = xml.NewEncoder(w).Encode(res)
+}
+
+func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
+	src, err := url.PathUnescape(copySource)
+	if err != nil {
+		src = copySource
+	}
+	src = strings.TrimPrefix(src, "/")
+	srcKey := strings.TrimPrefix(src, f.bucket+"/")
+
+	f.mu.Lock()
+	body, ok := f.objects[f.bucket+"/"+srcKey]
+	if ok {
+		buf := make([]byte, len(body))
+		copy(buf, body)
+		f.objects[f.bucket+"/"+destKey] = buf
+	}
+	f.mu.Unlock()
+	if !ok {
+		http.Error(w, "NoSuchKey", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml")
+	_, _ = io.WriteString(w, `<CopyObjectResult><ETag>"deadbeef"</ETag></CopyObjectResult>`)
 }
 
 func (f *fakeS3) deleteObjects(w http.ResponseWriter, r *http.Request) {
@@ -514,6 +542,42 @@ func TestDeletePrefix_EmptyNoop(t *testing.T) {
 	calls := fake.deleteObjectsCalls
 	fake.mu.Unlock()
 	assert.Equal(t, 0, calls, "no objects under prefix -> no delete batch issued")
+}
+
+func TestMovePrefix(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	for k, v := range map[string]string{
+		"www/deploys/d1/index.html":    "home",
+		"www/deploys/d1/assets/app.js": "js",
+		"www/deploys/d2/index.html":    "other",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte(v)), "text/plain", int64(len(v))))
+	}
+
+	n, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+
+	src, err := c.HasPrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.False(t, src, "source prefix must be empty after move")
+
+	got, err := c.GetAlias(context.Background(), "_trash/www/d1/index.html")
+	require.NoError(t, err)
+	assert.Equal(t, "home", got, "bytes preserved at destination key")
+
+	kept, err := c.HasPrefix(context.Background(), "www/deploys/d2/")
+	require.NoError(t, err)
+	assert.True(t, kept, "sibling deploy untouched")
+}
+
+func TestMovePrefix_EmptyNoop(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	n, err := c.MovePrefix(context.Background(), "absent/", "_trash/absent/")
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
 }
 
 func TestVerifyDeployComplete_PassFail(t *testing.T) {

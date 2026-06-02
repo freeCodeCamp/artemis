@@ -249,6 +249,45 @@ func (c *Client) deleteBatch(ctx context.Context, ids []s3types.ObjectIdentifier
 	return len(ids), nil
 }
 
+func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (int, error) {
+	var moved int
+	var token *string
+	for {
+		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            awsv2.String(c.bucket),
+			Prefix:            awsv2.String(srcPrefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return moved, fmt.Errorf("r2 moveprefix list %s: %w", srcPrefix, err)
+		}
+		for _, obj := range page.Contents {
+			if obj.Key == nil {
+				continue
+			}
+			key := *obj.Key
+			dstKey := dstPrefix + strings.TrimPrefix(key, srcPrefix)
+			_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+				Bucket:     awsv2.String(c.bucket),
+				Key:        awsv2.String(dstKey),
+				CopySource: awsv2.String(c.bucket + "/" + key),
+			})
+			if err != nil {
+				return moved, fmt.Errorf("r2 moveprefix copy %s->%s: %w", key, dstKey, err)
+			}
+			if err := c.DeleteObject(ctx, key); err != nil {
+				return moved, fmt.Errorf("r2 moveprefix delete %s: %w", key, err)
+			}
+			moved++
+		}
+		if page.IsTruncated == nil || !*page.IsTruncated {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	return moved, nil
+}
+
 // VerifyError is returned when VerifyDeployComplete finds expected files
 // missing from the deploy prefix. The Missing field lists the files that
 // did not surface in the listing.
