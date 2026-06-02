@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,8 +38,8 @@ func (r *Relay) RunOnce(ctx context.Context) (int, error) {
 	var done []int64
 	for _, e := range events {
 		if err := r.Publisher.Publish(ctx, e.Topic, e.Payload); err != nil {
-			r.mark(ctx, done)
-			return len(done), fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
+			pubErr := fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
+			return len(done), errors.Join(pubErr, r.mark(ctx, done))
 		}
 		done = append(done, e.ID)
 	}
