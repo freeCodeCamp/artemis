@@ -127,6 +127,25 @@ func TestReconcile_AliasedMissingNotPruned(t *testing.T) {
 	assert.Equal(t, []string{"live"}, report.AliasedMissing)
 }
 
+func TestReconcile_AliasedOrphanNotTombstoned(t *testing.T) {
+	id := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + id + "/index.html"}}
+	store := &fakeReconcileStore{
+		deploys: map[string][]Deploy{},
+		aliases: map[string]struct{}{id: {}},
+	}
+	mover := &fakeMover{}
+
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+
+	assert.NotContains(t, report.OrphanTombstoned, id,
+		"an alias-pinned deploy is never tombstoned even when unindexed + marker-less + past grace (V1)")
+	assert.Empty(t, mover.moves, "no R2 move of an aliased deploy")
+	assert.Empty(t, store.tombstoned)
+	assert.Contains(t, report.AliasedMissing, id, "surfaced as drift to alert on instead")
+}
+
 func TestReconcile_DriftMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
