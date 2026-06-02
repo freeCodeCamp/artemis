@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
@@ -225,6 +226,14 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 	return deleted, nil
 }
 
+func encodeCopySource(bucket, key string) string {
+	segs := strings.Split(key, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return bucket + "/" + strings.Join(segs, "/")
+}
+
 func (c *Client) deleteBatch(ctx context.Context, ids []s3types.ObjectIdentifier) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -270,7 +279,7 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 			_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
 				Bucket:     awsv2.String(c.bucket),
 				Key:        awsv2.String(dstKey),
-				CopySource: awsv2.String(c.bucket + "/" + key),
+				CopySource: awsv2.String(encodeCopySource(c.bucket, key)),
 			})
 			if err != nil {
 				return moved, fmt.Errorf("r2 moveprefix copy %s->%s: %w", key, dstKey, err)

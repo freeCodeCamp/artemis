@@ -223,9 +223,16 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
+	for i := 0; i < len(copySource); i++ {
+		if b := copySource[i]; b == ' ' || b > 0x7F {
+			http.Error(w, "InvalidArgument: x-amz-copy-source must be URL-encoded", http.StatusBadRequest)
+			return
+		}
+	}
 	src, err := url.PathUnescape(copySource)
 	if err != nil {
-		src = copySource
+		http.Error(w, "InvalidArgument: bad copy-source escaping", http.StatusBadRequest)
+		return
 	}
 	src = strings.TrimPrefix(src, "/")
 	srcKey := strings.TrimPrefix(src, f.bucket+"/")
@@ -570,6 +577,21 @@ func TestMovePrefix(t *testing.T) {
 	kept, err := c.HasPrefix(context.Background(), "www/deploys/d2/")
 	require.NoError(t, err)
 	assert.True(t, kept, "sibling deploy untouched")
+}
+
+func TestMovePrefix_EncodesCopySource(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	key := "www/deploys/d1/café menu.html"
+	require.NoError(t, c.PutObject(context.Background(), key, bytes.NewReader([]byte("body")), "text/html", 4))
+
+	n, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
+	require.NoError(t, err, "tombstone-move must handle keys with spaces / non-ASCII (URL-encoded copy-source)")
+	assert.Equal(t, 1, n)
+
+	got, err := c.GetAlias(context.Background(), "_trash/www/d1/café menu.html")
+	require.NoError(t, err)
+	assert.Equal(t, "body", got, "object preserved at destination under its original (decoded) key")
 }
 
 func TestMovePrefix_EmptyNoop(t *testing.T) {
