@@ -187,7 +187,11 @@ func (h *Handlers) reconcileStaleClaim(r *http.Request, name string) bool {
 		switch req.Status {
 		case reporequest.StatusActive:
 			exists, _, gErr := h.GitHubApp.RepoExists(r.Context(), req.Name)
-			if gErr != nil || exists {
+			if gErr != nil {
+				slog.Warn("repo.create.reconcile_probe_failed", "id", req.ID, "name", req.Name, "err", gErr, "reqID", RequestIDFromContext(r.Context()))
+				return false
+			}
+			if exists {
 				return false
 			}
 			if _, mErr := h.Repos.MarkStale(r.Context(), req.ID, "repository no longer exists on GitHub; name claim reconciled"); mErr != nil {
