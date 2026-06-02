@@ -57,6 +57,11 @@ type R2Store interface {
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 	HasPrefix(ctx context.Context, prefix string) (bool, error)
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
+	MovePrefix(ctx context.Context, src, dst string) (int, error)
+}
+
+type TombstoneStore interface {
+	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
 }
 
 // RegistryHealth is the readiness probe contract for the registry
@@ -76,6 +81,8 @@ type Handlers struct {
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
+	Tombstones         TombstoneStore
+	TrashPrefixBase    string // e.g. "_trash/"
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or

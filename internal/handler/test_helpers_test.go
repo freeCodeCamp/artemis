@@ -373,6 +373,23 @@ func (f *fakeR2) HasPrefix(_ context.Context, prefix string) (bool, error) {
 	return false, nil
 }
 
+func (f *fakeR2) MovePrefix(_ context.Context, src, dst string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return 0, f.listErr
+	}
+	var moved int
+	for k, v := range f.objects {
+		if hasPrefix(k, src) {
+			f.objects[dst+trimPrefix(k, src)] = v
+			delete(f.objects, k)
+			moved++
+		}
+	}
+	return moved, nil
+}
+
 func (f *fakeR2) VerifyDeployComplete(_ context.Context, prefix string, expected []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
