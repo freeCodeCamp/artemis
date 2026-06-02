@@ -98,25 +98,22 @@ func TestBackfill(t *testing.T) {
 		"mtime parsed from deploy-id timestamp")
 }
 
-func TestBackfill_HonorsAliasKeyFormat(t *testing.T) {
+func TestBackfill_AliasKeyIsR2DirRelative(t *testing.T) {
+	dir := "www.freecode.camp"
 	lister := &fakeLister{
-		sites: []string{"www"},
-		byPfx: map[string][]string{"www/deploys/": {"www/deploys/20260420-141522-abc1234/index.html"}},
+		sites: []string{dir},
+		byPfx: map[string][]string{dir + "/deploys/": {dir + "/deploys/20260420-141522-abc1234/index.html"}},
 		aliases: map[string]string{
-			"www/prod":    "20260420-141522-abc1234",
-			"www/staging": "20260420-141522-abc1234",
+			dir + "/production": "20260420-141522-abc1234",
+			dir + "/preview":    "20260420-141522-abc1234",
 		},
 	}
 	idx := &fakeIndexer{}
-	b := &Backfill{
-		Lister:           lister,
-		Indexer:          idx,
-		Now:              func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) },
-		ProductionKeyFmt: "<site>/prod",
-		PreviewKeyFmt:    "<site>/staging",
-	}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
 
 	res, err := b.Run(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 2, res.Aliases, "backfill reads aliases at the configured (non-default) key format")
+	assert.Equal(t, 1, res.Deploys)
+	assert.Equal(t, 2, res.Aliases,
+		"alias key is the R2-dir-relative literal <dir>/<mode>; the dir from ListSites already carries the .freecode.camp suffix, so the slug-templated ALIAS_*_KEY_FORMAT must NOT be re-applied")
 }

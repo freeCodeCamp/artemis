@@ -22,22 +22,9 @@ type Indexer interface {
 }
 
 type Backfill struct {
-	Lister           Lister
-	Indexer          Indexer
-	Now              func() time.Time
-	ProductionKeyFmt string
-	PreviewKeyFmt    string
-}
-
-func (b *Backfill) aliasKey(mode, site string) string {
-	f := b.PreviewKeyFmt
-	if mode == "production" {
-		f = b.ProductionKeyFmt
-	}
-	if f == "" {
-		f = "<site>/" + mode
-	}
-	return strings.ReplaceAll(f, "<site>", site)
+	Lister  Lister
+	Indexer Indexer
+	Now     func() time.Time
 }
 
 type Result struct {
@@ -90,7 +77,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 		}
 
 		for _, mode := range []string{"production", "preview"} {
-			v, err := b.Lister.GetAlias(ctx, b.aliasKey(mode, site))
+			v, err := b.Lister.GetAlias(ctx, site+"/"+mode)
 			if err != nil {
 				if r2.IsNotFound(err) {
 					continue
