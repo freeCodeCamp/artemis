@@ -3,6 +3,7 @@ package gc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type SiteGC struct {
 	DeployPrefix func(site, id string) string
 	TrashPrefix  func(site, id string) string
 	Now          func() time.Time
+	Metrics      *Metrics
 }
 
 type GCResult struct {
@@ -62,9 +64,13 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	if plan.Aborted {
 		res.Aborted = true
 		res.AbortReason = plan.Reason
+		g.Metrics.run(WorkflowGCSiteLabel, "aborted")
+		slog.Warn("gc.site.aborted", "site", site, "planned", len(res.Planned), "reason", plan.Reason)
 		return res, nil
 	}
 	if dryRun {
+		g.Metrics.run(WorkflowGCSiteLabel, "dry-run")
+		slog.Info("gc.site.dry-run", "site", site, "planned", len(res.Planned))
 		return res, nil
 	}
 
@@ -88,5 +94,13 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 		res.Tombstoned = append(res.Tombstoned, d.ID)
 		res.BytesReclaimed += d.Bytes
 	}
+
+	g.Metrics.tombstoned(len(res.Tombstoned))
+	g.Metrics.run(WorkflowGCSiteLabel, "ok")
+	slog.Info("gc.site.done", "site", site,
+		"planned", len(res.Planned),
+		"tombstoned", len(res.Tombstoned),
+		"skippedAliased", len(res.SkippedAliased),
+		"bytes", res.BytesReclaimed)
 	return res, nil
 }

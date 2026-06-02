@@ -3,6 +3,7 @@ package gc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -28,6 +29,7 @@ type TombstonePurge struct {
 	Recovery  time.Duration
 	TrashBase string
 	Now       func() time.Time
+	Metrics   *Metrics
 }
 
 type PurgeResult struct {
@@ -69,5 +71,11 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 		res.Purged = append(res.Purged, label)
 		res.BytesReclaimed += t.Bytes
 	}
+
+	if !dryRun {
+		p.Metrics.reclaimed(res.BytesReclaimed)
+		p.Metrics.run(WorkflowTombstonePurgeLabel, "ok")
+	}
+	slog.Info("gc.tombstone-purge.done", "purged", len(res.Purged), "bytes", res.BytesReclaimed, "dryRun", dryRun)
 	return res, nil
 }
