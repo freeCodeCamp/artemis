@@ -199,8 +199,32 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("site.delete", "slug", slug, "reqID", RequestIDFromContext(r.Context()))
-	w.WriteHeader(http.StatusNoContent)
+
+	if r.URL.Query().Get("purge") != "true" {
+		slog.Info("site.delete", "slug", slug, "reqID", RequestIDFromContext(r.Context()))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if h.Tombstones == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "tombstone store not configured")
+		return
+	}
+	base := h.TrashPrefixBase
+	if base == "" {
+		base = "_trash/"
+	}
+	moved, err := h.R2.MovePrefix(r.Context(), slug+"/", base+slug+"/")
+	if err != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
+		return
+	}
+	if err := h.Tombstones.RecordTombstone(r.Context(), slug, "", 0); err != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
+		return
+	}
+	slog.Info("site.purge", "slug", slug, "moved", moved, "reqID", RequestIDFromContext(r.Context()))
+	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
 }
 
 // SitesList implements GET /api/sites — enumerates every registered
