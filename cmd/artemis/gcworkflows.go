@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
@@ -12,7 +14,24 @@ import (
 const (
 	topicSiteReconcile = "site.reconcile"
 	cronTombstonePurge = "0 3 * * *"
+	relayInterval      = 5 * time.Second
 )
+
+func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := relay.RunOnce(ctx); err != nil {
+				slog.Error("relay.run", "err", err)
+				observability.CaptureBackground("relay.run", err)
+			}
+		}
+	}
+}
 
 func gcWorkflowDefs(gcw *gcWiring, dryRun bool) []worker.WorkflowDef {
 	return []worker.WorkflowDef{

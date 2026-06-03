@@ -226,6 +226,10 @@ func run() error {
 			slog.Info("worker: starting", "addr", cfg.Hatchet.Addr)
 			workerErrCh <- workerRuntime.Start(rootCtx)
 		}()
+
+		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
+		go runRelayLoop(rootCtx, relay, relayInterval)
+		slog.Info("outbox relay: started", "interval", relayInterval)
 	}
 
 	h := &handler.Handlers{
