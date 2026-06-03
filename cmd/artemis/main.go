@@ -23,6 +23,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/observability"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
@@ -88,6 +89,17 @@ func run() error {
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	pgDB, pgCleanup, err := openPostgres(rootCtx, cfg)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
+	defer pgCleanup()
+	if pgDB != nil {
+		slog.Info("postgres: connected, migrations applied")
+	} else {
+		slog.Info("postgres disabled (DATABASE_URL unset); deploy-only mode, GC off")
+	}
 
 	registryStore, registryReader, registryCleanup, err := openRegistry(rootCtx, cfg)
 	if err != nil {
@@ -237,6 +249,21 @@ func run() error {
 	}
 	slog.Info("artemis: shutdown complete")
 	return nil
+}
+
+func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), error) {
+	if !cfg.GCEnabled() {
+		return nil, func() {}, nil
+	}
+	db, err := pg.New(ctx, pg.Config{DatabaseURL: cfg.DatabaseURL})
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect: %w", err)
+	}
+	if err := pg.Migrate(ctx, db.Pool); err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("migrate: %w", err)
+	}
+	return db, db.Close, nil
 }
 
 // openRegistry constructs the Valkey-backed registry store + reader.
