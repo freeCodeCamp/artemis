@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/backfill"
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/handler"
@@ -15,6 +16,8 @@ import (
 var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
+	_ backfill.Lister           = (*r2.Client)(nil)
+	_ backfill.Indexer          = (*pg.Repo)(nil)
 )
 
 const deployIDToken = "<ts>-<sha>"

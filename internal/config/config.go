@@ -40,6 +40,7 @@ type Config struct {
 	Repo               RepoConfig
 	Sentry             SentryConfig
 	DatabaseURL        string
+	BackfillOnBoot     bool
 	Hatchet            HatchetConfig
 	Cleanup            CleanupConfig
 }
@@ -335,6 +336,9 @@ func Load() (*Config, error) {
 	}
 
 	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+	if v := os.Getenv("BACKFILL_ON_BOOT"); v != "" {
+		cfg.BackfillOnBoot = v == "1" || strings.EqualFold(v, "true")
+	}
 	cfg.Hatchet.ClientToken = os.Getenv("HATCHET_CLIENT_TOKEN")
 	cfg.Hatchet.Addr = os.Getenv("HATCHET_ADDR")
 

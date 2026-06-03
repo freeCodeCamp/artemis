@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/backfill"
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
@@ -208,6 +209,19 @@ func run() error {
 	var pgRepo *pg.Repo
 	if gcw != nil {
 		pgRepo = gcw.Repo
+	}
+
+	if cfg.BackfillOnBoot {
+		if pgRepo == nil {
+			return fmt.Errorf("BACKFILL_ON_BOOT set but DATABASE_URL is unset")
+		}
+		res, err := (&backfill.Backfill{Lister: r2Client, Indexer: pgRepo, Now: time.Now}).Run(rootCtx)
+		if err != nil {
+			return fmt.Errorf("backfill: %w", err)
+		}
+		slog.Info("backfill complete (one-shot)",
+			"sites", res.Sites, "deploys", res.Deploys, "aliases", res.Aliases)
+		return nil
 	}
 
 	var hatchetAdapter *hatchet.Adapter
