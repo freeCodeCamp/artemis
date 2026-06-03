@@ -20,6 +20,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/observability"
@@ -187,6 +188,20 @@ func run() error {
 		metrics.RegistryRefreshFailures.Inc()
 		observability.CaptureBackground("registry.refresh", err)
 	})
+
+	var gcw *gcWiring
+	if pgDB != nil {
+		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client, gc.NewMetrics(metricsReg))
+		if err != nil {
+			return fmt.Errorf("wire gc: %w", err)
+		}
+		slog.Info("gc: wired",
+			"siteGCReady", gcw.SiteGC != nil,
+			"blastCap", cfg.Cleanup.BlastCap,
+			"retentionDays", cfg.Cleanup.RetentionDays,
+			"dryRun", cfg.Cleanup.DryRun,
+		)
+	}
 
 	h := &handler.Handlers{
 		GH:                   ghClient,
