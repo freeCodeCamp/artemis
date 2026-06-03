@@ -23,12 +23,14 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/freeCodeCamp/artemis/internal/hatchet"
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
+	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -203,6 +205,24 @@ func run() error {
 		)
 	}
 
+	var hatchetAdapter *hatchet.Adapter
+	workerErrCh := make(chan error, 1)
+	if gcw != nil && cfg.Hatchet.Addr != "" {
+		hatchetAdapter = hatchet.New(hatchet.Config{
+			Token:      cfg.Hatchet.ClientToken,
+			Addr:       cfg.Hatchet.Addr,
+			WorkerName: "artemis",
+		})
+		workerRuntime := worker.NewRuntime(hatchetAdapter)
+		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun); err != nil {
+			return fmt.Errorf("register gc workflows: %w", err)
+		}
+		go func() {
+			slog.Info("worker: starting", "addr", cfg.Hatchet.Addr)
+			workerErrCh <- workerRuntime.Start(rootCtx)
+		}()
+	}
+
 	h := &handler.Handlers{
 		GH:                   ghClient,
 		JWT:                  signer,
@@ -255,6 +275,10 @@ func run() error {
 		slog.Info("artemis: shutdown signal received")
 	case err := <-errCh:
 		return fmt.Errorf("listen: %w", err)
+	case err := <-workerErrCh:
+		if err != nil {
+			return fmt.Errorf("worker: %w", err)
+		}
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

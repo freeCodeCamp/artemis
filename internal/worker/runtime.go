@@ -13,6 +13,7 @@ const (
 	WorkflowManualDelete   = "manual-delete"
 	WorkflowSitePurge      = "site-purge"
 	WorkflowTombstonePurge = "tombstone-purge"
+	WorkflowReconcile      = "reconcile"
 )
 
 type Handler func(ctx context.Context, input map[string]any) error
