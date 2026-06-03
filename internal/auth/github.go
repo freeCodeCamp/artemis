@@ -148,7 +148,7 @@ func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (s
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(resp.Body)
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
@@ -172,6 +172,9 @@ func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (s
 		return "", fmt.Errorf("github /user: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
+	if readErr != nil {
+		return "", fmt.Errorf("github /user: read body: %w", readErr)
+	}
 	var u struct {
 		Login string `json:"login"`
 	}
@@ -273,17 +276,21 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, readErr := io.ReadAll(resp.Body)
 
 	var member bool
 	switch {
 	case resp.StatusCode == http.StatusOK:
+		if readErr != nil {
+			return false, fmt.Errorf("github team membership: read body: %w", readErr)
+		}
 		var m struct {
 			State string `json:"state"`
 		}
-		if err := json.Unmarshal(body, &m); err == nil {
-			member = m.State == "active"
+		if err := json.Unmarshal(body, &m); err != nil {
+			return false, fmt.Errorf("github team membership: parse: %w", err)
 		}
+		member = m.State == "active"
 	case resp.StatusCode == http.StatusNotFound:
 		member = false
 	case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
@@ -353,7 +360,7 @@ func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token strin
 		if err != nil {
 			return nil, fmt.Errorf("github: %w", err)
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 
 		switch {
@@ -371,6 +378,9 @@ func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token strin
 			return nil, fmt.Errorf("github /user/teams: unexpected status %d: %s", resp.StatusCode, string(body))
 		}
 
+		if readErr != nil {
+			return nil, fmt.Errorf("github /user/teams: read body: %w", readErr)
+		}
 		var pageTeams []struct {
 			Slug         string `json:"slug"`
 			Organization struct {

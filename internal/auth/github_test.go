@@ -124,6 +124,21 @@ func TestGitHubClient_Cache_HitsAndExpires(t *testing.T) {
 	assert.EqualValues(t, 2, gh.userCalls.Load(), "expected cache to expire and refresh")
 }
 
+func TestGitHubClient_TeamMembership_MalformedBodyIsTransient(t *testing.T) {
+	gh := newFakeGH()
+	defer gh.Close()
+	gh.memberStatus = 200
+	gh.memberBody = `{"state":` // truncated JSON
+
+	c := NewGitHubClient(GitHubClientConfig{APIBase: gh.server.URL, Org: "freeCodeCamp", CacheTTL: time.Minute})
+
+	_, err := c.IsTeamMember(context.Background(), "ghp_test", "alice", "team-eng")
+	require.Error(t, err, "a 200 with an unparseable body must surface as a transient error, not a silent non-member")
+
+	_, _ = c.IsTeamMember(context.Background(), "ghp_test", "alice", "team-eng")
+	assert.EqualValues(t, 2, gh.memberCalls.Load(), "a parse failure must not be cached as a membership denial")
+}
+
 func TestGitHubClient_TeamMembership_Active(t *testing.T) {
 	gh := newFakeGH()
 	defer gh.Close()
