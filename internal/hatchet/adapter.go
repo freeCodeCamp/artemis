@@ -101,6 +101,12 @@ func (a *Adapter) buildWorkflow(client *hsdk.Client, def worker.WorkflowDef) *hs
 			LimitStrategy: &strategy,
 		}))
 	}
+	if len(def.EventTriggers) > 0 {
+		opts = append(opts, hsdk.WithWorkflowEvents(def.EventTriggers...))
+	}
+	if len(def.Cron) > 0 {
+		opts = append(opts, hsdk.WithWorkflowCron(def.Cron...))
+	}
 	wf := client.NewWorkflow(def.Name, opts...)
 	handler := def.Handler
 	wf.NewTask(def.Name, func(ctx hsdk.Context, input map[string]any) (any, error) {

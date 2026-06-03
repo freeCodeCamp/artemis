@@ -20,6 +20,8 @@ type Handler func(ctx context.Context, input map[string]any) error
 type WorkflowDef struct {
 	Name           string
 	ConcurrencyKey string
+	EventTriggers  []string
+	Cron           []string
 	Handler        Handler
 }
 
