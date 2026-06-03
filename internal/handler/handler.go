@@ -126,6 +126,12 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 	}
 	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {
 		slog.Error("outbox enqueue site.changed failed", "site", site, "err", err)
+		sentry.WithScope(func(scope *sentry.Scope) {
+			scope.SetTag("op", "outbox.enqueue")
+			scope.SetTag("site", site)
+			scope.SetFingerprint([]string{"outbox.enqueue"})
+			sentry.CaptureException(err)
+		})
 	}
 }
 
