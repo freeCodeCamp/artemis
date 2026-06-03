@@ -12,17 +12,23 @@ import (
 )
 
 type fakeReconcileStore struct {
-	deploys    map[string][]Deploy
-	aliases    map[string]struct{}
-	reindexed  []string
-	tombstoned []string
-	pruned     []string
+	deploys      map[string][]Deploy
+	aliases      map[string]struct{}
+	aliasesAfter map[string]struct{}
+	aliasCalls   int
+	reindexed    []string
+	tombstoned   []string
+	pruned       []string
 }
 
 func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
 	return s.deploys[site], nil
 }
 func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ string) (map[string]struct{}, time.Time, error) {
+	s.aliasCalls++
+	if s.aliasesAfter != nil && s.aliasCalls >= 2 {
+		return s.aliasesAfter, time.Time{}, nil
+	}
 	return s.aliases, time.Time{}, nil
 }
 func (s *fakeReconcileStore) UpsertDeploy(_ context.Context, _, id string, _ time.Time, _ int64, _ bool, _ string) error {
@@ -144,6 +150,24 @@ func TestReconcile_AliasedOrphanNotTombstoned(t *testing.T) {
 	assert.Empty(t, mover.moves, "no R2 move of an aliased deploy")
 	assert.Empty(t, store.tombstoned)
 	assert.Contains(t, report.AliasedMissing, id, "surfaced as drift to alert on instead")
+}
+
+func TestReconcile_AliasRaceAfterSnapshotNotTombstoned(t *testing.T) {
+	id := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + id + "/index.html"}}
+	store := &fakeReconcileStore{
+		deploys:      map[string][]Deploy{},
+		aliases:      map[string]struct{}{},
+		aliasesAfter: map[string]struct{}{id: {}},
+	}
+	mover := &fakeMover{}
+
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+
+	assert.Empty(t, mover.moves, "deploy aliased after the snapshot read must not be tombstoned (V1 TOCTOU)")
+	assert.Empty(t, store.tombstoned)
+	assert.NotContains(t, report.OrphanTombstoned, id)
 }
 
 func TestReconcile_DriftMetrics(t *testing.T) {

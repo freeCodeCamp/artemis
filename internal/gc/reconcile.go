@@ -109,6 +109,16 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 			}
 			report.Reindexed = append(report.Reindexed, id)
 		case rc.Now().Sub(info.mtime) >= rc.Grace:
+			nowAliases, _, err := rc.Store.AliasTargets(ctx, site)
+			if err != nil {
+				return report, fmt.Errorf("reconcile %s: re-read aliases before tombstone %s: %w", site, id, err)
+			}
+			if _, nowAliased := nowAliases[id]; nowAliased {
+				report.AliasedMissing = append(report.AliasedMissing, id)
+				slog.Error("reconcile.aliased_raced", "site", site, "deployId", id,
+					"detail", "alias appeared after snapshot read; skip tombstone (V1)")
+				continue
+			}
 			if _, err := rc.Mover.MovePrefix(ctx, rc.DeployPrefix(site, id), rc.TrashPrefix(site, id)); err != nil {
 				return report, fmt.Errorf("reconcile %s: tombstone orphan %s: %w", site, id, err)
 			}
