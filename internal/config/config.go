@@ -11,6 +11,8 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -388,6 +390,9 @@ func (c *Config) validate() error {
 	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
 		return err
 	}
+	if err := validateGitHubAPIBase(c.GitHub.APIBase); err != nil {
+		return err
+	}
 	if c.Registry.Valkey.Addr == "" {
 		return missing("VALKEY_ADDR")
 	}
@@ -451,6 +456,33 @@ func validateDeployPrefixFormat(fmtStr string) error {
 			fmtStr, strings.Join(missing, " and "))
 	}
 	return nil
+}
+
+func validateGitHubAPIBase(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid GH_API_BASE %q: %w", raw, err)
+	}
+	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("invalid GH_API_BASE %q: must be an absolute http(s) URL", raw)
+	}
+	if u.User != nil {
+		return fmt.Errorf("invalid GH_API_BASE %q: must not embed credentials", raw)
+	}
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("invalid GH_API_BASE %q: plaintext http is allowed only for loopback hosts; a bearer token must never traverse cleartext to a remote", raw)
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func (c *Config) GCEnabled() bool { return c.DatabaseURL != "" }

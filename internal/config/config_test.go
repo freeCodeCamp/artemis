@@ -58,6 +58,46 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Empty(t, cfg.Registry.Valkey.Password)
 }
 
+func TestLoad_GitHubAPIBaseValidation(t *testing.T) {
+	valid := []string{
+		"",                         // unset -> default https://api.github.com
+		"https://api.github.com",   // canonical
+		"https://ghe.corp.example", // GitHub Enterprise
+		"http://127.0.0.1:8080",    // loopback recording proxy
+		"http://localhost:3000",    // loopback by name
+		"http://[::1]:9090",        // loopback v6
+	}
+	for _, base := range valid {
+		t.Run("valid/"+base, func(t *testing.T) {
+			for k, v := range requiredEnv() {
+				t.Setenv(k, v)
+			}
+			t.Setenv("GH_API_BASE", base)
+			_, err := Load()
+			require.NoError(t, err)
+		})
+	}
+
+	invalid := []string{
+		"http://evil.example.com",      // cleartext to a remote -> bearer exfil
+		"http://api.github.com",        // cleartext downgrade of canonical host
+		"https://user:pass@gh.example", // embedded credentials
+		"ftp://gh.example",             // non-http scheme
+		"gh.example.com",               // no scheme/host
+		"://broken",                    // unparseable
+	}
+	for _, base := range invalid {
+		t.Run("invalid/"+base, func(t *testing.T) {
+			for k, v := range requiredEnv() {
+				t.Setenv(k, v)
+			}
+			t.Setenv("GH_API_BASE", base)
+			_, err := Load()
+			require.Error(t, err, "GH_API_BASE %q must be rejected", base)
+		})
+	}
+}
+
 func TestLoad_OverridesViaEnv(t *testing.T) {
 	for k, v := range requiredEnv() {
 		t.Setenv(k, v)
