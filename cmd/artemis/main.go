@@ -266,6 +266,9 @@ func run() error {
 		h.Outbox = pgRepo
 		h.Tombstones = pgRepo
 	}
+	if pgDB != nil {
+		h.PGHealth = pgDB
+	}
 
 	addr := ":" + strconv.Itoa(cfg.Port)
 	srv := &http.Server{

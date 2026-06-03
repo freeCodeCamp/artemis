@@ -33,6 +33,50 @@ func TestReadyZ_NoAuthRequired_BothUpstreamsReachable_ReturnsOK(t *testing.T) {
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 }
 
+func TestReadyzDegraded_PGDown_Returns200Degraded(t *testing.T) {
+	h := &Handlers{
+		Health:   &fakeHealth{},
+		R2:       newFakeR2(),
+		PGHealth: &fakeHealth{err: errors.New("dial tcp artemis-postgresql:5432: i/o timeout")},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, "PG down is degraded, not down — serve plane unaffected (R6/R7)")
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String())
+}
+
+func TestReadyzDegraded_PGUp_ReturnsReady(t *testing.T) {
+	h := &Handlers{
+		Health:   &fakeHealth{},
+		R2:       newFakeR2(),
+		PGHealth: &fakeHealth{},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"ready":true}`, w.Body.String())
+}
+
+func TestReadyzDegraded_ValkeyDownHardFailsEvenIfPGUp(t *testing.T) {
+	h := &Handlers{
+		Health:   &fakeHealth{err: errors.New("valkey down")},
+		R2:       newFakeR2(),
+		PGHealth: &fakeHealth{},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, "Valkey/R2 down = hard down even when PG ok")
+}
+
 func TestReadyZ_ValkeyDown_Returns503_ValkeyUnreachable(t *testing.T) {
 	h := &Handlers{
 		Health: &fakeHealth{err: errors.New("dial tcp valkey:6379: i/o timeout")},

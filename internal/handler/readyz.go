@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ const readyZProbeTimeout = 5 * time.Second
 // probes.
 func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
-	var valkeyErr, r2Err error
+	var valkeyErr, r2Err, pgErr error
 
 	if h.Health != nil {
 		wg.Add(1)
@@ -42,6 +43,16 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	if h.PGHealth != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
+			defer cancel()
+			pgErr = h.PGHealth.Ping(ctx)
+		}()
+	}
+
 	wg.Wait()
 
 	switch {
@@ -49,6 +60,9 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusServiceUnavailable, "valkey_unreachable", "valkey.ping", valkeyErr)
 	case r2Err != nil:
 		writeUpstreamError(w, r, http.StatusServiceUnavailable, "r2_unreachable", "r2.has_prefix", r2Err)
+	case pgErr != nil:
+		slog.Error("readyz: postgres degraded", "err", pgErr)
+		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
 	default:
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
 	}
