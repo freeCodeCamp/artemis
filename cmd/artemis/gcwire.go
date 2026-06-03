@@ -7,8 +7,14 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+)
+
+var (
+	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
+	_ handler.TombstoneStore    = (*pg.Repo)(nil)
 )
 
 const deployIDToken = "<ts>-<sha>"

@@ -205,6 +205,11 @@ func run() error {
 		)
 	}
 
+	var pgRepo *pg.Repo
+	if gcw != nil {
+		pgRepo = gcw.Repo
+	}
+
 	var hatchetAdapter *hatchet.Adapter
 	workerErrCh := make(chan error, 1)
 	if gcw != nil && cfg.Hatchet.Addr != "" {
@@ -233,6 +238,7 @@ func run() error {
 		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
 		DeployPrefix:         deployPrefix,
+		TrashPrefixBase:      cfg.Cleanup.TrashPrefix,
 		UploadMaxBytes:       cfg.UploadMaxBytes,
 		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
 		RepoOrg:              cfg.Repo.Org,
@@ -250,6 +256,11 @@ func run() error {
 		h.RepoGH = repoGH
 		h.Repos = repoStore
 		h.GitHubApp = appClient
+	}
+
+	if pgRepo != nil {
+		h.Outbox = pgRepo
+		h.Tombstones = pgRepo
 	}
 
 	addr := ":" + strconv.Itoa(cfg.Port)
