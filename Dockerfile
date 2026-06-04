@@ -2,8 +2,8 @@
 
 # ---- builder ----
 # Digest pinned for reproducible builds. Refresh via:
-#   docker buildx imagetools inspect golang:1.26.2-alpine
-FROM golang:1.26.2-alpine@sha256:f85330846cde1e57ca9ec309382da3b8e6ae3ab943d2739500e08c86393a21b1 AS builder
+#   docker buildx imagetools inspect golang:1.26.4-alpine
+FROM golang:1.26.4-alpine@sha256:103c743516b0d9dd69c203ed64f730eb342cae4b85d3f6c5cb376d91abbc6bcb AS builder
 WORKDIR /src
 
 # Copy go.mod / go.sum first to maximize layer cache reuse on dep changes.
