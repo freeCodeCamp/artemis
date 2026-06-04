@@ -72,9 +72,9 @@ func TestDebounce_StaleCallbackDoesNotDropNewerTimer(t *testing.T) {
 	d.mu.Lock()
 	fresh := d.timers["www"]
 	d.mu.Unlock()
-	require.NotSame(t, stale, fresh, "second Notify installs a distinct timer")
+	require.NotEqual(t, stale.gen, fresh.gen, "second Notify installs a distinct timer")
 
-	d.fire("www", stale)
+	d.fire("www", stale.gen)
 
 	mu.Lock()
 	assert.Equal(t, 0, count, "stale in-flight callback must not Trigger")
@@ -83,7 +83,7 @@ func TestDebounce_StaleCallbackDoesNotDropNewerTimer(t *testing.T) {
 	d.mu.Lock()
 	got := d.timers["www"]
 	d.mu.Unlock()
-	assert.Same(t, fresh, got, "stale callback must not delete the newer timer entry")
+	assert.Equal(t, fresh.gen, got.gen, "stale callback must not delete the newer timer entry")
 }
 
 func TestDebounce_StopHaltsPendingTriggers(t *testing.T) {

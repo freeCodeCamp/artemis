@@ -10,12 +10,18 @@ type Debouncer struct {
 	Trigger func(site string)
 
 	mu      sync.Mutex
-	timers  map[string]*time.Timer
+	gen     uint64
+	timers  map[string]debounceEntry
 	stopped bool
 }
 
+type debounceEntry struct {
+	timer *time.Timer
+	gen   uint64
+}
+
 func NewDebouncer(window time.Duration, trigger func(site string)) *Debouncer {
-	return &Debouncer{Window: window, Trigger: trigger, timers: map[string]*time.Timer{}}
+	return &Debouncer{Window: window, Trigger: trigger, timers: map[string]debounceEntry{}}
 }
 
 func (d *Debouncer) Notify(site string) {
@@ -24,17 +30,19 @@ func (d *Debouncer) Notify(site string) {
 	if d.stopped {
 		return
 	}
-	if t, ok := d.timers[site]; ok {
-		t.Stop()
+	if e, ok := d.timers[site]; ok {
+		e.timer.Stop()
 	}
-	var timer *time.Timer
-	timer = time.AfterFunc(d.Window, func() { d.fire(site, timer) })
-	d.timers[site] = timer
+	d.gen++
+	gen := d.gen
+	timer := time.AfterFunc(d.Window, func() { d.fire(site, gen) })
+	d.timers[site] = debounceEntry{timer: timer, gen: gen}
 }
 
-func (d *Debouncer) fire(site string, timer *time.Timer) {
+func (d *Debouncer) fire(site string, gen uint64) {
 	d.mu.Lock()
-	if d.stopped || d.timers[site] != timer {
+	e, ok := d.timers[site]
+	if d.stopped || !ok || e.gen != gen {
 		d.mu.Unlock()
 		return
 	}
@@ -47,8 +55,8 @@ func (d *Debouncer) Stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stopped = true
-	for _, t := range d.timers {
-		t.Stop()
+	for _, e := range d.timers {
+		e.timer.Stop()
 	}
-	d.timers = map[string]*time.Timer{}
+	d.timers = map[string]debounceEntry{}
 }
