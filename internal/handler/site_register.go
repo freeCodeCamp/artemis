@@ -190,17 +190,11 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Registry.Delete(r.Context(), slug); err != nil {
-		switch {
-		case errors.Is(err, registry.ErrNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
-		default:
-			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.delete", err)
-		}
-		return
-	}
-
 	if r.URL.Query().Get("purge") != "true" {
+		if err := h.Registry.Delete(r.Context(), slug); err != nil {
+			writeRegistryDeleteError(w, r, err)
+			return
+		}
 		slog.Info("site.delete", "slug", slug, "reqID", RequestIDFromContext(r.Context()))
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -223,8 +217,20 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 		return
 	}
+	if err := h.Registry.Delete(r.Context(), slug); err != nil {
+		writeRegistryDeleteError(w, r, err)
+		return
+	}
 	slog.Info("site.purge", "slug", slug, "moved", moved, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
+}
+
+func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, registry.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "site is not registered")
+		return
+	}
+	writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.delete", err)
 }
 
 // SitesList implements GET /api/sites — enumerates every registered
