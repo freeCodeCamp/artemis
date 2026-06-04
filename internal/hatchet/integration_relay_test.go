@@ -109,8 +109,7 @@ func restartEngine(t *testing.T) {
 	t.Helper()
 	composeFile := os.Getenv("HATCHET_COMPOSE_FILE")
 	if composeFile == "" {
-		t.Log("HATCHET_COMPOSE_FILE unset; skipping live engine restart, asserting at-least-once without restart")
-		return
+		t.Skip("HATCHET_COMPOSE_FILE unset; across-restart invariant not exercised without the compose stack")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
