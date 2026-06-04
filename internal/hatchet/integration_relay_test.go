@@ -112,7 +112,9 @@ func restartEngine(t *testing.T) {
 		t.Log("HATCHET_COMPOSE_FILE unset; skipping live engine restart, asserting at-least-once without restart")
 		return
 	}
-	cmd := exec.Command("docker", "compose", "-f", composeFile, "restart", "hatchet-lite")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composeFile, "restart", "hatchet-lite")
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "restart hatchet-lite: %s", string(out))
 	time.Sleep(3 * time.Second)
