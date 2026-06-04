@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -370,7 +371,7 @@ func (c *GitHubClient) userTeamsThroughDurableCache(ctx context.Context, cacheKe
 		return nil, err
 	}
 	if err := c.teamCacheDurable.Set(ctx, login, teams); err != nil {
-		return nil, err
+		slog.Warn("durable team cache write failed", "login", login, "err", err)
 	}
 	return teams, nil
 }

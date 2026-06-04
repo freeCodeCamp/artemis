@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -572,6 +573,42 @@ func TestAuthUsesTeamCache(t *testing.T) {
 
 	assert.EqualValues(t, 1, teamsCalls.Load(),
 		"durable teamcache must absorb repeated lookups across fresh clients (replicas/restarts): GitHub /user/teams hit once")
+}
+
+type failingSetTeamCache struct{}
+
+func (failingSetTeamCache) Get(context.Context, string) ([]string, bool, error) {
+	return nil, false, nil
+}
+
+func (failingSetTeamCache) Set(context.Context, string, []string) error {
+	return errors.New("valkey down")
+}
+
+func TestAuthTeamCacheSetFailureNonFatal(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	})
+	mux.HandleFunc("/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"slug":"staff","organization":{"login":"freeCodeCamp"}}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := NewGitHubClient(GitHubClientConfig{
+		APIBase:   server.URL,
+		Org:       "freeCodeCamp",
+		CacheTTL:  time.Minute,
+		TeamCache: failingSetTeamCache{},
+	})
+
+	teams, err := c.UserTeams(context.Background(), "ghp_alice")
+	require.NoError(t, err,
+		"durable cache write failure must not discard successfully fetched teams")
+	assert.Equal(t, []string{"staff"}, teams)
 }
 
 func TestAuthTeamCacheRespectsTTL(t *testing.T) {
