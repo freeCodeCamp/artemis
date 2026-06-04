@@ -1,6 +1,7 @@
 # Binaries
 /bin/
 /artemis
+/loadgen
 *.exe
 *.test
 *.out

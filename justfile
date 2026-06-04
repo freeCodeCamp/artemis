@@ -112,6 +112,10 @@ smoke:
 e2e-local:
     ./scripts/e2e-local.sh
 
+# Scalability load harness: ephemeral pg + registry/outbox/gc throughput (R14)
+loadgen:
+    ./scripts/loadgen.sh
+
 # docker build — multi-stage distroless
 image:
     docker build \
