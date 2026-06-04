@@ -46,8 +46,11 @@ func TestMetrics(t *testing.T) {
 		t.Fatalf("metrics: %v", err)
 	}
 	mustStatus(t, status, http.StatusOK, "metrics")
-	if !strings.Contains(string(body), "artemis_") && !strings.Contains(string(body), "go_") {
-		t.Fatalf("metrics body missing prometheus exposition: %s", truncate(body, 200))
+	if !strings.Contains(string(body), "artemis_") {
+		t.Fatalf("metrics body missing artemis_ prefix: %s", truncate(body, 200))
+	}
+	if !strings.Contains(string(body), "go_") {
+		t.Fatalf("metrics body missing go_ prefix: %s", truncate(body, 200))
 	}
 }
 
