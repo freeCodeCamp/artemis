@@ -1,0 +1,152 @@
+name: artemis-e2e
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: artemis
+      POSTGRES_PASSWORD: artemis
+      POSTGRES_DB: artemis
+    ports:
+      - "${PG_HOST_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artemis -d artemis"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  hatchet-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hatchet
+      POSTGRES_PASSWORD: hatchet
+      POSTGRES_DB: hatchet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hatchet -d hatchet"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  hatchet-lite:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.88.1
+    depends_on:
+      hatchet-postgres:
+        condition: service_healthy
+    ports:
+      - "${HATCHET_GRPC_HOST_PORT:-7077}:7077"
+      - "${HATCHET_DASHBOARD_HOST_PORT:-8888}:8888"
+    environment:
+      DATABASE_URL: "postgresql://hatchet:hatchet@hatchet-postgres:5432/hatchet?sslmode=disable"
+      SERVER_AUTH_COOKIE_DOMAIN: localhost
+      SERVER_AUTH_COOKIE_INSECURE: "t"
+      SERVER_AUTH_SET_EMAIL_VERIFIED: "t"
+      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
+      SERVER_GRPC_INSECURE: "t"
+      SERVER_GRPC_BROADCAST_ADDRESS: "hatchet-lite:7077"
+      SERVER_GRPC_PORT: "7077"
+      SERVER_URL: "http://localhost:8888"
+      SERVER_DEFAULT_ENGINE_VERSION: "V1"
+      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: "hatchet-lite:7077"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:8888/api/ready || exit 1",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - hatchet_lite_config:/config
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --address ":9000" --certs-dir /certs
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - "${E2E_CERTS_DIR:-./.certs}:/certs:ro"
+    ports:
+      - "${MINIO_HOST_PORT:-59000}:9000"
+
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until mc --insecure alias set local https://minio:9000 minioadmin minioadmin; do
+          echo 'waiting for minio'; sleep 1;
+        done;
+        mc --insecure mb --ignore-existing local/universe-static-apps-01;
+        echo 'bucket ready';
+
+  fakegithub:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.fakegithub
+    network_mode: "service:artemis"
+    depends_on:
+      artemis:
+        condition: service_started
+    environment:
+      FAKE_GH_ADDR: "127.0.0.1:9001"
+      FAKE_GH_ORG: "freeCodeCamp-Universe"
+      FAKE_GH_USER: "smoke-bot"
+      FAKE_GH_TEAMS: "staff,apollo-11-approvers"
+      FAKE_GH_APP_ID: "123"
+      FAKE_GH_APP_PUBLIC_KEY: "${FAKE_GH_APP_PUBLIC_KEY:-}"
+      FAKE_GH_TEMPLATES: "universe-static-template"
+
+  artemis:
+    build:
+      context: ../..
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+      hatchet-lite:
+        condition: service_healthy
+    volumes:
+      - "${E2E_CERTS_DIR:-./.certs}:/certs:ro"
+    environment:
+      PORT: "8080"
+      LOG_LEVEL: "debug"
+      R2_ENDPOINT: "https://minio:9000"
+      R2_ACCESS_KEY_ID: "minioadmin"
+      R2_SECRET_ACCESS_KEY: "minioadmin"
+      R2_BUCKET: "universe-static-apps-01"
+      SSL_CERT_FILE: "/certs/public.crt"
+      VALKEY_ADDR: "valkey:6379"
+      DATABASE_URL: "postgres://artemis:artemis@postgres:5432/artemis?sslmode=disable"
+      GH_API_BASE: "http://127.0.0.1:9001"
+      GH_ORG: "freeCodeCamp-Universe"
+      GH_REPO_ORG: "freeCodeCamp-Universe"
+      GH_CLIENT_ID: "Iv1.fakelocalclientid"
+      JWT_SIGNING_KEY: "local-e2e-jwt-signing-key-not-secret-32bytes"
+      GH_APP_ID: "123"
+      GH_APP_INSTALLATION_ID: "456"
+      GH_APP_PRIVATE_KEY: "${GH_APP_PRIVATE_KEY:-}"
+      REPO_APPROVE_AUTHZ_TEAM: "apollo-11-approvers"
+      HATCHET_ADDR: "hatchet-lite:7077"
+      HATCHET_CLIENT_TOKEN: "${HATCHET_CLIENT_TOKEN:-}"
+      HATCHET_CLIENT_TLS_STRATEGY: "none"
+    ports:
+      - "${ARTEMIS_HOST_PORT:-8080}:8080"
+
+volumes:
+  hatchet_lite_config:

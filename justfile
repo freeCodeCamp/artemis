@@ -108,6 +108,10 @@ compose-logs:
 smoke:
     ./scripts/smoke.sh
 
+# Full-stack E2E: boots artemis + pg + valkey + minio + hatchet, runs the e2e suite
+e2e-local:
+    ./scripts/e2e-local.sh
+
 # docker build — multi-stage distroless
 image:
     docker build \
