@@ -31,8 +31,10 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
+	"github.com/freeCodeCamp/artemis/internal/teamcache"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 )
 
 // Build-time identity, injected via -ldflags "-X main.version=... -X main.commit=...".
@@ -123,11 +125,18 @@ func run() error {
 		return fmt.Errorf("init r2: %w", err)
 	}
 
+	githubTeamCache, teamCacheCleanup, err := openTeamCache(rootCtx, cfg)
+	if err != nil {
+		return fmt.Errorf("open team cache: %w", err)
+	}
+	defer teamCacheCleanup()
+
 	// GitHub identity client.
 	ghClient := auth.NewGitHubClient(auth.GitHubClientConfig{
-		APIBase:  cfg.GitHub.APIBase,
-		Org:      cfg.GitHub.Org,
-		CacheTTL: cfg.GitHub.MembershipCacheTTL,
+		APIBase:   cfg.GitHub.APIBase,
+		Org:       cfg.GitHub.Org,
+		CacheTTL:  cfg.GitHub.MembershipCacheTTL,
+		TeamCache: githubTeamCache,
 	})
 
 	// JWT signer.
@@ -363,6 +372,21 @@ func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registr
 		return nil, nil, nil, nil, fmt.Errorf("valkey reader: %w", err)
 	}
 	return writer, reader, store, func() { _ = store.Close() }, nil
+}
+
+func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, func(), error) {
+	if cfg.Registry.Valkey.Addr == "" {
+		return nil, func() {}, nil
+	}
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Registry.Valkey.Addr,
+		Password: cfg.Registry.Valkey.Password,
+	})
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, func() {}, fmt.Errorf("teamcache ping %s: %w", cfg.Registry.Valkey.Addr, err)
+	}
+	return teamcache.New(client, cfg.GitHub.MembershipCacheTTL), func() { _ = client.Close() }, nil
 }
 
 func parseLogLevel(level string) slog.Level {

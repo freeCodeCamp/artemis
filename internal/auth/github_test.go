@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/freeCodeCamp/artemis/internal/teamcache"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -525,4 +528,88 @@ func TestGitHubClient_AuthorizeForSite_NoTeams(t *testing.T) {
 	ok, err := c.AuthorizeForSite(context.Background(), "ghp_test", "alice", nil)
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+func TestAuthUsesTeamCache(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = rdb.Close() }()
+	tc := teamcache.New(rdb, time.Minute)
+
+	userCalls := atomic.Int32{}
+	teamsCalls := atomic.Int32{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		userCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	})
+	mux.HandleFunc("/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		teamsCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"slug":"staff","organization":{"login":"freeCodeCamp"}}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	newClient := func() *GitHubClient {
+		return NewGitHubClient(GitHubClientConfig{
+			APIBase:   server.URL,
+			Org:       "freeCodeCamp",
+			CacheTTL:  time.Minute,
+			TeamCache: tc,
+		})
+	}
+
+	for i := 0; i < 3; i++ {
+		c := newClient()
+		teams, err := c.UserTeams(context.Background(), "ghp_alice")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"staff"}, teams)
+	}
+
+	assert.EqualValues(t, 1, teamsCalls.Load(),
+		"durable teamcache must absorb repeated lookups across fresh clients (replicas/restarts): GitHub /user/teams hit once")
+}
+
+func TestAuthTeamCacheRespectsTTL(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = rdb.Close() }()
+	tc := teamcache.New(rdb, time.Minute)
+
+	teamsCalls := atomic.Int32{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"alice"}`))
+	})
+	mux.HandleFunc("/user/teams", func(w http.ResponseWriter, r *http.Request) {
+		teamsCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"slug":"staff","organization":{"login":"freeCodeCamp"}}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	mk := func() *GitHubClient {
+		return NewGitHubClient(GitHubClientConfig{
+			APIBase: server.URL, Org: "freeCodeCamp", CacheTTL: time.Minute, TeamCache: tc,
+		})
+	}
+
+	_, err = mk().UserTeams(context.Background(), "ghp_alice")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, teamsCalls.Load())
+
+	mr.FastForward(2 * time.Minute)
+
+	_, err = mk().UserTeams(context.Background(), "ghp_alice")
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, teamsCalls.Load(),
+		"expired durable entry must not be served stale; re-probe GitHub after TTL")
 }

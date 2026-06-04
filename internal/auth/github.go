@@ -17,6 +17,11 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+type TeamCache interface {
+	Get(ctx context.Context, login string) ([]string, bool, error)
+	Set(ctx context.Context, login string, teams []string) error
+}
+
 // GitHubClientConfig configures the GitHub REST client used for identity
 // validation and team-membership probes.
 type GitHubClientConfig struct {
@@ -25,15 +30,17 @@ type GitHubClientConfig struct {
 	CacheTTL   time.Duration // membership + identity cache TTL (default 5 min)
 	HTTPClient *http.Client  // optional override (testability)
 	Now        func() time.Time
+	TeamCache  TeamCache
 }
 
 // GitHubClient validates GitHub bearer tokens against /user and probes
 // team memberships in the configured org. Both call paths are cached for
 // CacheTTL to absorb steady-state pressure on the GitHub REST API.
 type GitHubClient struct {
-	cfg        GitHubClientConfig
-	httpClient *http.Client
-	now        func() time.Time
+	cfg              GitHubClientConfig
+	httpClient       *http.Client
+	now              func() time.Time
+	teamCacheDurable TeamCache
 
 	mu             sync.Mutex
 	userCache      map[string]userCacheEntry // hashToken(raw) → cached login
@@ -82,12 +89,13 @@ func NewGitHubClient(cfg GitHubClientConfig) *GitHubClient {
 		cfg.Now = time.Now
 	}
 	return &GitHubClient{
-		cfg:            cfg,
-		httpClient:     cfg.HTTPClient,
-		now:            cfg.Now,
-		userCache:      make(map[string]userCacheEntry),
-		teamCache:      make(map[teamCacheKey]teamCacheEntry),
-		userTeamsCache: make(map[string]userTeamsCacheEntry),
+		cfg:              cfg,
+		httpClient:       cfg.HTTPClient,
+		now:              cfg.Now,
+		teamCacheDurable: cfg.TeamCache,
+		userCache:        make(map[string]userCacheEntry),
+		teamCache:        make(map[teamCacheKey]teamCacheEntry),
+		userTeamsCache:   make(map[string]userTeamsCacheEntry),
 	}
 }
 
@@ -335,12 +343,45 @@ func (c *GitHubClient) UserTeams(ctx context.Context, token string) ([]string, e
 			return append([]string(nil), entry.teams...), nil
 		}
 		c.mu.Unlock()
-		return c.fetchUserTeams(ctx, cacheKey, token)
+		return c.userTeamsThroughDurableCache(ctx, cacheKey, token)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return v.([]string), nil
+}
+
+func (c *GitHubClient) userTeamsThroughDurableCache(ctx context.Context, cacheKey, token string) ([]string, error) {
+	if c.teamCacheDurable == nil {
+		return c.fetchUserTeams(ctx, cacheKey, token)
+	}
+	login, err := c.ValidateToken(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	if teams, hit, err := c.teamCacheDurable.Get(ctx, login); err != nil {
+		return nil, err
+	} else if hit {
+		c.storeUserTeams(cacheKey, teams)
+		return append([]string(nil), teams...), nil
+	}
+	teams, err := c.fetchUserTeams(ctx, cacheKey, token)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.teamCacheDurable.Set(ctx, login, teams); err != nil {
+		return nil, err
+	}
+	return teams, nil
+}
+
+func (c *GitHubClient) storeUserTeams(cacheKey string, teams []string) {
+	c.mu.Lock()
+	c.userTeamsCache[cacheKey] = userTeamsCacheEntry{
+		teams:   append([]string(nil), teams...),
+		expires: c.now().Add(c.cfg.CacheTTL),
+	}
+	c.mu.Unlock()
 }
 
 func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token string) ([]string, error) {
