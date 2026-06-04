@@ -51,10 +51,12 @@ type harness struct {
 }
 
 type observer struct {
-	mu     sync.Mutex
-	starts map[string]int
-	active map[string]int
-	maxCo  map[string]int
+	mu           sync.Mutex
+	starts       map[string]int
+	active       map[string]int
+	maxCo        map[string]int
+	globalActive int
+	globalMax    int
 }
 
 func newObserver() *observer {
@@ -73,12 +75,23 @@ func (o *observer) enter(site string) {
 	if o.active[site] > o.maxCo[site] {
 		o.maxCo[site] = o.active[site]
 	}
+	o.globalActive++
+	if o.globalActive > o.globalMax {
+		o.globalMax = o.globalActive
+	}
 }
 
 func (o *observer) leave(site string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.active[site]--
+	o.globalActive--
+}
+
+func (o *observer) peakGlobalConcurrency() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.globalMax
 }
 
 func (o *observer) startsFor(site string) int {

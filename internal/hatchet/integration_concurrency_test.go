@@ -71,4 +71,7 @@ func TestR3DistinctSitesRunConcurrent(t *testing.T) {
 
 	h.waitStarts(t, siteA, 1)
 	h.waitStarts(t, siteB, 1)
+
+	require.GreaterOrEqual(t, h.observed.peakGlobalConcurrency(), 2,
+		"distinct sites must overlap in execution, not merely both start eventually")
 }
