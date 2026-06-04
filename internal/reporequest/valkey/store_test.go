@@ -281,6 +281,123 @@ func TestStore_RejectFreesNameCaseInsensitively(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestStore_MarkActiveRequiresApproved(t *testing.T) {
+	tests := []struct {
+		name     string
+		toStatus func(t *testing.T, s *valkey.Store, ctx context.Context, id string)
+	}{
+		{
+			name:     "pending",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {},
+		},
+		{
+			name: "active",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {
+				_, err := s.Approve(ctx, id, "admin")
+				require.NoError(t, err)
+				_, err = s.MarkActive(ctx, id, "https://github.com/freeCodeCamp-Universe/x")
+				require.NoError(t, err)
+			},
+		},
+		{
+			name: "rejected",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {
+				_, err := s.Reject(ctx, id, "admin", "no")
+				require.NoError(t, err)
+			},
+		},
+		{
+			name: "failed",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {
+				_, err := s.Approve(ctx, id, "admin")
+				require.NoError(t, err)
+				_, err = s.MarkFailed(ctx, id, "boom")
+				require.NoError(t, err)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t)
+			ctx := context.Background()
+			r, err := s.Create(ctx, sampleReq("x"))
+			require.NoError(t, err)
+			tc.toStatus(t, s, ctx, r.ID)
+
+			_, err = s.MarkActive(ctx, r.ID, "https://github.com/freeCodeCamp-Universe/x")
+			assert.ErrorIs(t, err, reporequest.ErrNotPending,
+				"only an approved request may go active; a %s row must be guarded", tc.name)
+		})
+	}
+}
+
+func TestStore_MarkFailedRequiresApproved(t *testing.T) {
+	tests := []struct {
+		name     string
+		toStatus func(t *testing.T, s *valkey.Store, ctx context.Context, id string)
+	}{
+		{
+			name:     "pending",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {},
+		},
+		{
+			name: "active",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {
+				_, err := s.Approve(ctx, id, "admin")
+				require.NoError(t, err)
+				_, err = s.MarkActive(ctx, id, "https://github.com/freeCodeCamp-Universe/x")
+				require.NoError(t, err)
+			},
+		},
+		{
+			name: "rejected",
+			toStatus: func(t *testing.T, s *valkey.Store, ctx context.Context, id string) {
+				_, err := s.Reject(ctx, id, "admin", "no")
+				require.NoError(t, err)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t)
+			ctx := context.Background()
+			r, err := s.Create(ctx, sampleReq("x"))
+			require.NoError(t, err)
+			tc.toStatus(t, s, ctx, r.ID)
+
+			_, err = s.MarkFailed(ctx, r.ID, "boom")
+			assert.ErrorIs(t, err, reporequest.ErrNotPending,
+				"only an approved request may be marked failed; a %s row must be guarded", tc.name)
+		})
+	}
+}
+
+func TestStore_DeleteFailedRowKeepsReclaimedName(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	a, err := s.Create(ctx, sampleReq("x"))
+	require.NoError(t, err)
+	_, err = s.Approve(ctx, a.ID, "adm")
+	require.NoError(t, err)
+	_, err = s.MarkFailed(ctx, a.ID, "boom")
+	require.NoError(t, err)
+
+	b, err := s.Create(ctx, sampleReq("x"))
+	require.NoError(t, err)
+	require.NotEqual(t, a.ID, b.ID)
+
+	require.NoError(t, s.Delete(ctx, a.ID))
+
+	_, err = s.Create(ctx, sampleReq("x"))
+	assert.ErrorIs(t, err, reporequest.ErrAlreadyExists,
+		"deleting a failed row must not release a name a newer pending row reclaimed")
+
+	got, err := s.Get(ctx, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "x", got.Name)
+}
+
 func TestNewWithClient_NilClient(t *testing.T) {
 	_, err := valkey.NewWithClient(nil)
 	require.Error(t, err)

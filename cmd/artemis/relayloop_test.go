@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -80,5 +81,32 @@ func TestRelayLoop(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("runRelayLoop must return when ctx is cancelled")
+	}
+}
+
+type erroringOutbox struct{}
+
+func (erroringOutbox) FetchUnpublished(context.Context, int) ([]pg.OutboxEvent, error) {
+	return nil, errors.New("db down")
+}
+
+func (erroringOutbox) MarkPublished(context.Context, []int64, time.Time) error { return nil }
+
+func TestRelayLoop_FailedTickBumpsFailures(t *testing.T) {
+	relay := &worker.Relay{Source: erroringOutbox{}, Publisher: &fakePublisher{}, Batch: 10, Now: time.Now}
+	metrics := worker.NewMetrics(prometheus.NewRegistry())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { runRelayLoop(ctx, relay, time.Millisecond, metrics); close(done) }()
+
+	require.Eventually(t, func() bool { return testutil.ToFloat64(metrics.RelayFailures) >= 1 }, 2*time.Second, time.Millisecond,
+		"a relay RunOnce error must bump RelayFailures so a stalled outbox alerts")
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runRelayLoop must return when ctx is cancelled even after error ticks")
 	}
 }

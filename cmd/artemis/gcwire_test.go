@@ -6,6 +6,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +70,50 @@ func TestBootWiringProdLayout(t *testing.T) {
 func TestBootWiring_LayoutRejectsBadFormat(t *testing.T) {
 	_, err := newGCLayout("<site>/deploys/", "_trash/")
 	require.Error(t, err, "format without the deploy-id token must be rejected")
+}
+
+func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
+		Cleanup: config.CleanupConfig{
+			BlastCap:      5,
+			RetentionDays: 7,
+			RecoveryDays:  3,
+			TrashPrefix:   "_trash/",
+		},
+	}
+	repo := &pg.Repo{}
+	r2c := &r2.Client{}
+
+	w, err := newGCWiring(cfg, repo, r2c, nil)
+	require.NoError(t, err)
+	require.NotNil(t, w)
+
+	assert.Same(t, repo, w.Repo, "repo must be plumbed through")
+	assert.Equal(t, 5, w.SiteGC.BlastCap, "BlastCap=0 would disable the mass-delete safety cap")
+	assert.Equal(t, 7*24*time.Hour, w.SiteGC.Policy.Retention, "policy retention must derive from RetentionDays")
+	assert.Equal(t, "_trash/", w.Purge.TrashBase, "purge must scan the configured trash base")
+	assert.Equal(t, 3*24*time.Hour, w.Purge.Recovery, "recovery window must derive from RecoveryDays")
+
+	require.NotNil(t, w.SiteGC.DeployPrefix)
+	require.NotNil(t, w.SiteGC.TrashPrefix)
+	require.NotNil(t, w.Reconciler.SitePrefix)
+	require.NotNil(t, w.Reconciler.DeployPrefix)
+
+	assert.Equal(t, "www/deploys/id/", w.SiteGC.DeployPrefix("www", "id"),
+		"a wrong deploy-prefix closure would mass-move the wrong R2 prefix")
+	assert.Equal(t, "_trash/www/id/", w.SiteGC.TrashPrefix("www", "id"))
+	assert.Equal(t, "www/deploys/", w.Reconciler.SitePrefix("www"))
+}
+
+func TestNewGCWiring_RejectsBadFormat(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>/deploys/",
+		Cleanup:            config.CleanupConfig{BlastCap: 5, TrashPrefix: "_trash/"},
+	}
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, nil)
+	require.Error(t, err, "a format missing the deploy-id token must fail boot wiring, not produce a degenerate prefix fn")
+	require.Nil(t, w)
 }
 
 func TestGCPolicyFromConfig(t *testing.T) {

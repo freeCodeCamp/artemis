@@ -47,6 +47,14 @@ type fakeS3 struct {
 	pageSize           int
 	deleteObjectsCalls int
 	lastDeleteBatch    int
+
+	failList          bool
+	failDeleteObjects bool
+	deleteFailKeys    map[string]struct{}
+	failDeleteKeys    map[string]struct{}
+	failCopyKeys      map[string]struct{}
+	failGetKeys       map[string]struct{}
+	truncateGetKeys   map[string]struct{}
 }
 
 func newFakeS3(t *testing.T, bucket string) *fakeS3 {
@@ -105,17 +113,44 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
 		f.mu.Lock()
+		_, failGet := f.failGetKeys[key]
+		_, truncGet := f.truncateGetKeys[key]
 		body, ok := f.objects[f.bucket+"/"+key]
 		f.mu.Unlock()
+		if failGet {
+			writeS3Error(w, http.StatusServiceUnavailable, "SlowDown", "reduce your request rate")
+			return
+		}
 		if !ok {
 			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if truncGet {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)+16))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+			if fl, okFlush := w.(http.Flusher); okFlush {
+				fl.Flush()
+			}
+			if hj, okHj := w.(http.Hijacker); okHj {
+				if conn, _, errHj := hj.Hijack(); errHj == nil {
+					_ = conn.Close()
+				}
+			}
 			return
 		}
 		_, _ = w.Write(body)
 	case http.MethodDelete:
 		f.mu.Lock()
-		delete(f.objects, f.bucket+"/"+key)
+		_, failDel := f.failDeleteKeys[key]
+		if !failDel {
+			delete(f.objects, f.bucket+"/"+key)
+		}
 		f.mu.Unlock()
+		if failDel {
+			writeS3Error(w, http.StatusInternalServerError, "InternalError", "we encountered an internal error")
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "unsupported", http.StatusMethodNotAllowed)
@@ -142,7 +177,20 @@ type commonPrefix struct {
 	Prefix string `xml:"Prefix"`
 }
 
+func writeS3Error(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>`+code+`</Code><Message>`+message+`</Message></Error>`)
+}
+
 func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	failList := f.failList
+	f.mu.Unlock()
+	if failList {
+		writeS3Error(w, http.StatusInternalServerError, "InternalError", "list failed")
+		return
+	}
 	q := r.URL.Query()
 	prefix := q.Get("prefix")
 	delimiter := q.Get("delimiter")
@@ -223,6 +271,13 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
+	f.mu.Lock()
+	_, failCopy := f.failCopyKeys[destKey]
+	f.mu.Unlock()
+	if failCopy {
+		writeS3Error(w, http.StatusInternalServerError, "InternalError", "copy failed")
+		return
+	}
 	for i := 0; i < len(copySource); i++ {
 		if b := copySource[i]; b == ' ' || b > 0x7F {
 			http.Error(w, "InvalidArgument: x-amz-copy-source must be URL-encoded", http.StatusBadRequest)
@@ -267,8 +322,18 @@ func (f *fakeS3) deleteObjects(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.deleteObjectsCalls++
 	f.lastDeleteBatch = len(req.Objects)
+	if f.failDeleteObjects {
+		f.mu.Unlock()
+		writeS3Error(w, http.StatusInternalServerError, "InternalError", "deleteobjects failed")
+		return
+	}
 	var deleted []string
+	var failed []string
 	for _, o := range req.Objects {
+		if _, bad := f.deleteFailKeys[o.Key]; bad {
+			failed = append(failed, o.Key)
+			continue
+		}
 		delete(f.objects, f.bucket+"/"+o.Key)
 		deleted = append(deleted, o.Key)
 	}
@@ -277,14 +342,23 @@ func (f *fakeS3) deleteObjects(w http.ResponseWriter, r *http.Request) {
 	type deletedEntry struct {
 		Key string `xml:"Key"`
 	}
+	type errorEntry struct {
+		Key     string `xml:"Key"`
+		Code    string `xml:"Code"`
+		Message string `xml:"Message"`
+	}
 	var res struct {
 		XMLName xml.Name       `xml:"DeleteResult"`
 		Deleted []deletedEntry `xml:"Deleted"`
+		Errors  []errorEntry   `xml:"Error"`
 	}
 	if !req.Quiet {
 		for _, k := range deleted {
 			res.Deleted = append(res.Deleted, deletedEntry{Key: k})
 		}
+	}
+	for _, k := range failed {
+		res.Errors = append(res.Errors, errorEntry{Key: k, Code: "AccessDenied", Message: "AccessDenied"})
 	}
 	w.Header().Set("Content-Type", "application/xml")
 	_ = xml.NewEncoder(w).Encode(res)
@@ -641,4 +715,161 @@ func TestVerifyDeployComplete_PassFail(t *testing.T) {
 	var verr *VerifyError
 	assert.True(t, errors.As(err, &verr))
 	assert.Contains(t, verr.Missing, "missing.html")
+}
+
+func TestDeletePrefix_PartialFailureReportsAccurateCount(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.deleteFailKeys = map[string]struct{}{"www/deploys/d1/style.css": {}}
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/index.html",
+		"www/deploys/d1/app.js",
+		"www/deploys/d1/style.css",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "www/deploys/d1/")
+	require.Error(t, err, "per-key DeleteObjects errors must surface, not be swallowed")
+	assert.Equal(t, 2, n, "count must exclude the failed key (3 requested, 1 failed)")
+	assert.Contains(t, err.Error(), "1 of 3 failed",
+		"error must report how many of how many failed for GC/tombstone accounting")
+	assert.Contains(t, err.Error(), "www/deploys/d1/style.css",
+		"error must name the failing key")
+
+	fake.mu.Lock()
+	_, stillThere := fake.objects["b/www/deploys/d1/style.css"]
+	fake.mu.Unlock()
+	assert.True(t, stillThere, "the failed key must remain present (it was not actually deleted)")
+}
+
+func TestDeletePrefix_DeleteObjectsTransportError(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failDeleteObjects = true
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/index.html",
+		"www/deploys/d1/app.js",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "www/deploys/d1/")
+	require.Error(t, err, "a 5xx from DeleteObjects must surface, not be swallowed as success")
+	assert.Equal(t, 0, n, "no objects counted deleted when the batch transport-errors")
+	assert.Contains(t, err.Error(), "r2 deleteobjects",
+		"error must be wrapped with the deleteobjects context")
+
+	fake.mu.Lock()
+	_, a := fake.objects["b/www/deploys/d1/index.html"]
+	_, b := fake.objects["b/www/deploys/d1/app.js"]
+	fake.mu.Unlock()
+	assert.True(t, a && b, "objects must remain since the delete batch failed")
+}
+
+func TestMovePrefix_CopySucceedsThenDeleteFails_AbortsWithPartialProgress(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failDeleteKeys = map[string]struct{}{"www/deploys/d1/b.html": {}}
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/a.html",
+		"www/deploys/d1/b.html",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("v")), "text/plain", 1))
+	}
+
+	n, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
+	require.Error(t, err, "post-copy DeleteObject failure must abort the move")
+	assert.Contains(t, err.Error(), "moveprefix delete",
+		"error must be wrapped with the moveprefix delete context")
+	assert.Equal(t, 1, n, "only the cleanly moved object counts; the failed one aborts the loop")
+
+	dst, derr := c.GetAlias(context.Background(), "_trash/www/d1/b.html")
+	require.NoError(t, derr)
+	assert.Equal(t, "v", dst,
+		"copy already landed at dst for the delete-failed key: a live duplicate now exists at both src and dst")
+
+	fake.mu.Lock()
+	_, srcStill := fake.objects["b/www/deploys/d1/b.html"]
+	fake.mu.Unlock()
+	assert.True(t, srcStill, "src copy of the delete-failed key is still present, confirming the double-serve risk")
+}
+
+func TestMovePrefix_CopyError_AbortsWithoutDeletingSource(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failCopyKeys = map[string]struct{}{"_trash/www/d1/a.html": {}}
+	c := newClient(t, fake)
+	require.NoError(t, c.PutObject(context.Background(),
+		"www/deploys/d1/a.html", bytes.NewReader([]byte("v")), "text/plain", 1))
+
+	n, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
+	require.Error(t, err, "a CopyObject failure must abort before deleting the source")
+	assert.Contains(t, err.Error(), "moveprefix copy",
+		"error must be wrapped with the moveprefix copy context")
+	assert.Equal(t, 0, n, "nothing moved when the only copy fails")
+
+	src, serr := c.GetAlias(context.Background(), "www/deploys/d1/a.html")
+	require.NoError(t, serr)
+	assert.Equal(t, "v", src,
+		"source bytes must NOT be deleted when the copy never succeeded")
+}
+
+func TestGetAlias_NonNotFoundErrorIsWrappedNotMappedToNotFound(t *testing.T) {
+	t.Run("transient 5xx is not absence", func(t *testing.T) {
+		fake := newFakeS3(t, "b")
+		fake.failGetKeys = map[string]struct{}{"www/production": {}}
+		c := newClient(t, fake)
+		require.NoError(t, c.PutObject(context.Background(),
+			"www/production", bytes.NewReader([]byte("deploys/d1")), "text/plain", 10))
+
+		_, err := c.GetAlias(context.Background(), "www/production")
+		require.Error(t, err)
+		assert.False(t, IsNotFound(err),
+			"a 503 must NOT be misclassified as alias-absent or callers reset deploy pointers on a transient outage")
+		assert.Contains(t, err.Error(), "r2 get",
+			"non-NoSuchKey/NotFound API errors must be wrapped with the get context")
+	})
+
+	t.Run("body read error is wrapped", func(t *testing.T) {
+		fake := newFakeS3(t, "b")
+		fake.truncateGetKeys = map[string]struct{}{"www/production": {}}
+		c := newClient(t, fake)
+		require.NoError(t, c.PutObject(context.Background(),
+			"www/production", bytes.NewReader([]byte("deploys/d1")), "text/plain", 10))
+
+		_, err := c.GetAlias(context.Background(), "www/production")
+		require.Error(t, err)
+		assert.False(t, IsNotFound(err), "a truncated body is an error, not absence")
+		assert.Contains(t, err.Error(), "r2 read",
+			"a ReadAll failure on the alias body must be wrapped with the read context")
+	})
+}
+
+func TestListPrefix_PaginatesAcrossContinuationToken(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.pageSize = 2
+	c := newClient(t, fake)
+	want := make([]string, 0, 5)
+	for i := 0; i < 5; i++ {
+		k := fmtKey("www/deploys/d1/f%02d.html", i)
+		want = append(want, k)
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("x")), "text/plain", 1))
+	}
+
+	keys, err := c.ListPrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, want, keys,
+		"the continuation-token loop must return every key; a broken loop would truncate and falsely report files missing")
+}
+
+func TestListPrefix_ListErrorIsWrapped(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failList = true
+	c := newClient(t, fake)
+
+	keys, err := c.ListPrefix(context.Background(), "www/deploys/d1/")
+	require.Error(t, err, "a list 5xx must surface, not be swallowed into an empty result")
+	assert.Nil(t, keys)
+	assert.Contains(t, err.Error(), "r2 list",
+		"the list error must be wrapped with the list context")
 }
