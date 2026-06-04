@@ -102,9 +102,7 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", importAdvisoryLockKey); err != nil {
 		return 0, fmt.Errorf("pg registry import: lock: %w", err)
 	}
-	defer func() {
-		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", importAdvisoryLockKey)
-	}()
+	defer releaseAdvisoryLock(conn, importAdvisoryLockKey)
 
 	var count int
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM sites").Scan(&count); err != nil {

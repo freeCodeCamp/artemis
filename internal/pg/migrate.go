@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,6 +16,12 @@ import (
 var migrationsFS embed.FS
 
 const migrateAdvisoryLockKey = 8472013
+
+func releaseAdvisoryLock(conn *pgxpool.Conn, key int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", key)
+}
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	conn, err := pool.Acquire(ctx)
@@ -26,9 +33,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrateAdvisoryLockKey); err != nil {
 		return fmt.Errorf("migrate: lock: %w", err)
 	}
-	defer func() {
-		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrateAdvisoryLockKey)
-	}()
+	defer releaseAdvisoryLock(conn, migrateAdvisoryLockKey)
 
 	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    TEXT        PRIMARY KEY,

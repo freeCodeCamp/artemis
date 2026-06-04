@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -66,4 +67,65 @@ func TestMigrations(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 2, "both enqueued events unpublished")
 	require.Less(t, events[0].ID, events[1].ID, "FetchUnpublished returns oldest-first by id")
+}
+
+func TestReleaseAdvisoryLock_FreesLockOnCanceledCallerCtx(t *testing.T) {
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+
+	ctx := context.Background()
+	container, err := postgres.Run(ctx, "postgres:16-alpine",
+		postgres.WithDatabase("artemis_test"),
+		postgres.WithUsername("artemis"),
+		postgres.WithPassword("artemis"),
+		postgres.BasicWaitStrategies(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = container.Terminate(ctx) })
+
+	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
+	require.NoError(t, err)
+
+	poolCfg, err := pgxpool.ParseConfig(connStr)
+	require.NoError(t, err)
+	poolCfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	probe, err := pgxpool.New(ctx, connStr)
+	require.NoError(t, err)
+	t.Cleanup(probe.Close)
+
+	conn, err := pool.Acquire(ctx)
+	require.NoError(t, err)
+
+	var poolPID uint32
+	require.NoError(t, conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&poolPID))
+
+	callerCtx, cancel := context.WithCancel(ctx)
+	_, err = conn.Exec(callerCtx, "SELECT pg_advisory_lock($1)", migrateAdvisoryLockKey)
+	require.NoError(t, err)
+
+	held, err := advisoryLockHeldByPID(ctx, probe, migrateAdvisoryLockKey, poolPID)
+	require.NoError(t, err)
+	require.True(t, held, "lock acquired on the pooled session")
+
+	cancel()
+	require.Error(t, callerCtx.Err(), "caller ctx is canceled before the deferred unlock runs")
+
+	releaseAdvisoryLock(conn, migrateAdvisoryLockKey)
+	conn.Release()
+
+	held, err = advisoryLockHeldByPID(ctx, probe, migrateAdvisoryLockKey, poolPID)
+	require.NoError(t, err)
+	require.False(t, held,
+		"releaseAdvisoryLock must free the lock on the pooled session even when the caller ctx was canceled; a held lock leaks onto the pooled conn and blocks later migrations")
+}
+
+func advisoryLockHeldByPID(ctx context.Context, pool *pgxpool.Pool, key int64, pid uint32) (bool, error) {
+	var held bool
+	err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND objid = $1 AND granted AND pid = $2)`,
+		key, pid).Scan(&held)
+	return held, err
 }
