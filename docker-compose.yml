@@ -1,6 +1,18 @@
 name: artemis-local
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: artemis
+      POSTGRES_PASSWORD: artemis
+      POSTGRES_DB: artemis
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artemis -d artemis"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   valkey:
     image: valkey/valkey:8-alpine
     healthcheck:
@@ -34,8 +46,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.fakegithub
+    network_mode: "service:artemis"
+    depends_on:
+      artemis:
+        condition: service_started
     environment:
-      FAKE_GH_ADDR: ":9001"
+      FAKE_GH_ADDR: "127.0.0.1:9001"
       FAKE_GH_ORG: "freeCodeCamp-Universe"
       FAKE_GH_USER: "smoke-bot"
       FAKE_GH_TEAMS: "staff,apollo-11-approvers"
@@ -47,12 +63,12 @@ services:
     build:
       context: .
     depends_on:
+      postgres:
+        condition: service_healthy
       valkey:
         condition: service_healthy
       minio-setup:
         condition: service_completed_successfully
-      fakegithub:
-        condition: service_started
     environment:
       PORT: "8080"
       LOG_LEVEL: "debug"
@@ -61,7 +77,8 @@ services:
       R2_SECRET_ACCESS_KEY: "minioadmin"
       R2_BUCKET: "universe-static-apps-01"
       VALKEY_ADDR: "valkey:6379"
-      GH_API_BASE: "http://fakegithub:9001"
+      DATABASE_URL: "postgres://artemis:artemis@postgres:5432/artemis?sslmode=disable"
+      GH_API_BASE: "http://127.0.0.1:9001"
       GH_ORG: "freeCodeCamp-Universe"
       GH_REPO_ORG: "freeCodeCamp-Universe"
       GH_CLIENT_ID: "Iv1.fakelocalclientid"
@@ -69,5 +86,6 @@ services:
       GH_APP_ID: "123"
       GH_APP_INSTALLATION_ID: "456"
       GH_APP_PRIVATE_KEY: "${GH_APP_PRIVATE_KEY:-}"
+      REPO_APPROVE_AUTHZ_TEAM: "apollo-11-approvers"
     ports:
       - "8080:8080"
