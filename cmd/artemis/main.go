@@ -363,6 +363,14 @@ func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registr
 	)
 	if pgDB != nil {
 		pgReg := pg.NewRegistryStore(pgDB).WithOnChange(valkey.PublishOnChange(ctx, store))
+		imported, err := pgReg.Import(ctx, store)
+		if err != nil {
+			_ = store.Close()
+			return nil, nil, nil, nil, fmt.Errorf("registry import: %w", err)
+		}
+		if imported > 0 {
+			slog.Info("registry import complete (one-shot)", "sites", imported)
+		}
 		writer = pgReg
 		source = pgReg
 	}

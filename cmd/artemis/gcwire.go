@@ -11,6 +11,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 )
 
 var (
@@ -19,6 +20,7 @@ var (
 	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)
+	_ pg.SitesSource            = (*valkey.Store)(nil)
 )
 
 func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {

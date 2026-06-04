@@ -86,6 +86,55 @@ func (s *RegistryStore) Delete(ctx context.Context, slug string) error {
 	return nil
 }
 
+type SitesSource interface {
+	Sites(ctx context.Context) ([]registry.Site, error)
+}
+
+const importAdvisoryLockKey = 8472014
+
+func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pg registry import: acquire: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", importAdvisoryLockKey); err != nil {
+		return 0, fmt.Errorf("pg registry import: lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", importAdvisoryLockKey)
+	}()
+
+	var count int
+	if err := conn.QueryRow(ctx, "SELECT count(*) FROM sites").Scan(&count); err != nil {
+		return 0, fmt.Errorf("pg registry import: count: %w", err)
+	}
+	if count > 0 {
+		return 0, nil
+	}
+
+	sites, err := src.Sites(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pg registry import: source sites: %w", err)
+	}
+
+	imported := 0
+	for _, site := range sites {
+		teams := append([]string(nil), site.Teams...)
+		_, err := conn.Exec(ctx,
+			`INSERT INTO sites (slug, teams, created_at, updated_at, created_by)
+			 VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (slug) DO NOTHING`,
+			site.Slug, teams, site.CreatedAt, site.UpdatedAt, site.CreatedBy)
+		if err != nil {
+			return imported, fmt.Errorf("pg registry import %s: %w", site.Slug, err)
+		}
+		imported++
+	}
+	return imported, nil
+}
+
 func (s *RegistryStore) Sites(ctx context.Context) ([]registry.Site, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT slug, teams, created_at, updated_at, created_by FROM sites ORDER BY slug`)
