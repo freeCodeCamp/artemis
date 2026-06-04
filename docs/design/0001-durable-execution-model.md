@@ -18,7 +18,7 @@ Operator constraints (locked):
 
 ## 2. Decision — the architecture
 
-```
+```text
  commands (CLI / CI / curl)
         │  HTTP API (public contract, unchanged)
         ▼

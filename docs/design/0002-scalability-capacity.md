@@ -65,7 +65,7 @@ The default ties the pool to CPU count, but artemis's PG concurrency is driven b
 
 No code change is required to tune it: **pgx honours `pool_max_conns` as a DSN query parameter**. The harness proved this -- a DSN ending in `...?sslmode=disable&pool_max_conns=25` reported `pool_max_conns: 25` and the enlarged-pool throughput above. Operators set it in `DATABASE_URL`:
 
-```
+```bash
 DATABASE_URL=postgres://artemis:pw@artemis-postgresql:5432/artemis?sslmode=disable&pool_max_conns=20
 ```
 
@@ -87,7 +87,7 @@ The reference harness ran PG with `max_connections=200`, which comfortably holds
 
 The fan-out safety property is enforced by the engine, not by PG throughput. The adapter (`internal/hatchet/adapter.go`) registers every per-site workflow with:
 
-```
+```go
 types.Concurrency{
     Expression:    "input.site",
     MaxRuns:       1,
@@ -161,14 +161,14 @@ The `artemis_worker_*` and `artemis_relay_*` counters were wired into the boot p
 
 ## 10. Reproducing
 
-```
+```bash
 just loadgen                                  # default 500 sites x 40 deploys
 SITES=1000 DEPLOYS_PER_SITE=50 just loadgen    # heavier local run
 ```
 
 The script spins up an ephemeral `postgres:17-alpine`, runs migrations via the harness, drives the load, prints the JSON report to stdout, and tears the container down on exit. To tune the pool during a run, pass a DSN with `pool_max_conns`:
 
-```
+```bash
 LOADGEN_DATABASE_URL='postgres://artemis:artemis@localhost:55433/artemis?sslmode=disable&pool_max_conns=25' \
   CONCURRENCY=24 just loadgen
 ```
