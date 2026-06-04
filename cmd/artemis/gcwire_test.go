@@ -5,9 +5,23 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenRepoQueue_RequiresDatabase(t *testing.T) {
+	q, err := openRepoQueue(nil)
+	require.Error(t, err, "repo feature without a database must be rejected at boot")
+	require.Nil(t, q)
+}
+
+func TestOpenRepoQueue_IsPostgresBacked(t *testing.T) {
+	q, err := openRepoQueue(&pg.DB{})
+	require.NoError(t, err)
+	_, ok := q.(*pg.RepoQueue)
+	assert.True(t, ok, "repo queue must be backed by pg.RepoQueue")
+}
 
 func TestBootWiringProdLayout(t *testing.T) {
 	cases := []struct {

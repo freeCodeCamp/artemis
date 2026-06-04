@@ -30,7 +30,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
-	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
@@ -142,7 +141,7 @@ func run() error {
 	// routes left unmounted. repoGH probes membership in the Universe org
 	// (cfg.Repo.Org), distinct from ghClient's site-registry org.
 	var (
-		repoStore *repovalkey.Store
+		repoStore handler.RepoStore
 		repoGH    *auth.GitHubClient
 		appClient *githubapp.Client
 	)
@@ -160,14 +159,10 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("init github app client: %w", err)
 		}
-		repoStore, err = repovalkey.New(rootCtx, repovalkey.Config{
-			Addr:     cfg.Registry.Valkey.Addr,
-			Password: cfg.Registry.Valkey.Password,
-		})
+		repoStore, err = openRepoQueue(pgDB)
 		if err != nil {
 			return fmt.Errorf("open repo-request store: %w", err)
 		}
-		defer func() { _ = repoStore.Close() }()
 		repoGH = auth.NewGitHubClient(auth.GitHubClientConfig{
 			APIBase:  cfg.GitHub.APIBase,
 			Org:      cfg.Repo.Org,

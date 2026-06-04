@@ -16,9 +16,17 @@ import (
 var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
+	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)
 )
+
+func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {
+	if pgDB == nil {
+		return nil, fmt.Errorf("repo-creation feature requires DATABASE_URL")
+	}
+	return pg.NewRepoQueue(pgDB), nil
+}
 
 const deployIDToken = "<ts>-<sha>"
 
