@@ -1,3 +1,5 @@
+//lint:file-ignore SA1019 workaround: sdks/go NewClient's own public signature requires v0Client.ClientOpt (hatchet v0.88.1); no non-deprecated options surface exists yet — https://docs.hatchet.run/home/migration-guide-go
+
 package hatchet
 
 import (
