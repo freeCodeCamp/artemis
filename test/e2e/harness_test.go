@@ -76,7 +76,7 @@ func newHTTPClient(caFile string) *http.Client {
 		log.Printf("[setup] WARN: no certs parsed from %q", caFile)
 		return c
 	}
-	c.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+	c.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	return c
 }
 
