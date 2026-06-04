@@ -228,6 +228,65 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 	}
 }
 
+func TestSiteRollback_DeepAssert(t *testing.T) {
+	e := requireStack(t)
+	r2c := e.r2Client(t)
+	ctx := context.Background()
+
+	slug := uniqueSlug("rbk")
+	registerSite(t, e, slug)
+	t.Cleanup(func() { _ = e.call(t, http.MethodDelete, "/api/site/"+slug, e.GHToken, nil, nil) })
+
+	prior := mintDeploy(t, e, slug, "preview")
+	current := mintDeploy(t, e, slug, "preview")
+	if prior == current {
+		t.Fatalf("deploy ids collided: %q", prior)
+	}
+
+	var promoteResp struct {
+		DeployID string `json:"deployId"`
+	}
+	mustStatus(t, e.call(t, http.MethodPost, "/api/site/"+slug+"/promote", e.GHToken,
+		map[string]any{"deployId": current}, &promoteResp), http.StatusOK, "promote")
+	if promoteResp.DeployID != current {
+		t.Fatalf("promote deployId=%q want %q", promoteResp.DeployID, current)
+	}
+
+	prodAlias, err := r2c.GetAlias(ctx, slug+"/production")
+	if err != nil {
+		t.Fatalf("R2 prod alias get after promote: %v", err)
+	}
+	if strings.TrimSpace(prodAlias) != current {
+		t.Fatalf("R2 prod alias=%q want %q after promote", prodAlias, current)
+	}
+
+	var rollbackResp struct {
+		DeployID string `json:"deployId"`
+	}
+	mustStatus(t, e.call(t, http.MethodPost, "/api/site/"+slug+"/rollback", e.GHToken,
+		map[string]any{"to": prior}, &rollbackResp), http.StatusOK, "rollback")
+	if rollbackResp.DeployID != prior {
+		t.Fatalf("rollback deployId=%q want %q", rollbackResp.DeployID, prior)
+	}
+
+	rolledAlias, err := r2c.GetAlias(ctx, slug+"/production")
+	if err != nil {
+		t.Fatalf("R2 prod alias get after rollback: %v", err)
+	}
+	if strings.TrimSpace(rolledAlias) != prior {
+		t.Fatalf("R2 prod alias=%q want %q after rollback", rolledAlias, prior)
+	}
+
+	var aliasResp struct {
+		DeployID string `json:"deployId"`
+	}
+	mustStatus(t, e.call(t, http.MethodGet, "/api/site/"+slug+"/alias/production", e.GHToken, nil, &aliasResp),
+		http.StatusOK, "alias get")
+	if aliasResp.DeployID != prior {
+		t.Fatalf("alias get deployId=%q want %q after rollback", aliasResp.DeployID, prior)
+	}
+}
+
 func TestManualDelete_Tombstone(t *testing.T) {
 	e := requireStack(t)
 	r2c := e.r2Client(t)
