@@ -26,12 +26,19 @@ docker run -d --name "$CONTAINER" \
   -c max_connections=200 -c shared_buffers=256MB >/dev/null
 
 echo >&2 "==> waiting for postgres"
+ok=0
 for _ in $(seq 1 30); do
   if docker exec "$CONTAINER" pg_isready -U artemis -d artemis >/dev/null 2>&1; then
+    ok=1
     break
   fi
   sleep 1
 done
+if [[ "$ok" != 1 ]]; then
+  echo "FATAL: postgres never became ready on :${PG_HOST_PORT}" >&2
+  docker logs "$CONTAINER" 2>/dev/null | tail -40
+  exit 1
+fi
 
 DSN="${LOADGEN_DATABASE_URL:-postgres://artemis:artemis@localhost:${PG_HOST_PORT}/artemis?sslmode=disable}"
 echo >&2 "==> running load harness sites=${SITES} deploys-per-site=${DEPLOYS_PER_SITE} concurrency=${CONCURRENCY}"
