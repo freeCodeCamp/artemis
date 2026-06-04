@@ -30,7 +30,9 @@ func (q *RepoQueue) WithIDGen(fn func() string) *RepoQueue     { q.newID = fn; r
 
 func defaultRepoRequestID() string {
 	var b [10]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err)
+	}
 	return "req_" + hex.EncodeToString(b[:])
 }
 
