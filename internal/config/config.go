@@ -400,7 +400,7 @@ func (c *Config) validate() error {
 	if c.Registry.Valkey.Addr == "" {
 		return missing("VALKEY_ADDR")
 	}
-	if c.Registry.AuthzTeam == "" {
+	if strings.TrimSpace(c.Registry.AuthzTeam) == "" {
 		return fmt.Errorf("REGISTRY_AUTHZ_TEAM must not be empty")
 	}
 	if c.Repo.Org == "" {

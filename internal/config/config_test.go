@@ -134,9 +134,6 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 	assert.Equal(t, "secret-pw", cfg.Registry.Valkey.Password)
 }
 
-// TestLoad_UploadMaxBytes_RejectsNonPositive — env var is additive but
-// when set must be a positive integer. Empty/absent → default; explicit
-// "0" or negative → boot-time error.
 func TestConfigLoad(t *testing.T) {
 	for k, v := range requiredEnv() {
 		t.Setenv(k, v)
@@ -218,11 +215,6 @@ func TestLoad_UploadMaxBytes_RejectsNonPositive(t *testing.T) {
 			}
 			t.Setenv("UPLOAD_MAX_BYTES", bad)
 			_, err := Load()
-			if bad == "" {
-				// empty is treated as set-but-blank; ParseInt on "" → error
-				require.Error(t, err)
-				return
-			}
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "UPLOAD_MAX_BYTES")
 		})
@@ -321,17 +313,28 @@ func TestLoad_AcceptsValidDeployPrefix(t *testing.T) {
 	assert.Equal(t, "<site>/custom/<ts>-<sha>/sub/", cfg.DeployPrefixFormat)
 }
 
-func TestLoad_RegistryAuthzTeamRejectsBlank(t *testing.T) {
+func TestLoad_RegistryAuthzTeamRejectsWhitespace(t *testing.T) {
 	for k, v := range requiredEnv() {
 		t.Setenv(k, v)
 	}
-	// Setting REGISTRY_AUTHZ_TEAM to an empty string keeps the default
-	// (the env-loader only overrides when v != ""), so this case
-	// exercises validate() against an explicitly cleared default.
-	t.Setenv("REGISTRY_AUTHZ_TEAM", "  ") // whitespace-only is treated as content; validate accepts; the assertion below covers the unset path
+	t.Setenv("REGISTRY_AUTHZ_TEAM", "  ")
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "REGISTRY_AUTHZ_TEAM")
+}
+
+func TestValidate_RegistryAuthzTeamRejectsBlank(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "  ", cfg.Registry.AuthzTeam)
+	require.Equal(t, "staff", cfg.Registry.AuthzTeam)
+
+	cfg.Registry.AuthzTeam = ""
+	err = cfg.validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "REGISTRY_AUTHZ_TEAM")
 }
 
 // captureSlog redirects slog.Default() to a buffer for the duration of
