@@ -36,9 +36,9 @@ func TestMetrics_RegisterAndExpose(t *testing.T) {
 func TestWriteUpstreamError_IncrementsUpstreamErrorsCounter(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
-	prev := pkgMetrics
+	resetMetricsForTest()
+	t.Cleanup(resetMetricsForTest)
 	SetMetrics(m)
-	t.Cleanup(func() { SetMetrics(prev) })
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
