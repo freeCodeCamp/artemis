@@ -19,6 +19,35 @@ func (f *fakeOutbox) EnqueueSiteChanged(_ context.Context, site string) error {
 	return nil
 }
 
+type ctxCapturingOutbox struct {
+	capturedDone bool
+	called       bool
+}
+
+func (f *ctxCapturingOutbox) EnqueueSiteChanged(ctx context.Context, _ string) error {
+	f.called = true
+	select {
+	case <-ctx.Done():
+		f.capturedDone = true
+	default:
+	}
+	return nil
+}
+
+func TestEmitSiteChanged_DetachedFromRequestCancellation(t *testing.T) {
+	h, _ := newTestHandlers(t, &fakeGH{}, standardSites(), newFakeR2())
+	ob := &ctxCapturingOutbox{}
+	h.Outbox = ob
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	h.emitSiteChanged(ctx, "www")
+
+	require.True(t, ob.called, "emitSiteChanged must enqueue even when the request context is canceled")
+	assert.False(t, ob.capturedDone, "enqueue context must be detached from the canceled request context")
+}
+
 func TestFinalize_EmitsSiteChanged(t *testing.T) {
 	store := newFakeR2()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)

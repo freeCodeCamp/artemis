@@ -129,6 +129,8 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 	if h.Outbox == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {
 		slog.Error("outbox enqueue site.changed failed", "site", site, "err", err)
 		sentry.WithScope(func(scope *sentry.Scope) {
