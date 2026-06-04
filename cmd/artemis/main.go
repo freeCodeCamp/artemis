@@ -34,6 +34,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/teamcache"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -190,6 +191,10 @@ func run() error {
 	}
 
 	metricsReg := prometheus.NewRegistry()
+	metricsReg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
 	metrics := handler.NewMetrics(metricsReg)
 	handler.SetMetrics(metrics)
 	workerMetrics := worker.NewMetrics(metricsReg)
