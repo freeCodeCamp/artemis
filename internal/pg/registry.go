@@ -120,7 +120,7 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 	imported := 0
 	for _, site := range sites {
 		teams := append([]string(nil), site.Teams...)
-		_, err := conn.Exec(ctx,
+		tag, err := conn.Exec(ctx,
 			`INSERT INTO sites (slug, teams, created_at, updated_at, created_by)
 			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT (slug) DO NOTHING`,
@@ -128,7 +128,7 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 		if err != nil {
 			return imported, fmt.Errorf("pg registry import %s: %w", site.Slug, err)
 		}
-		imported++
+		imported += int(tag.RowsAffected())
 	}
 	return imported, nil
 }
