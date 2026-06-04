@@ -32,7 +32,6 @@ func (r *Repo) SetAliasCAS(ctx context.Context, site, name, expected, next strin
 		if err := Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": site}); err != nil {
 			return err
 		}
-		current = next
 		ok = true
 		return nil
 	})
