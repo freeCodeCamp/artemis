@@ -64,6 +64,22 @@ integration-help:
     @echo "    SITE=test ROOT_DOMAIN=freecode.camp \\"
     @echo "    just integration"
 
+# Real-Hatchet suite: spins up hatchet-lite via compose, mints a token, runs R2/R3/R4/R5
+hatchet-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd test/integration/hatchet
+    compose="docker compose -f compose.hatchet.yaml"
+    tenant="707d0855-80ab-4e1f-a156-f1c4546cbf52"
+    $compose up -d --wait
+    trap "$compose down -v" EXIT
+    token=$($compose exec -T hatchet-lite /hatchet-admin token create --config /config --tenant-id "$tenant" | tr -d '\r\n')
+    HATCHET_CLIENT_TOKEN="$token" \
+        HATCHET_CLIENT_HOST_PORT="${HATCHET_CLIENT_HOST_PORT:-127.0.0.1:7077}" \
+        HATCHET_CLIENT_TLS_STRATEGY=none \
+        HATCHET_COMPOSE_FILE="$PWD/compose.hatchet.yaml" \
+        {{go}} test -tags=integration -count=1 -timeout=10m ../../../internal/hatchet/...
+
 # go vet (CI also runs golangci-lint)
 lint:
     {{go}} vet {{pkg}}

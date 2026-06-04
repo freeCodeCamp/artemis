@@ -1,0 +1,49 @@
+name: artemis-hatchet-it
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: hatchet
+      POSTGRES_PASSWORD: hatchet
+      POSTGRES_DB: hatchet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hatchet -d hatchet"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  hatchet-lite:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.88.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${HATCHET_GRPC_HOST_PORT:-7077}:7077"
+      - "${HATCHET_DASHBOARD_HOST_PORT:-8888}:8888"
+    environment:
+      DATABASE_URL: "postgresql://hatchet:hatchet@postgres:5432/hatchet?sslmode=disable"
+      SERVER_AUTH_COOKIE_DOMAIN: localhost
+      SERVER_AUTH_COOKIE_INSECURE: "t"
+      SERVER_AUTH_SET_EMAIL_VERIFIED: "t"
+      SERVER_GRPC_BIND_ADDRESS: "0.0.0.0"
+      SERVER_GRPC_INSECURE: "t"
+      SERVER_GRPC_BROADCAST_ADDRESS: "127.0.0.1:7077"
+      SERVER_GRPC_PORT: "7077"
+      SERVER_URL: "http://localhost:8888"
+      SERVER_DEFAULT_ENGINE_VERSION: "V1"
+      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: "127.0.0.1:7077"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:8888/api/ready || exit 1",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    volumes:
+      - hatchet_lite_config:/config
+
+volumes:
+  hatchet_lite_config:
