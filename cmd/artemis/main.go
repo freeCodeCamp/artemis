@@ -28,6 +28,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	repovalkey "github.com/freeCodeCamp/artemis/internal/reporequest/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
@@ -105,7 +106,7 @@ func run() error {
 		slog.Info("postgres disabled (DATABASE_URL unset); deploy-only mode, GC off")
 	}
 
-	registryStore, registryReader, registryCleanup, err := openRegistry(rootCtx, cfg)
+	registryWriter, registryReader, registryHealth, registryCleanup, err := openRegistry(rootCtx, cfg, pgDB)
 	if err != nil {
 		return fmt.Errorf("open registry: %w", err)
 	}
@@ -250,8 +251,8 @@ func run() error {
 		GH:                   ghClient,
 		JWT:                  signer,
 		Sites:                registryReader,
-		Registry:             registryStore,
-		Health:               registryStore,
+		Registry:             registryWriter,
+		Health:               registryHealth,
 		R2:                   r2Client,
 		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
 		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
@@ -337,24 +338,36 @@ func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), erro
 	return db, db.Close, nil
 }
 
-// openRegistry constructs the Valkey-backed registry store + reader.
-// The store is the Writer surface used by /api/site/{register,update,
-// delete}; the reader is the Reader surface used by every read-side
-// handler. Cleanup MUST be called on shutdown to close the connection.
-func openRegistry(ctx context.Context, cfg *config.Config) (*valkey.Store, *valkey.Reader, func(), error) {
+// openRegistry constructs the registry Writer, read-side Reader, and
+// health probe. When pgDB is non-nil, pg.RegistryStore is the
+// source-of-truth (Writer + Reader source) and Valkey is the
+// OnChange-published cache-front transport; otherwise Valkey is the
+// source-of-truth. Cleanup MUST be called on shutdown.
+func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registry.Writer, *valkey.Reader, *valkey.Store, func(), error) {
 	store, err := valkey.New(ctx, valkey.Config{
 		Addr:     cfg.Registry.Valkey.Addr,
 		Password: cfg.Registry.Valkey.Password,
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("valkey: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("valkey: %w", err)
 	}
-	reader, err := valkey.NewReader(ctx, store, valkey.DefaultRefreshFallback)
+
+	var (
+		writer registry.Writer    = store
+		source valkey.SitesSource = store
+	)
+	if pgDB != nil {
+		pgReg := pg.NewRegistryStore(pgDB).WithOnChange(valkey.PublishOnChange(ctx, store))
+		writer = pgReg
+		source = pgReg
+	}
+
+	reader, err := valkey.NewReaderFromSource(ctx, source, store, valkey.DefaultRefreshFallback)
 	if err != nil {
 		_ = store.Close()
-		return nil, nil, nil, fmt.Errorf("valkey reader: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("valkey reader: %w", err)
 	}
-	return store, reader, func() { _ = store.Close() }, nil
+	return writer, reader, store, func() { _ = store.Close() }, nil
 }
 
 func parseLogLevel(level string) slog.Level {

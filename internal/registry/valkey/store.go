@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -148,6 +149,18 @@ func (s *Store) Subscribe(ctx context.Context) (<-chan string, error) {
 		}
 	}()
 	return out, nil
+}
+
+func (s *Store) Publish(ctx context.Context, slug string) error {
+	return s.client.Publish(ctx, ChannelRegistryChanged, slug).Err()
+}
+
+func PublishOnChange(ctx context.Context, store *Store) func(slug string) {
+	return func(slug string) {
+		if err := store.Publish(ctx, slug); err != nil {
+			slog.Warn("valkey registry publish failed", "slug", slug, "err", err)
+		}
+	}
 }
 
 // siteKey returns the hash key for a given slug. Defined in one place

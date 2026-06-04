@@ -20,15 +20,22 @@ type onRefreshErrorFn = func(error)
 // DefaultRefreshFallback is the cap on how long the in-memory cache
 // can stay stale without an explicit registry.changed event refresh.
 // Even if pub-sub silently drops a message, callers see at most this
-// much divergence between Valkey state and the artemis snapshot.
+// much divergence between the source-of-truth state and the artemis
+// snapshot.
 const DefaultRefreshFallback = 60 * time.Second
 
-// Reader is the registry.Reader implementation backed by Valkey.
-// It maintains an in-process snapshot of the entire registry that
-// is refreshed eagerly on every registry.changed event and lazily
-// on a TTL fallback (covers missed pub-sub deliveries).
+type SitesSource interface {
+	Sites(ctx context.Context) ([]registry.Site, error)
+}
+
+// Reader is the registry.Reader cache-front. It maintains an
+// in-process snapshot of the entire registry that is refreshed
+// eagerly on every registry.changed event (delivered over Valkey
+// pub-sub) and lazily on a TTL fallback (covers missed deliveries).
+// The snapshot is rebuilt from the SitesSource, the source-of-truth.
 type Reader struct {
-	store *Store
+	source SitesSource
+	pubsub *Store
 
 	mu       sync.RWMutex
 	snapshot snapshot
@@ -86,17 +93,25 @@ func (s snapshot) TeamsForSite(slug string) []string {
 	return out
 }
 
-// NewReader returns a Reader pre-populated with the current registry
-// state. It launches a background goroutine that subscribes to
-// registry.changed and refreshes the cache on every event. The
+// NewReader returns a Reader whose source-of-truth and pub-sub
+// transport are the same Valkey *Store. Retained for the Valkey-only
+// configuration; the Postgres cutover uses NewReaderFromSource.
+func NewReader(ctx context.Context, store *Store, ttl time.Duration) (*Reader, error) {
+	return NewReaderFromSource(ctx, store, store, ttl)
+}
+
+// NewReaderFromSource returns a Reader pre-populated from source (the
+// source-of-truth) and subscribed to registry.changed over the pubsub
+// *Store (cross-replica invalidation transport). It launches a
+// background goroutine that refreshes the cache on every event; the
 // goroutine exits when ctx is canceled. Pass DefaultRefreshFallback
 // for ttl unless tests need a tighter window.
-func NewReader(ctx context.Context, store *Store, ttl time.Duration) (*Reader, error) {
-	r := &Reader{store: store}
+func NewReaderFromSource(ctx context.Context, source SitesSource, pubsub *Store, ttl time.Duration) (*Reader, error) {
+	r := &Reader{source: source, pubsub: pubsub}
 	if err := r.Refresh(ctx); err != nil {
 		return nil, fmt.Errorf("registry: initial refresh: %w", err)
 	}
-	events, err := store.Subscribe(ctx)
+	events, err := pubsub.Subscribe(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("registry: subscribe: %w", err)
 	}
@@ -113,11 +128,11 @@ func (r *Reader) Snapshot() registry.Snapshot {
 	return r.snapshot
 }
 
-// Refresh re-reads the registry from Valkey, replacing the cached
-// snapshot atomically. Exposed as a public method so tests (and the
-// import binary) can drive refreshes deterministically.
+// Refresh re-reads the registry from the source-of-truth, replacing
+// the cached snapshot atomically. Exposed as a public method so tests
+// (and the import binary) can drive refreshes deterministically.
 func (r *Reader) Refresh(ctx context.Context) error {
-	sites, err := r.store.Sites(ctx)
+	sites, err := r.source.Sites(ctx)
 	if err != nil {
 		return err
 	}
