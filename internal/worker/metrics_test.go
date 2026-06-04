@@ -1,12 +1,15 @@
 package worker
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 )
+
+var errFail = errors.New("relay boom")
 
 func TestObs(t *testing.T) {
 	reg := prometheus.NewRegistry()
@@ -27,6 +30,14 @@ func TestObs(t *testing.T) {
 
 	m.SetDLQDepth(0)
 	assert.EqualValues(t, 0, testutil.ToFloat64(m.DLQDepth), "operator drained the DLQ")
+
+	m.ObserveRelay(7, nil)
+	assert.EqualValues(t, 7, testutil.ToFloat64(m.RelayPublished))
+	assert.EqualValues(t, 0, testutil.ToFloat64(m.RelayFailures))
+
+	m.ObserveRelay(3, errFail)
+	assert.EqualValues(t, 10, testutil.ToFloat64(m.RelayPublished), "partial drain still counts what published")
+	assert.EqualValues(t, 1, testutil.ToFloat64(m.RelayFailures))
 }
 
 func TestObs_NilSafe(t *testing.T) {
@@ -35,4 +46,5 @@ func TestObs_NilSafe(t *testing.T) {
 	m.ObserveDeadLetter("x")
 	m.SetQueueDepth("x", 1)
 	m.SetDLQDepth(1)
+	m.ObserveRelay(1, nil)
 }

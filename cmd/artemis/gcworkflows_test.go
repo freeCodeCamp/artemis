@@ -13,7 +13,7 @@ import (
 
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true)
+	defs := gcWorkflowDefs(gcw, true, nil)
 	require.Len(t, defs, 3)
 
 	byName := map[string]worker.WorkflowDef{}
@@ -54,6 +54,6 @@ func (c *captureEngine) Stop(context.Context) error          { return nil }
 func TestRegisterGCWorkflows(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	rt := worker.NewRuntime(&captureEngine{})
-	require.NoError(t, registerGCWorkflows(rt, gcw, false))
+	require.NoError(t, registerGCWorkflows(rt, gcw, false, nil))
 	assert.Len(t, rt.Registered(), 3)
 }

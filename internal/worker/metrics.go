@@ -8,6 +8,8 @@ type Metrics struct {
 	WorkflowRuns     *prometheus.CounterVec
 	WorkflowFailures *prometheus.CounterVec
 	DeadLettered     *prometheus.CounterVec
+	RelayPublished   prometheus.Counter
+	RelayFailures    prometheus.Counter
 }
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -32,8 +34,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_worker_dead_lettered_total",
 			Help: "Workflow runs that exhausted retries and dead-lettered, labelled by workflow.",
 		}, []string{"workflow"}),
+		RelayPublished: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "artemis_relay_published_total",
+			Help: "Outbox rows published to the engine by the relay loop (at-least-once).",
+		}),
+		RelayFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "artemis_relay_failures_total",
+			Help: "Relay RunOnce passes that returned an error before draining the batch.",
+		}),
 	}
-	reg.MustRegister(m.QueueDepth, m.DLQDepth, m.WorkflowRuns, m.WorkflowFailures, m.DeadLettered)
+	reg.MustRegister(m.QueueDepth, m.DLQDepth, m.WorkflowRuns, m.WorkflowFailures, m.DeadLettered, m.RelayPublished, m.RelayFailures)
 	return m
 }
 
@@ -67,4 +77,16 @@ func (m *Metrics) SetDLQDepth(depth float64) {
 		return
 	}
 	m.DLQDepth.Set(depth)
+}
+
+func (m *Metrics) ObserveRelay(published int, err error) {
+	if m == nil {
+		return
+	}
+	if published > 0 {
+		m.RelayPublished.Add(float64(published))
+	}
+	if err != nil {
+		m.RelayFailures.Inc()
+	}
 }

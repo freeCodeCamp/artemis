@@ -192,6 +192,7 @@ func run() error {
 	metricsReg := prometheus.NewRegistry()
 	metrics := handler.NewMetrics(metricsReg)
 	handler.SetMetrics(metrics)
+	workerMetrics := worker.NewMetrics(metricsReg)
 	registryReader.SetOnRefreshError(func(err error) {
 		metrics.RegistryRefreshFailures.Inc()
 		observability.CaptureBackground("registry.refresh", err)
@@ -238,7 +239,7 @@ func run() error {
 			WorkerName: "artemis",
 		})
 		workerRuntime := worker.NewRuntime(hatchetAdapter)
-		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun); err != nil {
+		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, workerMetrics); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)
 		}
 		go func() {
@@ -247,7 +248,7 @@ func run() error {
 		}()
 
 		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
-		go runRelayLoop(rootCtx, relay, relayInterval)
+		go runRelayLoop(rootCtx, relay, relayInterval, workerMetrics)
 		slog.Info("outbox relay: started", "interval", relayInterval)
 	}
 
