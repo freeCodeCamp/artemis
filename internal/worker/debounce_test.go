@@ -53,6 +53,39 @@ func TestDebounce_LaterChangeRetriggers(t *testing.T) {
 		"a change after processing triggers GC again (no lost updates; per-site order preserved by engine key, E2)")
 }
 
+func TestDebounce_StaleCallbackDoesNotDropNewerTimer(t *testing.T) {
+	var mu sync.Mutex
+	var count int
+	d := NewDebouncer(time.Hour, func(string) {
+		mu.Lock()
+		count++
+		mu.Unlock()
+	})
+	t.Cleanup(d.Stop)
+
+	d.Notify("www")
+	d.mu.Lock()
+	stale := d.timers["www"]
+	d.mu.Unlock()
+
+	d.Notify("www")
+	d.mu.Lock()
+	fresh := d.timers["www"]
+	d.mu.Unlock()
+	require.NotSame(t, stale, fresh, "second Notify installs a distinct timer")
+
+	d.fire("www", stale)
+
+	mu.Lock()
+	assert.Equal(t, 0, count, "stale in-flight callback must not Trigger")
+	mu.Unlock()
+
+	d.mu.Lock()
+	got := d.timers["www"]
+	d.mu.Unlock()
+	assert.Same(t, fresh, got, "stale callback must not delete the newer timer entry")
+}
+
 func TestDebounce_StopHaltsPendingTriggers(t *testing.T) {
 	var mu sync.Mutex
 	var count int

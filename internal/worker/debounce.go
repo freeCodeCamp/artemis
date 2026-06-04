@@ -27,16 +27,20 @@ func (d *Debouncer) Notify(site string) {
 	if t, ok := d.timers[site]; ok {
 		t.Stop()
 	}
-	d.timers[site] = time.AfterFunc(d.Window, func() {
-		d.mu.Lock()
-		if d.stopped {
-			d.mu.Unlock()
-			return
-		}
-		delete(d.timers, site)
+	var timer *time.Timer
+	timer = time.AfterFunc(d.Window, func() { d.fire(site, timer) })
+	d.timers[site] = timer
+}
+
+func (d *Debouncer) fire(site string, timer *time.Timer) {
+	d.mu.Lock()
+	if d.stopped || d.timers[site] != timer {
 		d.mu.Unlock()
-		d.Trigger(site)
-	})
+		return
+	}
+	delete(d.timers, site)
+	d.mu.Unlock()
+	d.Trigger(site)
 }
 
 func (d *Debouncer) Stop() {
