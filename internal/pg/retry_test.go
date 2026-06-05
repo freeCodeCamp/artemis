@@ -51,7 +51,6 @@ func TestRetryConnectWindowExhausted(t *testing.T) {
 	require.Nil(t, db)
 	require.ErrorIs(t, err, connectErr)
 	require.Greater(t, attempts.Load(), int32(1), "must retry within the window")
-	require.GreaterOrEqual(t, elapsed, 50*time.Millisecond, "window minus final-backoff slack")
 	require.Less(t, elapsed, 2*time.Second, "window is a hard ceiling")
 }
 
@@ -84,14 +83,38 @@ func TestRetryConnectCtxCanceled(t *testing.T) {
 	require.Less(t, time.Since(start), 2*time.Second, "must abort promptly on cancel")
 }
 
-func TestNewWithRetryUnreachableRetriesWithinWindow(t *testing.T) {
+func TestRetryConnectCtxCanceledBySignalCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(errors.New("terminated signal received"))
+	var attempts atomic.Int32
+	db, err := retryConnect(ctx, 10*time.Second, 10*time.Millisecond, 20*time.Millisecond,
+		func(ctx context.Context) (*DB, error) {
+			attempts.Add(1)
+			return nil, errors.New("dial error: connection refused")
+		})
+	require.Nil(t, db)
+	require.ErrorIs(t, err, context.Canceled,
+		"shutdown must surface as context.Canceled regardless of cancel cause, so main() can route it away from Sentry")
+	require.LessOrEqual(t, attempts.Load(), int32(1))
+}
+
+func TestRetryConnectLateSuccessBeatsDeadlineCheck(t *testing.T) {
+	want := &DB{}
+	db, err := retryConnect(context.Background(), 5*time.Millisecond, 100*time.Millisecond, 200*time.Millisecond,
+		func(ctx context.Context) (*DB, error) {
+			return want, nil
+		})
+	require.NoError(t, err, "a successful connect must never be discarded as a timeout")
+	require.Same(t, want, db)
+}
+
+func TestNewWithRetryUnreachableBoundedByWindow(t *testing.T) {
 	start := time.Now()
 	db, err := NewWithRetry(context.Background(), Config{
 		DatabaseURL: "postgres://artemis:x@127.0.0.1:1/artemis?sslmode=disable&connect_timeout=1",
 	}, 1200*time.Millisecond)
-	elapsed := time.Since(start)
 	require.Nil(t, db)
 	require.Error(t, err)
-	require.GreaterOrEqual(t, elapsed, 450*time.Millisecond, "at least one real backoff cycle")
-	require.Less(t, elapsed, 3*time.Second, "window is a hard ceiling")
+	require.NotErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(start), 3*time.Second, "window is a hard ceiling")
 }

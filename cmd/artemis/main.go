@@ -45,8 +45,14 @@ var (
 	commit  = "unknown"
 )
 
+const bootPhaseTimeout = 20 * time.Second
+
 func main() {
 	if err := run(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			slog.Info("artemis: boot aborted by shutdown signal", "err", err)
+			return
+		}
 		observability.CaptureFatal(err) // no-op unless Sentry was initialised
 		slog.Error("artemis: fatal", "err", err)
 		os.Exit(1)
@@ -341,7 +347,9 @@ func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect: %w", err)
 	}
-	if err := pg.Migrate(ctx, db.Pool); err != nil {
+	migrateCtx, cancel := context.WithTimeout(ctx, bootPhaseTimeout)
+	defer cancel()
+	if err := pg.Migrate(migrateCtx, db.Pool); err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -368,7 +376,9 @@ func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registr
 	)
 	if pgDB != nil {
 		pgReg := pg.NewRegistryStore(pgDB).WithOnChange(valkey.PublishOnChange(ctx, store))
-		imported, err := pgReg.Import(ctx, store)
+		importCtx, cancel := context.WithTimeout(ctx, bootPhaseTimeout)
+		imported, err := pgReg.Import(importCtx, store)
+		cancel()
 		if err != nil {
 			_ = store.Close()
 			return nil, nil, nil, nil, fmt.Errorf("registry import: %w", err)

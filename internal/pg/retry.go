@@ -34,7 +34,7 @@ func retryConnect(ctx context.Context, window, base, max time.Duration, connect 
 			return db, nil
 		}
 		if ctx.Err() != nil {
-			return nil, context.Cause(ctx)
+			return nil, ctx.Err()
 		}
 		if remaining := time.Until(deadline); remaining <= backoff {
 			return nil, err
@@ -47,7 +47,7 @@ func retryConnect(ctx context.Context, window, base, max time.Duration, connect 
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, context.Cause(ctx)
+			return nil, ctx.Err()
 		case <-timer.C:
 		}
 		if backoff *= 2; backoff > max {
