@@ -28,21 +28,22 @@ const defaultGitHubAPIBase = "https://api.github.com"
 
 // Config holds the full Artemis runtime configuration.
 type Config struct {
-	Port               int
-	R2                 R2Config
-	GitHub             GitHubConfig
-	JWT                JWTConfig
-	Aliases            AliasConfig
-	DeployPrefixFormat string
-	UploadMaxBytes     int64 // single PUT /upload body cap; default 100 MiB
-	LogLevel           string
-	Registry           RegistryConfig
-	Repo               RepoConfig
-	Sentry             SentryConfig
-	DatabaseURL        string
-	BackfillOnBoot     bool
-	Hatchet            HatchetConfig
-	Cleanup            CleanupConfig
+	Port                 int
+	R2                   R2Config
+	GitHub               GitHubConfig
+	JWT                  JWTConfig
+	Aliases              AliasConfig
+	DeployPrefixFormat   string
+	UploadMaxBytes       int64 // single PUT /upload body cap; default 100 MiB
+	LogLevel             string
+	Registry             RegistryConfig
+	Repo                 RepoConfig
+	Sentry               SentryConfig
+	DatabaseURL          string
+	PGConnectRetryWindow time.Duration
+	BackfillOnBoot       bool
+	Hatchet              HatchetConfig
+	Cleanup              CleanupConfig
 }
 
 type HatchetConfig struct {
@@ -185,6 +186,7 @@ const (
 	defaultRepoCreateAuthzTeam    = "staff"
 	defaultRepoApproveAuthzTeam   = "none"
 	defaultSentryTracesSampleRate = 0.2
+	defaultPGConnectRetryWindow   = 45 * time.Second
 )
 
 var validLogLevels = map[string]struct{}{
@@ -336,6 +338,14 @@ func Load() (*Config, error) {
 	}
 
 	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+	cfg.PGConnectRetryWindow = defaultPGConnectRetryWindow
+	if v, ok := os.LookupEnv("PG_CONNECT_RETRY_WINDOW"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("invalid PG_CONNECT_RETRY_WINDOW %q: must be a non-negative Go duration (0 disables retry)", v)
+		}
+		cfg.PGConnectRetryWindow = d
+	}
 	if v := os.Getenv("BACKFILL_ON_BOOT"); v != "" {
 		cfg.BackfillOnBoot = v == "1" || strings.EqualFold(v, "true")
 	}

@@ -337,7 +337,7 @@ func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), erro
 	if !cfg.GCEnabled() {
 		return nil, func() {}, nil
 	}
-	db, err := pg.New(ctx, pg.Config{DatabaseURL: cfg.DatabaseURL})
+	db, err := pg.NewWithRetry(ctx, pg.Config{DatabaseURL: cfg.DatabaseURL}, cfg.PGConnectRetryWindow)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect: %w", err)
 	}
