@@ -2,6 +2,83 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.0.0](https://github.com/freeCodeCamp/artemis/compare/v0.8.0...v1.0.0) (2026-06-05)
+
+
+### Features
+
+* **auth:** consult durable teamcache before GitHub team probe ([6355ea7](https://github.com/freeCodeCamp/artemis/commit/6355ea7902ca7ad8c192d765814f7b8b12d7f17e))
+* **backfill:** one-shot BACKFILL_ON_BOOT R2-to-PG index runner ([a185b51](https://github.com/freeCodeCamp/artemis/commit/a185b51a4337679f2e5678215ca935eeee64304d))
+* **boot:** inject pg.Repo as handler Outbox + Tombstones (TrashPrefixBase) ([0dcaaa5](https://github.com/freeCodeCamp/artemis/commit/0dcaaa5ba0d4aaa686786c4c2957a57bcf1646ca))
+* **boot:** open pg pool + run migrations gated on DATABASE_URL ([55a535e](https://github.com/freeCodeCamp/artemis/commit/55a535ec1ed1b153d50dcdba6579cd8d903f3d6b))
+* **boot:** register + start gc workflows on the Hatchet worker ([c8fd6bf](https://github.com/freeCodeCamp/artemis/commit/c8fd6bf2e3dd59a8ee00e724ec542cb870c4c3b0))
+* **boot:** run outbox-relay ticker loop draining to the Hatchet adapter ([7d95639](https://github.com/freeCodeCamp/artemis/commit/7d95639817a8bbd0505bde5b3ed3e7c86952e89e))
+* **boot:** wire gc closures + policy + pg.Repo stores (prod R2 layout) ([ded5b80](https://github.com/freeCodeCamp/artemis/commit/ded5b80cb5d2df79bb5fb37a4fde8fe26246c9c6))
+* **config:** add DATABASE_URL, HATCHET_*, CLEANUP_* with grace&gt;=ttl validation ([b6c1a08](https://github.com/freeCodeCamp/artemis/commit/b6c1a088bfb18b125380b79bd2660f4d8ccbd03d))
+* **deploy:** write _artemis_meta.json marker on finalize ([b9cd06f](https://github.com/freeCodeCamp/artemis/commit/b9cd06f9b80a80eecabc5f50677310f375b9a20c))
+* **gc:** add gc-site workflow (retain, TOCTOU re-check, tombstone-move, dry-run) ([52138cc](https://github.com/freeCodeCamp/artemis/commit/52138cc8b8cf733d14494d83e15ef48fe52ca7a2))
+* **gc:** add prometheus metrics + slog reporting for GC workflows ([61315ac](https://github.com/freeCodeCamp/artemis/commit/61315ac04e5100469db16ac1bfc67a2d8d2ae22e))
+* **gc:** add pure retain predicate (alias/keepN/grace/retention/serve-cache) ([7be6dc6](https://github.com/freeCodeCamp/artemis/commit/7be6dc670d6c09ba0c2cd3b676a9e691e8ffcfb4))
+* **gc:** add reconcile-slice drift audit (orphan tombstone, reindex, PG prune) ([f4f9786](https://github.com/freeCodeCamp/artemis/commit/f4f97864e7b2d5538f4207872d10f433b75f41c2))
+* **gc:** add site GC planner with blast-cap abort ([c211aeb](https://github.com/freeCodeCamp/artemis/commit/c211aebe2381dd8f3700e70cade0e229012feb0c))
+* **gc:** add tombstone-purge workflow (2-phase reclaim past recovery window) ([882ae27](https://github.com/freeCodeCamp/artemis/commit/882ae27b1136a3c60de698d53a85ba3914e458ff))
+* **handler:** add manual deploy-delete endpoint (409 if aliased, else tombstone) ([e3d19e1](https://github.com/freeCodeCamp/artemis/commit/e3d19e1f92f8a963facd0a355dbede3cf11365eb))
+* **handler:** add site-purge (?purge=true cascade tombstone) ([ef3bc4b](https://github.com/freeCodeCamp/artemis/commit/ef3bc4bc371c27a227b47d8351abf9b20025e309))
+* **hatchet:** adapter implementing worker.Engine + worker.Publisher ([9714509](https://github.com/freeCodeCamp/artemis/commit/971450970db5ecc705cd470e155106ae7dba98f0))
+* **metrics:** expose worker run + relay counters at /metrics ([c3830a9](https://github.com/freeCodeCamp/artemis/commit/c3830a981d60124af65beb0d051b7c8eba4f304e))
+* **observability:** capture outbox-enqueue failures to Sentry ([bd002f2](https://github.com/freeCodeCamp/artemis/commit/bd002f2ad89322af77bd78ff8c8317a4e4b31c64))
+* **pg:** add alias CAS for last-writer-safe promote/rollback (no lost update) ([dc392ff](https://github.com/freeCodeCamp/artemis/commit/dc392ff826a39620799e29ea1d913d4c38ee3689))
+* **pg:** add atomic finalize saga (deploy+alias+outbox in one tx) ([d8a1653](https://github.com/freeCodeCamp/artemis/commit/d8a16537e3010f3108e0304f60137b97c30fe0e8))
+* **pg:** add deploy/alias/tombstone repo + one-time R2-&gt;PG backfill ([8286666](https://github.com/freeCodeCamp/artemis/commit/828666647a068d3e08ab533a5db446ac6755a2b6))
+* **pg:** add Postgres layer with embedded schema migrations ([fd1f4bf](https://github.com/freeCodeCamp/artemis/commit/fd1f4bf750700b1262a7a2612c781c31cb1bd2ba))
+* **pg:** add Postgres-backed repo-request queue (partial-index name claim, CAS transitions) ([c6a3827](https://github.com/freeCodeCamp/artemis/commit/c6a3827fe6c065ab2c5ad35ede649d8593687a6f))
+* **pg:** add Postgres-backed site registry store (Valkey cache-front via OnChange) ([6807518](https://github.com/freeCodeCamp/artemis/commit/6807518426f49646ba01b89e0a7068e52c6f9086))
+* **pg:** add transactional outbox + emit site.changed on finalize/promote/rollback ([7988ba0](https://github.com/freeCodeCamp/artemis/commit/7988ba0e4e91b8ce566730a038bc50669d9250c6))
+* **r2:** add DeleteObject + paginated batch DeletePrefix ([53e14fe](https://github.com/freeCodeCamp/artemis/commit/53e14fe6cca802a6be6423b19a0c57d83a73de39))
+* **r2:** add ListSites (top-level delimiter, _* excluded) ([1698048](https://github.com/freeCodeCamp/artemis/commit/169804879d4463c6037eec5f875dbe8ea7cda8ab))
+* **r2:** add MovePrefix (copy+delete) for tombstone moves ([b1f248d](https://github.com/freeCodeCamp/artemis/commit/b1f248db128ce4d18436a8073160bcc3ce810025))
+* **readyz:** PG-degraded probe semantics (R6) ([d075130](https://github.com/freeCodeCamp/artemis/commit/d07513089c0ee93b29d6d2c15f21eeda3ada6777))
+* **registry:** cut registry SoT to pg.RegistryStore + valkey cache-front ([a40efe5](https://github.com/freeCodeCamp/artemis/commit/a40efe512ff169d27eb8243f8b1e5c6476fd03ab))
+* **registry:** one-shot Valkey-to-PG import on boot when empty ([11b9be8](https://github.com/freeCodeCamp/artemis/commit/11b9be861cd86999ee32078c5af047c317e9b0fb))
+* **teamcache:** add Valkey-backed shared GitHub team-membership cache ([a166a35](https://github.com/freeCodeCamp/artemis/commit/a166a354d4d3e220e2b1bd95b6e7741e24e10bd1))
+* **worker:** add engine-agnostic durable workflow runtime (concurrency key=site) ([ade56a4](https://github.com/freeCodeCamp/artemis/commit/ade56a4315986b100ede9cbbb9f33bbaddfc2f5a))
+* **worker:** add event/cron triggers to WorkflowDef + Hatchet adapter ([d7f68b4](https://github.com/freeCodeCamp/artemis/commit/d7f68b4c363e8aa6707d53c9ed7048e23a431bf1))
+* **worker:** add outbox relay to publisher (at-least-once, order-preserving) ([e67ee1c](https://github.com/freeCodeCamp/artemis/commit/e67ee1c7a2b045ba432511da80232c70fc318fe7))
+* **worker:** add per-site debouncer for site.changed gc-site triggers ([060a98d](https://github.com/freeCodeCamp/artemis/commit/060a98dd826b8bf899f9d4ef6a4ca794637e45ce))
+* **worker:** add queue/DLQ/workflow metrics + reconcile drift counters ([26032dc](https://github.com/freeCodeCamp/artemis/commit/26032dccc5746ab68990b187946948f5e8a2e387))
+* **worker:** register finalize/promote/rollback as durable workflows (key=site) ([701ac31](https://github.com/freeCodeCamp/artemis/commit/701ac31b7c418b42555bfb92a7a91b5816ac8838))
+
+
+### Bug Fixes
+
+* **auth:** surface io.ReadAll + parse errors on GitHub OK path ([ae9ebf8](https://github.com/freeCodeCamp/artemis/commit/ae9ebf8014805647d01bdb19edf1ddd14f8efff5))
+* **auth:** tolerate durable team cache write fail ([531f491](https://github.com/freeCodeCamp/artemis/commit/531f491d77998e7e1231826a7545ab1bc9d74d05))
+* **backfill:** honor configurable ALIAS_*_KEY_FORMAT instead of hardcoded keys ([10d0074](https://github.com/freeCodeCamp/artemis/commit/10d0074c02aeeb466bc65a7842335dd6e37e5621))
+* **backfill:** revert alias-key templating; read R2-dir-relative &lt;dir&gt;/&lt;mode&gt; (B3 was a false positive) ([81e3ccd](https://github.com/freeCodeCamp/artemis/commit/81e3ccd74d8670417daca6e4f25ad5723b16f53f))
+* **compose:** boot smoke stack past R11 via loopback fakegithub + pg ([f4c05a5](https://github.com/freeCodeCamp/artemis/commit/f4c05a5f4ffcb0c8ccb2dd1a0745671551cf4af5))
+* **config:** reject whitespace-only authz team ([939559a](https://github.com/freeCodeCamp/artemis/commit/939559a1414c7bc847738e6d95404d513967ec19))
+* **config:** validate GH_API_BASE; reject cleartext-remote + malformed bases ([8bc0170](https://github.com/freeCodeCamp/artemis/commit/8bc01704b5419449c6bc8fe684fa70cd1e6aa316))
+* **gc:** never tombstone an alias-pinned deploy in reconcile (V1) ([935df49](https://github.com/freeCodeCamp/artemis/commit/935df4996c8fd433ab52f51988925f7dd220718d))
+* **gc:** re-read aliases before reconcile tombstone to close TOCTOU (V1) ([130638c](https://github.com/freeCodeCamp/artemis/commit/130638caf8bbb15d11825f025207df5a4a36e735))
+* **handler:** detach emit from request ctx ([069ab55](https://github.com/freeCodeCamp/artemis/commit/069ab55df24f3c671e68bb194c0df2a4cdf4253b))
+* **handler:** purge R2 before registry delete ([b94f581](https://github.com/freeCodeCamp/artemis/commit/b94f581c92f592765ad3562794dfc49f42f60029))
+* **metrics:** expose go and process collectors ([cb87f3e](https://github.com/freeCodeCamp/artemis/commit/cb87f3edc3acada4a05fb45c32807363aad0e042))
+* **pg:** count only inserted rows in import ([a5db15b](https://github.com/freeCodeCamp/artemis/commit/a5db15be5efe445c8599a7a3387626018a58a97e))
+* **pg:** panic on crypto/rand failure in repo request id gen ([fd23e57](https://github.com/freeCodeCamp/artemis/commit/fd23e576a776f8c127014893104e912eef395fc6))
+* **pg:** rebuild outbox_unpublished_idx on id to match fetch order ([f9f0d10](https://github.com/freeCodeCamp/artemis/commit/f9f0d109710ba7bb8954219cdbc4a42a97b033c9))
+* **pg:** return DB-read value as current from SetAliasCAS ([2170962](https://github.com/freeCodeCamp/artemis/commit/217096209b9a0f90f39ba9a61a3afa078bcfa75d))
+* **pg:** unlock advisory locks on fresh ctx ([71489c8](https://github.com/freeCodeCamp/artemis/commit/71489c8dc3869109f1a07071400a756e87153bb7))
+* **r2:** URL-encode MovePrefix copy-source for space/non-ASCII keys (V5) ([2dff82e](https://github.com/freeCodeCamp/artemis/commit/2dff82efa8251beb1c5840a38e5a15d9c57fae30))
+* **scripts:** fail fast on pg readiness timeout ([535c721](https://github.com/freeCodeCamp/artemis/commit/535c7218f24731eb1ac669e75af2fb0dbcc4c1ae))
+* **worker:** close debounce timer capture race ([70120ff](https://github.com/freeCodeCamp/artemis/commit/70120fff67a5f074bc4ffb74e776a39ee6e314a5))
+* **worker:** guard debounce callback against stale timer race ([4587b39](https://github.com/freeCodeCamp/artemis/commit/4587b390beba08c440385fafb26330828dd13de8))
+* **worker:** surface mark-published error on relay publish failure (errcheck) ([2792bb7](https://github.com/freeCodeCamp/artemis/commit/2792bb7d69d2506d04502b7dd7e06783acdb4c0b))
+
+
+### Miscellaneous Chores
+
+* release 1.0.0 ([3ca3271](https://github.com/freeCodeCamp/artemis/commit/3ca3271cc8213a0e34f229e664167ee53aee6ef0))
+
 ## [0.8.0](https://github.com/freeCodeCamp/artemis/compare/v0.7.1...v0.8.0) (2026-06-02)
 
 
