@@ -2,6 +2,20 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.1.0](https://github.com/freeCodeCamp/artemis/compare/v1.0.0...v1.1.0) (2026-06-06)
+
+
+### Features
+
+* **pg:** bounded boot connect retry with backoff ([068e455](https://github.com/freeCodeCamp/artemis/commit/068e45541138dff76e330ce0859bd2ad12c89024))
+
+
+### Bug Fixes
+
+* **boot:** shutdown-aware exit, bounded lock waits ([f107e32](https://github.com/freeCodeCamp/artemis/commit/f107e3277dd5e356f479be4f222d36681e1edd8d))
+* **handler:** canonicalize site keys to R2 dirname at GC boundary ([15757f5](https://github.com/freeCodeCamp/artemis/commit/15757f5b2e861d65f1baf08240e2c565d9a279f0))
+* **handler:** write deploy index + alias rows through to PG on finalize/promote/rollback ([2e8ed88](https://github.com/freeCodeCamp/artemis/commit/2e8ed8801fd7fbcf04ca4e78608d487d757151d5))
+
 ## [1.0.0](https://github.com/freeCodeCamp/artemis/compare/v0.8.0...v1.0.0) (2026-06-05)
 
 
