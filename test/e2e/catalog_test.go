@@ -185,7 +185,7 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 		t.Fatalf("finalize mode=%q", finResp.Mode)
 	}
 
-	previewAlias, err := r2c.GetAlias(ctx, slug+"/preview")
+	previewAlias, err := r2c.GetAlias(ctx, siteDir(slug)+"/preview")
 	if err != nil {
 		t.Fatalf("R2 preview alias get: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 		t.Fatalf("R2 preview alias=%q want %q", previewAlias, initResp.DeployID)
 	}
 
-	waitOutbox(t, pool, slug)
+	waitOutbox(t, pool, siteDir(slug))
 
 	var promoteResp struct {
 		DeployID string `json:"deployId"`
@@ -204,7 +204,7 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 		t.Fatalf("promote deployId=%q want %q", promoteResp.DeployID, initResp.DeployID)
 	}
 
-	prodAlias, err := r2c.GetAlias(ctx, slug+"/production")
+	prodAlias, err := r2c.GetAlias(ctx, siteDir(slug)+"/production")
 	if err != nil {
 		t.Fatalf("R2 prod alias get: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestSiteRollback_DeepAssert(t *testing.T) {
 		t.Fatalf("promote deployId=%q want %q", promoteResp.DeployID, current)
 	}
 
-	prodAlias, err := r2c.GetAlias(ctx, slug+"/production")
+	prodAlias, err := r2c.GetAlias(ctx, siteDir(slug)+"/production")
 	if err != nil {
 		t.Fatalf("R2 prod alias get after promote: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestSiteRollback_DeepAssert(t *testing.T) {
 		t.Fatalf("rollback deployId=%q want %q", rollbackResp.DeployID, prior)
 	}
 
-	rolledAlias, err := r2c.GetAlias(ctx, slug+"/production")
+	rolledAlias, err := r2c.GetAlias(ctx, siteDir(slug)+"/production")
 	if err != nil {
 		t.Fatalf("R2 prod alias get after rollback: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestManualDelete_Tombstone(t *testing.T) {
 
 	deployID := mintDeploy(t, e, slug, "preview")
 
-	deployPrefix := slug + "/deploys/" + deployID + "/"
+	deployPrefix := siteDir(slug) + "/deploys/" + deployID + "/"
 	if !hasPrefix(t, r2c, deployPrefix) {
 		t.Fatalf("R2 prefix %q absent before delete", deployPrefix)
 	}
@@ -328,13 +328,13 @@ func TestManualDelete_Tombstone(t *testing.T) {
 	if hasPrefix(t, r2c, deployPrefix) {
 		t.Fatalf("R2 prefix %q still present after tombstone", deployPrefix)
 	}
-	if !hasPrefix(t, r2c, "_trash/"+slug+"/"+deployID+"/") {
+	if !hasPrefix(t, r2c, "_trash/"+siteDir(slug)+"/"+deployID+"/") {
 		t.Fatalf("R2 trash prefix absent after tombstone")
 	}
 
 	var n int
 	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM tombstones WHERE site=$1 AND id=$2`, slug, deployID).Scan(&n); err != nil {
+		`SELECT count(*) FROM tombstones WHERE site=$1 AND id=$2`, siteDir(slug), deployID).Scan(&n); err != nil {
 		t.Fatalf("pg tombstone query: %v", err)
 	}
 	if n != 1 {
@@ -361,16 +361,16 @@ func TestSitePurge_Tombstone(t *testing.T) {
 		t.Fatalf("purge status=%q want purged", purgeResp.Status)
 	}
 
-	if hasPrefix(t, r2c, slug+"/") {
+	if hasPrefix(t, r2c, siteDir(slug)+"/") {
 		t.Fatalf("R2 site prefix %q/ still present after purge", slug)
 	}
-	if !hasPrefix(t, r2c, "_trash/"+slug+"/") {
+	if !hasPrefix(t, r2c, "_trash/"+siteDir(slug)+"/") {
 		t.Fatalf("R2 trash prefix absent after purge")
 	}
 
 	var n int
 	if err := pool.QueryRow(ctx,
-		`SELECT count(*) FROM tombstones WHERE site=$1`, slug).Scan(&n); err != nil {
+		`SELECT count(*) FROM tombstones WHERE site=$1`, siteDir(slug)).Scan(&n); err != nil {
 		t.Fatalf("pg tombstone query: %v", err)
 	}
 	if n == 0 {

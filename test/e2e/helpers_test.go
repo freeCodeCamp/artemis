@@ -22,6 +22,10 @@ func uniqueSlug(prefix string) string {
 	return fmt.Sprintf("%se2e%d%d", prefix, time.Now().UnixNano()%1_000_000, n)
 }
 
+func siteDir(slug string) string {
+	return slug + ".e2e.test"
+}
+
 func registerSite(t *testing.T, e env, slug string) {
 	t.Helper()
 	mustStatus(t, e.call(t, http.MethodPost, "/api/site/register", e.GHToken,

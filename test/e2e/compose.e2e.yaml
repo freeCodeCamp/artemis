@@ -145,6 +145,9 @@ services:
       HATCHET_ADDR: "hatchet-lite:7077"
       HATCHET_CLIENT_TOKEN: "${HATCHET_CLIENT_TOKEN:-}"
       HATCHET_CLIENT_TLS_STRATEGY: "none"
+      DEPLOY_PREFIX_FORMAT: "<site>.e2e.test/deploys/<ts>-<sha>/"
+      ALIAS_PRODUCTION_KEY_FORMAT: "<site>.e2e.test/production"
+      ALIAS_PREVIEW_KEY_FORMAT: "<site>.e2e.test/preview"
     ports:
       - "${ARTEMIS_HOST_PORT:-8080}:8080"
 
