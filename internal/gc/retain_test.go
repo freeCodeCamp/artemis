@@ -84,26 +84,27 @@ func TestRetain_Grace(t *testing.T) {
 }
 
 func TestRetain_ServeCacheSafe(t *testing.T) {
-	deploys := []Deploy{
+	freshDeploys := []Deploy{
 		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
 		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
 		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
-		{ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true},
+		{ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-5 * time.Second)},
 	}
 
-	_, delFresh := Retain(RetainInput{
-		Deploys:         deploys,
-		LastAliasChange: testNow.Add(-5 * time.Second),
-		Now:             testNow,
-	}, testPolicy())
+	_, delFresh := Retain(RetainInput{Deploys: freshDeploys, Now: testNow}, testPolicy())
 	assert.NotContains(t, delIDs(delFresh), "just-superseded",
-		"no delete within serve_cache_ttl of an alias move (V11)")
+		"no delete within serve_cache_ttl of losing alias status (V11)")
 
-	_, delLater := Retain(RetainInput{
-		Deploys:         deploys,
-		LastAliasChange: testNow.Add(-30 * time.Second),
-		Now:             testNow,
-	}, testPolicy())
+	laterDeploys := []Deploy{
+		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
+		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
+		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
+		{ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-30 * time.Second)},
+	}
+
+	_, delLater := Retain(RetainInput{Deploys: laterDeploys, Now: testNow}, testPolicy())
 	assert.Contains(t, delIDs(delLater), "just-superseded",
 		"past serve_cache_ttl the superseded deploy is collectable")
 }

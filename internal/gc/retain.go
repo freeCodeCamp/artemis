@@ -37,11 +37,8 @@ func Retain(in RetainInput, p Policy) (keep, del []Deploy) {
 		return ordered[i].ID > ordered[j].ID
 	})
 
-	freshAliasMove := !in.LastAliasChange.IsZero() &&
-		in.Now.Sub(in.LastAliasChange) < p.ServeCacheTTL
-
 	for rank, d := range ordered {
-		if retainDeploy(d, rank, freshAliasMove, in.AliasTargets, in.Now, p) {
+		if retainDeploy(d, rank, in.AliasTargets, in.Now, p) {
 			keep = append(keep, d)
 		} else {
 			del = append(del, d)
@@ -50,14 +47,14 @@ func Retain(in RetainInput, p Policy) (keep, del []Deploy) {
 	return keep, del
 }
 
-func retainDeploy(d Deploy, rank int, freshAliasMove bool, aliases map[string]struct{}, now time.Time, p Policy) bool {
+func retainDeploy(d Deploy, rank int, aliases map[string]struct{}, now time.Time, p Policy) bool {
 	if _, aliased := aliases[d.ID]; aliased {
 		return true
 	}
 	if rank < p.RecentKeep {
 		return true
 	}
-	if freshAliasMove {
+	if !d.AliasReleasedAt.IsZero() && now.Sub(d.AliasReleasedAt) < p.ServeCacheTTL {
 		return true
 	}
 	age := now.Sub(d.Mtime)

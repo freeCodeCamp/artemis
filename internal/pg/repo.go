@@ -51,7 +51,7 @@ func (r *Repo) UpsertAlias(ctx context.Context, site, name, deployID string, upd
 
 func (r *Repo) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, mtime, bytes, has_marker FROM deploys WHERE site = $1 AND state = 'active'`, site)
+		`SELECT id, mtime, bytes, has_marker, alias_released_at FROM deploys WHERE site = $1 AND state = 'active'`, site)
 	if err != nil {
 		return nil, fmt.Errorf("pg deploys %s: %w", site, err)
 	}
@@ -60,8 +60,12 @@ func (r *Repo) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, er
 	var out []gc.Deploy
 	for rows.Next() {
 		var d gc.Deploy
-		if err := rows.Scan(&d.ID, &d.Mtime, &d.Bytes, &d.HasMarker); err != nil {
+		var released *time.Time
+		if err := rows.Scan(&d.ID, &d.Mtime, &d.Bytes, &d.HasMarker, &released); err != nil {
 			return nil, fmt.Errorf("pg scan deploy %s: %w", site, err)
+		}
+		if released != nil {
+			d.AliasReleasedAt = *released
 		}
 		out = append(out, d)
 	}
