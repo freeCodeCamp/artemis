@@ -17,6 +17,7 @@ import (
 var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
+	_ handler.DeployIndexWriter = (*pg.Repo)(nil)
 	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)

@@ -127,3 +127,17 @@ func containsString(xs []string, want string) bool {
 	}
 	return false
 }
+
+func assertPGAlias(t *testing.T, pool *pgxpool.Pool, site, name, want string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var got string
+	if err := pool.QueryRow(ctx,
+		`SELECT deploy_id FROM aliases WHERE site=$1 AND name=$2`, site, name).Scan(&got); err != nil {
+		t.Fatalf("pg alias %s/%s: %v", site, name, err)
+	}
+	if got != want {
+		t.Fatalf("pg alias %s/%s=%q want %q", site, name, got, want)
+	}
+}

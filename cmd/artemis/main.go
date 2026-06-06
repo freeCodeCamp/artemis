@@ -296,6 +296,7 @@ func run() error {
 	if pgRepo != nil {
 		h.Outbox = pgRepo
 		h.Tombstones = pgRepo
+		h.Index = pgRepo
 	}
 	if pgDB != nil {
 		h.PGHealth = pgDB

@@ -195,6 +195,17 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 
 	waitOutbox(t, pool, siteDir(slug))
 
+	var pgMarker bool
+	if err := pool.QueryRow(ctx,
+		`SELECT has_marker FROM deploys WHERE site=$1 AND id=$2 AND state='active'`,
+		siteDir(slug), initResp.DeployID).Scan(&pgMarker); err != nil {
+		t.Fatalf("pg deploy row after finalize: %v", err)
+	}
+	if !pgMarker {
+		t.Fatalf("pg deploy row has_marker=false after finalize")
+	}
+	assertPGAlias(t, pool, siteDir(slug), "preview", initResp.DeployID)
+
 	var promoteResp struct {
 		DeployID string `json:"deployId"`
 	}
@@ -211,6 +222,8 @@ func TestDeployFlow_DeepAssert(t *testing.T) {
 	if strings.TrimSpace(prodAlias) != initResp.DeployID {
 		t.Fatalf("R2 prod alias=%q want %q", prodAlias, initResp.DeployID)
 	}
+
+	assertPGAlias(t, pool, siteDir(slug), "production", initResp.DeployID)
 
 	var aliasResp struct {
 		DeployID string `json:"deployId"`

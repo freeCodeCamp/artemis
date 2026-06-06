@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/go-chi/chi/v5"
@@ -132,7 +133,14 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.emitSiteChanged(r.Context(), site)
+	if h.Index != nil {
+		if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
+			return
+		}
+	} else {
+		h.emitSiteChanged(r.Context(), site)
+	}
 	slog.Info("site.promote", "site", site, "deployId", deployID, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
@@ -222,7 +230,14 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.emitSiteChanged(r.Context(), site)
+	if h.Index != nil {
+		if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
+			return
+		}
+	} else {
+		h.emitSiteChanged(r.Context(), site)
+	}
 	slog.Info("site.rollback", "site", site, "to", req.To, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
