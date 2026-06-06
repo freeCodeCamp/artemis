@@ -6,10 +6,11 @@ import (
 )
 
 type Deploy struct {
-	ID        string
-	Mtime     time.Time
-	Bytes     int64
-	HasMarker bool
+	ID              string
+	Mtime           time.Time
+	Bytes           int64
+	HasMarker       bool
+	AliasReleasedAt time.Time
 }
 
 type Policy struct {
