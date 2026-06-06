@@ -2,6 +2,15 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.1.1](https://github.com/freeCodeCamp/artemis/compare/v1.1.0...v1.1.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* **gc,handler:** R2-authoritative alias re-read + per-site advisory lock on destructive ops ([f12aad5](https://github.com/freeCodeCamp/artemis/commit/f12aad57f44fd9b3a95d0116e9e08891d30d1a4a))
+* **gc:** per-deploy alias-release hold replaces site-blanket freshAliasMove ([74c76ca](https://github.com/freeCodeCamp/artemis/commit/74c76ca0e7c5f2057f2a0c4068351a21d8de8429))
+* **pg,handler:** dedicated lock connection + in-lock CAS preflight reads ([8b3b1a0](https://github.com/freeCodeCamp/artemis/commit/8b3b1a0c7182c785c63df63e2b8b42e8c7a04012))
+
 ## [1.1.0](https://github.com/freeCodeCamp/artemis/compare/v1.0.0...v1.1.0) (2026-06-06)
 
 
