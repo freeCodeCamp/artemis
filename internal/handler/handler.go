@@ -73,6 +73,10 @@ type DeployIndexWriter interface {
 	AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error
 }
 
+type SiteLocker interface {
+	WithSiteLock(ctx context.Context, site string, fn func() error) error
+}
+
 // RegistryHealth is the readiness probe contract for the registry
 // backend. *valkey.Store satisfies this; handler tests substitute a
 // fake that returns the desired error.
@@ -99,6 +103,7 @@ type Handlers struct {
 	TrashPrefixBase    string // e.g. "_trash/"
 	Outbox             SiteChangeEmitter
 	Index              DeployIndexWriter
+	Locker             SiteLocker
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or

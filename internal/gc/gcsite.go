@@ -24,6 +24,7 @@ type SiteGC struct {
 	BlastCap     int
 	DeployPrefix func(site, id string) string
 	TrashPrefix  func(site, id string) string
+	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
 	Now          func() time.Time
 	Metrics      *Metrics
 }
