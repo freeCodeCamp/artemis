@@ -53,6 +53,14 @@ func (t DeployPrefixTemplate) SitePrefix(site string) string {
 	return p
 }
 
+func (t DeployPrefixTemplate) SiteDirname(site string) string {
+	p := t.SitePrefix(site)
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
 // DeployPrefix returns the R2 key prefix for one deploy, e.g.
 // "www/deploys/20260420-141522-abc1234/". Always ends with "/".
 func (t DeployPrefixTemplate) DeployPrefix(site, deployID string) string {

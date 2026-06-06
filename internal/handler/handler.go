@@ -129,6 +129,7 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 	if h.Outbox == nil {
 		return
 	}
+	site = h.DeployPrefix.SiteDirname(site)
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {

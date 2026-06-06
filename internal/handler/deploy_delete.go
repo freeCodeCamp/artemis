@@ -50,7 +50,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.tombstone", err)
 		return
 	}
-	if err := h.Tombstones.RecordTombstone(r.Context(), site, deployID, 0); err != nil {
+	if err := h.Tombstones.RecordTombstone(r.Context(), h.DeployPrefix.SiteDirname(site), deployID, 0); err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
 		return
 	}
@@ -70,5 +70,5 @@ func (h *Handlers) trashPrefix(site, id string) string {
 	if base == "" {
 		base = "_trash/"
 	}
-	return base + site + "/" + id + "/"
+	return base + h.DeployPrefix.SiteDirname(site) + "/" + id + "/"
 }

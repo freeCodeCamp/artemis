@@ -208,12 +208,13 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "_trash/"
 	}
-	moved, err := h.R2.MovePrefix(r.Context(), slug+"/", base+slug+"/")
+	dirname := h.DeployPrefix.SiteDirname(slug)
+	moved, err := h.R2.MovePrefix(r.Context(), dirname+"/", base+dirname+"/")
 	if err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 		return
 	}
-	if err := h.Tombstones.RecordTombstone(r.Context(), slug, "", 0); err != nil {
+	if err := h.Tombstones.RecordTombstone(r.Context(), dirname, "", 0); err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 		return
 	}
