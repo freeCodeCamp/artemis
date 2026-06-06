@@ -48,6 +48,16 @@ func (r *loggingR2) PutAlias(ctx context.Context, key, deployID string) error {
 	return r.fakeR2.PutAlias(ctx, key, deployID)
 }
 
+func (r *loggingR2) GetAlias(ctx context.Context, key string) (string, error) {
+	r.log.add("getAlias:" + key)
+	return r.fakeR2.GetAlias(ctx, key)
+}
+
+func (r *loggingR2) HasPrefix(ctx context.Context, prefix string) (bool, error) {
+	r.log.add("hasPrefix:" + prefix)
+	return r.fakeR2.HasPrefix(ctx, prefix)
+}
+
 func assertInsideLock(t *testing.T, log *eventLog, lockKey, op string) {
 	t.Helper()
 	lockAt, opAt, unlockAt := -1, -1, -1
@@ -147,6 +157,54 @@ func TestSiteRollback_AliasWriteUnderSiteLock(t *testing.T) {
 	)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
+	assertInsideLock(t, log, "www.freecode.camp", "putAlias:www/production")
+}
+
+func TestSitePromote_CASReadInsideLock(t *testing.T) {
+	log := &eventLog{}
+	store := &loggingR2{fakeR2: newFakeR2(), log: log}
+	store.aliases["www/production"] = "20260101-000000-old0001"
+
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
+	h.Locker = &fakeLocker{log: log}
+
+	body, _ := json.Marshal(SitePromoteRequest{
+		DeployID:        "20260420-141522-abc1234",
+		ExpectedCurrent: "20260101-000000-old0001",
+	})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assertInsideLock(t, log, "www.freecode.camp", "getAlias:www/production")
+	assertInsideLock(t, log, "www.freecode.camp", "putAlias:www/production")
+}
+
+func TestSiteRollback_PreflightReadsInsideLock(t *testing.T) {
+	log := &eventLog{}
+	store := &loggingR2{fakeR2: newFakeR2(), log: log}
+	deployID := "20260101-000000-old0001"
+	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("old")
+	store.aliases["www/production"] = "20260420-141522-abc1234"
+
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
+	h.Locker = &fakeLocker{log: log}
+
+	body, _ := json.Marshal(SiteRollbackRequest{To: deployID, ExpectedCurrent: "20260420-141522-abc1234"})
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", body,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assertInsideLock(t, log, "www.freecode.camp", "hasPrefix:www.freecode.camp/deploys/"+deployID+"/")
+	assertInsideLock(t, log, "www.freecode.camp", "getAlias:www/production")
 	assertInsideLock(t, log, "www.freecode.camp", "putAlias:www/production")
 }
 
