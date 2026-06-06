@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -128,18 +129,26 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
-		return
-	}
-
-	if h.Index != nil {
-		if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
-			return
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
+			return errAliasWriteHandled
 		}
-	} else {
-		h.emitSiteChanged(r.Context(), site)
+		if h.Index != nil {
+			if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
+				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
+				return errAliasWriteHandled
+			}
+		} else {
+			h.emitSiteChanged(r.Context(), site)
+		}
+		return nil
+	})
+	if lockErr != nil {
+		if !errors.Is(lockErr, errAliasWriteHandled) {
+			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+		}
+		return
 	}
 	slog.Info("site.promote", "site", site, "deployId", deployID, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -225,18 +234,26 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
-		return
-	}
-
-	if h.Index != nil {
-		if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
-			return
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
+			return errAliasWriteHandled
 		}
-	} else {
-		h.emitSiteChanged(r.Context(), site)
+		if h.Index != nil {
+			if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
+				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
+				return errAliasWriteHandled
+			}
+		} else {
+			h.emitSiteChanged(r.Context(), site)
+		}
+		return nil
+	})
+	if lockErr != nil {
+		if !errors.Is(lockErr, errAliasWriteHandled) {
+			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+		}
+		return
 	}
 	slog.Info("site.rollback", "site", site, "to", req.To, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{

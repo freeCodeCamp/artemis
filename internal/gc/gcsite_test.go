@@ -60,7 +60,10 @@ func newSiteGC(store Store, mover Mover) *SiteGC {
 		BlastCap:     0,
 		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
 		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
-		Now:          func() time.Time { return testNow },
+		LiveAliases: func(_ context.Context, _ string) (map[string]struct{}, error) {
+			return map[string]struct{}{}, nil
+		},
+		Now: func() time.Time { return testNow },
 	}
 }
 
@@ -89,14 +92,15 @@ func TestGC_PromoteMidRun(t *testing.T) {
 	ds := sixOld()
 	victim := ds[len(ds)-1].ID
 	store := &fakeStore{
-		deploys: map[string][]Deploy{"www": ds},
-		targetsSeq: []map[string]struct{}{
-			{},               // plan-time: nothing aliased
-			aliasSet(victim), // TOCTOU re-read: alias moved onto victim
-		},
+		deploys:    map[string][]Deploy{"www": ds},
+		targetsSeq: []map[string]struct{}{{}}, // plan-time: nothing aliased
 	}
 	mover := &fakeMover{}
-	res, err := newSiteGC(store, mover).Run(context.Background(), "www", false)
+	g := newSiteGC(store, mover)
+	g.LiveAliases = func(_ context.Context, _ string) (map[string]struct{}, error) {
+		return aliasSet(victim), nil // R2 live read: alias moved onto victim mid-run
+	}
+	res, err := g.Run(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.Contains(t, res.Planned, victim, "victim was in the plan")

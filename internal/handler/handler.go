@@ -136,6 +136,15 @@ type Handlers struct {
 	Metrics *Metrics
 }
 
+var errAliasWriteHandled = errors.New("alias write failure already written to response")
+
+func (h *Handlers) withSiteLock(ctx context.Context, dirname string, fn func() error) error {
+	if h.Locker == nil {
+		return fn()
+	}
+	return h.Locker.WithSiteLock(ctx, dirname, fn)
+}
+
 func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 	if h.Outbox == nil {
 		return

@@ -75,6 +75,10 @@ func TestBootWiring_LayoutRejectsBadFormat(t *testing.T) {
 func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
 	cfg := &config.Config{
 		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
+		Aliases: config.AliasConfig{
+			ProductionKeyFormat: "<site>/production",
+			PreviewKeyFormat:    "<site>/preview",
+		},
 		Cleanup: config.CleanupConfig{
 			BlastCap:      5,
 			RetentionDays: 7,

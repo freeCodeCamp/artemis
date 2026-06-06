@@ -209,21 +209,27 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		base = "_trash/"
 	}
 	dirname := h.DeployPrefix.SiteDirname(slug)
-	moved, err := h.R2.MovePrefix(r.Context(), dirname+"/", base+dirname+"/")
-	if err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
-		return
+	lockErr := h.withSiteLock(r.Context(), dirname, func() error {
+		moved, err := h.R2.MovePrefix(r.Context(), dirname+"/", base+dirname+"/")
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
+			return nil
+		}
+		if err := h.Tombstones.RecordTombstone(r.Context(), dirname, "", 0); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
+			return nil
+		}
+		if err := h.Registry.Delete(r.Context(), slug); err != nil {
+			writeRegistryDeleteError(w, r, err)
+			return nil
+		}
+		slog.Info("site.purge", "slug", slug, "moved", moved, "reqID", RequestIDFromContext(r.Context()))
+		writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
+		return nil
+	})
+	if lockErr != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
 	}
-	if err := h.Tombstones.RecordTombstone(r.Context(), dirname, "", 0); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
-		return
-	}
-	if err := h.Registry.Delete(r.Context(), slug); err != nil {
-		writeRegistryDeleteError(w, r, err)
-		return
-	}
-	slog.Info("site.purge", "slug", slug, "moved", moved, "reqID", RequestIDFromContext(r.Context()))
-	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
 }
 
 func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error) {

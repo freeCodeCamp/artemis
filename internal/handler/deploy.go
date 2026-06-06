@@ -214,18 +214,26 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	aliasKey := h.aliasKey(claims.Site, mode)
-	if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
-		return
-	}
-
-	if h.Index != nil {
-		if err := h.Index.FinalizeAtomic(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), 0); err != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
-			return
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), func() error {
+		if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
+			return errAliasWriteHandled
 		}
-	} else {
-		h.emitSiteChanged(r.Context(), claims.Site)
+		if h.Index != nil {
+			if err := h.Index.FinalizeAtomic(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), 0); err != nil {
+				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
+				return errAliasWriteHandled
+			}
+		} else {
+			h.emitSiteChanged(r.Context(), claims.Site)
+		}
+		return nil
+	})
+	if lockErr != nil {
+		if !errors.Is(lockErr, errAliasWriteHandled) {
+			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+		}
+		return
 	}
 	slog.Info("deploy.finalize.live", "site", claims.Site, "deployId", deployID, "mode", mode, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, map[string]any{

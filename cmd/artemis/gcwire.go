@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
 	_ handler.DeployIndexWriter = (*pg.Repo)(nil)
+	_ handler.SiteLocker        = (*pg.Repo)(nil)
 	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)
@@ -67,6 +69,33 @@ func newGCLayout(format, trashBase string) (gcLayout, error) {
 	}, nil
 }
 
+func newLiveAliasReader(r2c *r2.Client, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+	tails := make([]string, 0, len(formats))
+	for _, f := range formats {
+		slash := strings.IndexByte(f, '/')
+		if slash < 0 {
+			return nil, fmt.Errorf("alias key format %q must contain '/' after the site segment", f)
+		}
+		tails = append(tails, f[slash:])
+	}
+	return func(ctx context.Context, site string) (map[string]struct{}, error) {
+		out := map[string]struct{}{}
+		for _, tail := range tails {
+			v, err := r2c.GetAlias(ctx, site+tail)
+			if err != nil {
+				if r2.IsNotFound(err) {
+					continue
+				}
+				return nil, err
+			}
+			if v = strings.TrimSpace(v); v != "" {
+				out[v] = struct{}{}
+			}
+		}
+		return out, nil
+	}, nil
+}
+
 func gcPolicy(c config.CleanupConfig) gc.Policy {
 	return gc.Policy{
 		RecentKeep:    c.RecentKeep,
@@ -88,11 +117,16 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 	if err != nil {
 		return nil, err
 	}
+	liveAliases, err := newLiveAliasReader(r2c, cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+	if err != nil {
+		return nil, err
+	}
 	return &gcWiring{
 		Repo: repo,
 		SiteGC: &gc.SiteGC{
 			Store:        repo,
 			Mover:        r2c,
+			LiveAliases:  liveAliases,
 			Policy:       gcPolicy(cfg.Cleanup),
 			BlastCap:     cfg.Cleanup.BlastCap,
 			DeployPrefix: layout.deployPrefix,

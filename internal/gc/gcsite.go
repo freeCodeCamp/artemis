@@ -75,12 +75,15 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 		return res, nil
 	}
 
-	fresh, _, err := g.Store.AliasTargets(ctx, site)
-	if err != nil {
-		return res, fmt.Errorf("gc %s: re-read aliases: %w", site, err)
+	if g.LiveAliases == nil {
+		return res, fmt.Errorf("gc %s: live run without LiveAliases reader (wiring bug)", site)
 	}
 	for _, d := range plan.Delete {
-		if _, nowAliased := fresh[d.ID]; nowAliased {
+		live, err := g.LiveAliases(ctx, site)
+		if err != nil {
+			return res, fmt.Errorf("gc %s: re-read live aliases: %w", site, err)
+		}
+		if _, nowAliased := live[d.ID]; nowAliased {
 			res.SkippedAliased = append(res.SkippedAliased, d.ID)
 			continue
 		}

@@ -20,49 +20,55 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, mode := range []string{"production", "preview"} {
-		cur, err := h.R2.GetAlias(r.Context(), h.aliasKey(site, mode))
-		if err != nil && !r2.IsNotFound(err) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.delete", err)
-			return
-		}
-		if strings.TrimSpace(cur) == deployID {
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error": map[string]string{
-					"code":    "deploy_aliased",
-					"message": "deploy is the target of a live alias; promote or roll back before deleting",
-				},
-				"site":     site,
-				"deployId": deployID,
-				"alias":    mode,
-			})
-			return
-		}
-	}
-
 	if h.Tombstones == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "tombstone store not configured")
 		return
 	}
 
-	moved, err := h.R2.MovePrefix(r.Context(), h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
-	if err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.tombstone", err)
-		return
-	}
-	if err := h.Tombstones.RecordTombstone(r.Context(), h.DeployPrefix.SiteDirname(site), deployID, 0); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
-		return
-	}
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		for _, mode := range []string{"production", "preview"} {
+			cur, err := h.R2.GetAlias(r.Context(), h.aliasKey(site, mode))
+			if err != nil && !r2.IsNotFound(err) {
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.delete", err)
+				return nil
+			}
+			if strings.TrimSpace(cur) == deployID {
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": map[string]string{
+						"code":    "deploy_aliased",
+						"message": "deploy is the target of a live alias; promote or roll back before deleting",
+					},
+					"site":     site,
+					"deployId": deployID,
+					"alias":    mode,
+				})
+				return nil
+			}
+		}
 
-	slog.Info("site.deploy.tombstoned", "site", site, "deployId", deployID, "moved", moved,
-		"reqID", RequestIDFromContext(r.Context()))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"site":     site,
-		"deployId": deployID,
-		"status":   "tombstoned",
-		"moved":    moved,
+		moved, err := h.R2.MovePrefix(r.Context(), h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.tombstone", err)
+			return nil
+		}
+		if err := h.Tombstones.RecordTombstone(r.Context(), h.DeployPrefix.SiteDirname(site), deployID, 0); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
+			return nil
+		}
+
+		slog.Info("site.deploy.tombstoned", "site", site, "deployId", deployID, "moved", moved,
+			"reqID", RequestIDFromContext(r.Context()))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"site":     site,
+			"deployId": deployID,
+			"status":   "tombstoned",
+			"moved":    moved,
+		})
+		return nil
 	})
+	if lockErr != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+	}
 }
 
 func (h *Handlers) trashPrefix(site, id string) string {
