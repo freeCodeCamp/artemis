@@ -82,54 +82,55 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 
 	prodKey := h.aliasKey(site, "production")
 
-	// CAS guard: read current production alias and bail on mismatch.
-	// Treat missing-alias as the empty string so callers can use CAS
-	// to assert "no prod yet" by passing ExpectedCurrent="".
-	if req.ExpectedCurrent != "" {
-		current, err := h.R2.GetAlias(r.Context(), prodKey)
-		if err != nil && !r2.IsNotFound(err) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.promote.cas", err)
-			return
-		}
-		current = strings.TrimSpace(current)
-		if current != req.ExpectedCurrent {
-			if h.Metrics != nil {
-				h.Metrics.AliasDrift.Inc()
-			}
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error": map[string]string{
-					"code":    "alias_drift",
-					"message": "production alias has moved since expectedCurrent was read",
-				},
-				"site":    site,
-				"current": current,
-			})
-			return
-		}
-	}
-
-	// Resolve the deploy id to write. Explicit param wins; otherwise
-	// fall back to the preview alias (legacy path).
-	deployID := req.DeployID
-	if deployID == "" {
-		previewKey := h.aliasKey(site, "preview")
-		v, err := h.R2.GetAlias(r.Context(), previewKey)
-		if err != nil {
-			if r2.IsNotFound(err) {
-				writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
-				return
-			}
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.preview", err)
-			return
-		}
-		deployID = strings.TrimSpace(v)
-		if deployID == "" {
-			writeError(w, http.StatusUnprocessableEntity, "no_preview", "preview alias is empty")
-			return
-		}
-	}
-
+	var deployID string
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		// CAS guard: read current production alias and bail on mismatch.
+		// Treat missing-alias as the empty string so callers can use CAS
+		// to assert "no prod yet" by passing ExpectedCurrent="".
+		if req.ExpectedCurrent != "" {
+			current, err := h.R2.GetAlias(r.Context(), prodKey)
+			if err != nil && !r2.IsNotFound(err) {
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.promote.cas", err)
+				return errAliasWriteHandled
+			}
+			current = strings.TrimSpace(current)
+			if current != req.ExpectedCurrent {
+				if h.Metrics != nil {
+					h.Metrics.AliasDrift.Inc()
+				}
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": map[string]string{
+						"code":    "alias_drift",
+						"message": "production alias has moved since expectedCurrent was read",
+					},
+					"site":    site,
+					"current": current,
+				})
+				return errAliasWriteHandled
+			}
+		}
+
+		// Resolve the deploy id to write. Explicit param wins; otherwise
+		// fall back to the preview alias (legacy path).
+		deployID = req.DeployID
+		if deployID == "" {
+			previewKey := h.aliasKey(site, "preview")
+			v, err := h.R2.GetAlias(r.Context(), previewKey)
+			if err != nil {
+				if r2.IsNotFound(err) {
+					writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
+					return errAliasWriteHandled
+				}
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.preview", err)
+				return errAliasWriteHandled
+			}
+			deployID = strings.TrimSpace(v)
+			if deployID == "" {
+				writeError(w, http.StatusUnprocessableEntity, "no_preview", "preview alias is empty")
+				return errAliasWriteHandled
+			}
+		}
+
 		if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 			return errAliasWriteHandled
@@ -195,46 +196,46 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prefix := h.deployPrefix(site, req.To)
-	exists, err := h.R2.HasPrefix(r.Context(), prefix)
-	if err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.has.prefix.rollback", err)
-		return
-	}
-	if !exists {
-		writeError(w, http.StatusUnprocessableEntity, "deploy_missing", "target deploy no longer exists in r2")
-		return
-	}
-
 	prodKey := h.aliasKey(site, "production")
 
-	// CAS guard: read current prod alias and bail on mismatch. Missing
-	// alias normalises to empty-string — symmetric with SitePromote so
-	// callers can use a single response shape across both verbs.
-	if req.ExpectedCurrent != "" {
-		current, err := h.R2.GetAlias(r.Context(), prodKey)
-		if err != nil && !r2.IsNotFound(err) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.rollback.cas", err)
-			return
-		}
-		current = strings.TrimSpace(current)
-		if current != req.ExpectedCurrent {
-			if h.Metrics != nil {
-				h.Metrics.AliasDrift.Inc()
-			}
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error": map[string]string{
-					"code":    "alias_drift",
-					"message": "production alias has moved since expectedCurrent was read",
-				},
-				"site":    site,
-				"current": current,
-			})
-			return
-		}
-	}
-
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		prefix := h.deployPrefix(site, req.To)
+		exists, err := h.R2.HasPrefix(r.Context(), prefix)
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.has.prefix.rollback", err)
+			return errAliasWriteHandled
+		}
+		if !exists {
+			writeError(w, http.StatusUnprocessableEntity, "deploy_missing", "target deploy no longer exists in r2")
+			return errAliasWriteHandled
+		}
+
+		// CAS guard: read current prod alias and bail on mismatch. Missing
+		// alias normalises to empty-string — symmetric with SitePromote so
+		// callers can use a single response shape across both verbs.
+		if req.ExpectedCurrent != "" {
+			current, err := h.R2.GetAlias(r.Context(), prodKey)
+			if err != nil && !r2.IsNotFound(err) {
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.rollback.cas", err)
+				return errAliasWriteHandled
+			}
+			current = strings.TrimSpace(current)
+			if current != req.ExpectedCurrent {
+				if h.Metrics != nil {
+					h.Metrics.AliasDrift.Inc()
+				}
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": map[string]string{
+						"code":    "alias_drift",
+						"message": "production alias has moved since expectedCurrent was read",
+					},
+					"site":    site,
+					"current": current,
+				})
+				return errAliasWriteHandled
+			}
+		}
+
 		if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 			return errAliasWriteHandled

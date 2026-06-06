@@ -5,24 +5,28 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) error {
-	conn, err := r.pool.Acquire(ctx)
+	conn, err := pgx.ConnectConfig(ctx, r.pool.Config().ConnConfig.Copy())
 	if err != nil {
-		return fmt.Errorf("site lock %s: acquire conn: %w", site, err)
+		return fmt.Errorf("site lock %s: connect: %w", site, err)
 	}
-	defer conn.Release()
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := conn.Close(closeCtx); err != nil {
+			slog.Error("site lock: close failed; server reaps the session lock", "site", site, "err", err)
+		}
+	}()
 
+	if _, err := conn.Exec(ctx, `SET lock_timeout = '30s'`); err != nil {
+		return fmt.Errorf("site lock %s: set lock_timeout: %w", site, err)
+	}
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); err != nil {
 		return fmt.Errorf("site lock %s: %w", site, err)
 	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, site); err != nil {
-			slog.Error("site lock: unlock failed; session release reaps it", "site", site, "err", err)
-		}
-	}()
 	return fn()
 }
