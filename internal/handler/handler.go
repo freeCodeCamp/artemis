@@ -68,6 +68,11 @@ type SiteChangeEmitter interface {
 	EnqueueSiteChanged(ctx context.Context, site string) error
 }
 
+type DeployIndexWriter interface {
+	FinalizeAtomic(ctx context.Context, site, deployID, mode string, mtime time.Time, bytes int64) error
+	AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error
+}
+
 // RegistryHealth is the readiness probe contract for the registry
 // backend. *valkey.Store satisfies this; handler tests substitute a
 // fake that returns the desired error.
@@ -93,6 +98,7 @@ type Handlers struct {
 	Tombstones         TombstoneStore
 	TrashPrefixBase    string // e.g. "_trash/"
 	Outbox             SiteChangeEmitter
+	Index              DeployIndexWriter
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or
