@@ -13,17 +13,15 @@ type Plan struct {
 func PlanSite(site string, in RetainInput, p Policy, blastCap int) Plan {
 	_, del := Retain(in, p)
 
-	var total int64
-	for _, d := range del {
-		total += d.Bytes
-	}
-
-	plan := Plan{Site: site, Delete: del, TotalBytes: total}
+	plan := Plan{Site: site}
 	if blastCap > 0 && len(del) > blastCap {
 		plan.Aborted = true
-		plan.Reason = fmt.Sprintf("delete plan of %d exceeds blast-cap %d", len(del), blastCap)
-		plan.Delete = nil
-		plan.TotalBytes = 0
+		plan.Reason = fmt.Sprintf("delete plan of %d exceeds blast-cap %d; reaping oldest %d this run", len(del), blastCap, blastCap)
+		del = del[len(del)-blastCap:]
+	}
+	plan.Delete = del
+	for _, d := range del {
+		plan.TotalBytes += d.Bytes
 	}
 	return plan
 }

@@ -34,10 +34,17 @@ func TestGC_BlastCap(t *testing.T) {
 	assert.Len(t, under.Delete, 3)
 
 	over := PlanSite("www", RetainInput{Deploys: oldDeploys(10, 10), Now: testNow}, testPolicy(), 5)
-	assert.True(t, over.Aborted, "7 deletes over cap=5 -> abort (V6)")
-	assert.Empty(t, over.Delete, "aborted plan deletes nothing")
-	assert.EqualValues(t, 0, over.TotalBytes)
+	assert.True(t, over.Aborted, "7 deletes over cap=5 -> capped (partial progress, not total abort)")
+	assert.Len(t, over.Delete, 5, "capped plan reaps exactly blast-cap deploys")
+	assert.EqualValues(t, 50, over.TotalBytes, "bytes summed across the capped delete set")
 	assert.Contains(t, over.Reason, "blast-cap")
+
+	ids := map[string]bool{}
+	for _, d := range over.Delete {
+		ids[d.ID] = true
+	}
+	assert.True(t, ids["j-old"], "oldest deletable deploy is reaped first under the cap")
+	assert.False(t, ids["d-old"], "newest deletable deploy is spared until a later run")
 }
 
 func TestPlanSite_BlastCapDisabled(t *testing.T) {

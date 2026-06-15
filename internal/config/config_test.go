@@ -177,7 +177,7 @@ func TestConfigLoad(t *testing.T) {
 	assert.False(t, cfg.GCEnabled(), "no DATABASE_URL -> GC disabled")
 	assert.Equal(t, 7, cfg.Cleanup.RetentionDays)
 	assert.Equal(t, 3, cfg.Cleanup.RecentKeep)
-	assert.Equal(t, time.Hour, cfg.Cleanup.Grace)
+	assert.Equal(t, 72*time.Hour, cfg.Cleanup.Grace)
 	assert.Equal(t, 0, cfg.Cleanup.BlastCap)
 	assert.Equal(t, "_trash/", cfg.Cleanup.TrashPrefix)
 	assert.Equal(t, 7, cfg.Cleanup.RecoveryDays)

@@ -177,7 +177,7 @@ const (
 	serveCacheTTL                 = 15 * time.Second
 	defaultCleanupRetentionDays   = 7
 	defaultCleanupRecentKeep      = 3
-	defaultCleanupGrace           = time.Hour
+	defaultCleanupGrace           = 72 * time.Hour
 	defaultCleanupRecoveryDays    = 7
 	defaultCleanupTrashPrefix     = "_trash/"
 	minSigningKeyBytes            = 32

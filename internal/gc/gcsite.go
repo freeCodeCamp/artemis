@@ -62,16 +62,12 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	for _, d := range plan.Delete {
 		res.Planned = append(res.Planned, d.ID)
 	}
-	if plan.Aborted {
-		res.Aborted = true
-		res.AbortReason = plan.Reason
-		g.Metrics.run(WorkflowGCSiteLabel, "aborted")
-		slog.Warn("gc.site.aborted", "site", site, "planned", len(res.Planned), "reason", plan.Reason)
-		return res, nil
-	}
+	res.Aborted = plan.Aborted
+	res.AbortReason = plan.Reason
+
 	if dryRun {
 		g.Metrics.run(WorkflowGCSiteLabel, "dry-run")
-		slog.Info("gc.site.dry-run", "site", site, "planned", len(res.Planned))
+		slog.Info("gc.site.dry-run", "site", site, "planned", len(res.Planned), "capped", plan.Aborted)
 		return res, nil
 	}
 
@@ -100,7 +96,13 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	}
 
 	g.Metrics.tombstoned(len(res.Tombstoned))
-	g.Metrics.run(WorkflowGCSiteLabel, "ok")
+	outcome := "ok"
+	if plan.Aborted {
+		outcome = "capped"
+		slog.Warn("gc.site.capped", "site", site,
+			"tombstoned", len(res.Tombstoned), "reason", plan.Reason)
+	}
+	g.Metrics.run(WorkflowGCSiteLabel, outcome)
 	slog.Info("gc.site.done", "site", site,
 		"planned", len(res.Planned),
 		"tombstoned", len(res.Tombstoned),
