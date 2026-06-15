@@ -54,12 +54,24 @@ func (m *fakeMover) MovePrefix(_ context.Context, src, dst string) (int, error) 
 	return 1, nil
 }
 
+type fakeLocker struct {
+	calls int
+	sites []string
+}
+
+func (l *fakeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
+	l.calls++
+	l.sites = append(l.sites, site)
+	return fn()
+}
+
 func newSiteGC(store Store, mover Mover) *SiteGC {
 	return &SiteGC{
 		Store:        store,
 		Mover:        mover,
 		Policy:       testPolicy(),
 		BlastCap:     0,
+		Locker:       &fakeLocker{},
 		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
 		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
 		LiveAliases: func(_ context.Context, _ string) (map[string]struct{}, error) {
@@ -189,4 +201,29 @@ func TestGC_BlastCapPartial(t *testing.T) {
 	assert.Len(t, mover.moves, 5)
 	assert.InDelta(t, 1, testutil.ToFloat64(g.Metrics.Runs.WithLabelValues(WorkflowGCSiteLabel, "capped")), 0.0001,
 		"capped outcome metric fires for alerting")
+}
+
+func TestGC_LockPerMove(t *testing.T) {
+	store := &fakeStore{deploys: map[string][]Deploy{"www": sixOld()}, targetsSeq: []map[string]struct{}{{}}}
+	mover := &fakeMover{}
+	g := newSiteGC(store, mover)
+	lk := &fakeLocker{}
+	g.Locker = lk
+	res, err := g.Run(context.Background(), "www", false)
+	require.NoError(t, err)
+
+	assert.Len(t, res.Tombstoned, 3)
+	assert.Equal(t, 3, lk.calls, "advisory lock acquired once per move (T40), not once per run")
+	for _, s := range lk.sites {
+		assert.Equal(t, "www", s, "every per-move lock keyed by the site dirname")
+	}
+}
+
+func TestGC_LiveRunRequiresLocker(t *testing.T) {
+	store := &fakeStore{deploys: map[string][]Deploy{"www": sixOld()}, targetsSeq: []map[string]struct{}{{}}}
+	g := newSiteGC(store, &fakeMover{})
+	g.Locker = nil
+	_, err := g.Run(context.Background(), "www", false)
+	require.Error(t, err, "live run without a Locker is a wiring bug, fail loud")
+	assert.Contains(t, err.Error(), "Locker")
 }

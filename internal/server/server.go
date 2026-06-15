@@ -27,13 +27,17 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+const apiRequestTimeout = 60 * time.Second
 
 // New returns a chi router fully wired with the Handlers' endpoints +
 // the standard middleware chain (Sentry → RequestID → AccessLog →
@@ -66,6 +70,7 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 	r.Route("/api", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.RequireGitHubBearer)
+			r.Use(middleware.Timeout(apiRequestTimeout))
 			r.Get("/whoami", h.WhoAmI)
 			r.Post("/deploy/init", h.DeployInit)
 			r.Get("/sites", h.SitesList)

@@ -126,6 +126,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 		SiteGC: &gc.SiteGC{
 			Store:        repo,
 			Mover:        r2c,
+			Locker:       repo,
 			LiveAliases:  liveAliases,
 			Policy:       gcPolicy(cfg.Cleanup),
 			BlastCap:     cfg.Cleanup.BlastCap,

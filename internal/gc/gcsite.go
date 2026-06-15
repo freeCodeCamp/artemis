@@ -17,9 +17,14 @@ type Mover interface {
 	MovePrefix(ctx context.Context, src, dst string) (int, error)
 }
 
+type Locker interface {
+	WithSiteLock(ctx context.Context, site string, fn func() error) error
+}
+
 type SiteGC struct {
 	Store        Store
 	Mover        Mover
+	Locker       Locker
 	Policy       Policy
 	BlastCap     int
 	DeployPrefix func(site, id string) string
@@ -74,25 +79,34 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	if g.LiveAliases == nil {
 		return res, fmt.Errorf("gc %s: live run without LiveAliases reader (wiring bug)", site)
 	}
+	if g.Locker == nil {
+		return res, fmt.Errorf("gc %s: live run without site Locker (wiring bug)", site)
+	}
 	for _, d := range plan.Delete {
-		live, err := g.LiveAliases(ctx, site)
-		if err != nil {
-			return res, fmt.Errorf("gc %s: re-read live aliases: %w", site, err)
+		d := d
+		if err := g.Locker.WithSiteLock(ctx, site, func() error {
+			live, err := g.LiveAliases(ctx, site)
+			if err != nil {
+				return fmt.Errorf("re-read live aliases: %w", err)
+			}
+			if _, nowAliased := live[d.ID]; nowAliased {
+				res.SkippedAliased = append(res.SkippedAliased, d.ID)
+				return nil
+			}
+			src := g.DeployPrefix(site, d.ID)
+			dst := g.TrashPrefix(site, d.ID)
+			if _, err := g.Mover.MovePrefix(ctx, src, dst); err != nil {
+				return fmt.Errorf("tombstone-move %s: %w", d.ID, err)
+			}
+			if err := g.Store.Tombstone(ctx, site, d); err != nil {
+				return fmt.Errorf("record tombstone %s: %w", d.ID, err)
+			}
+			res.Tombstoned = append(res.Tombstoned, d.ID)
+			res.BytesReclaimed += d.Bytes
+			return nil
+		}); err != nil {
+			return res, fmt.Errorf("gc %s: %w", site, err)
 		}
-		if _, nowAliased := live[d.ID]; nowAliased {
-			res.SkippedAliased = append(res.SkippedAliased, d.ID)
-			continue
-		}
-		src := g.DeployPrefix(site, d.ID)
-		dst := g.TrashPrefix(site, d.ID)
-		if _, err := g.Mover.MovePrefix(ctx, src, dst); err != nil {
-			return res, fmt.Errorf("gc %s: tombstone-move %s: %w", site, d.ID, err)
-		}
-		if err := g.Store.Tombstone(ctx, site, d); err != nil {
-			return res, fmt.Errorf("gc %s: record tombstone %s: %w", site, d.ID, err)
-		}
-		res.Tombstoned = append(res.Tombstoned, d.ID)
-		res.BytesReclaimed += d.Bytes
 	}
 
 	g.Metrics.tombstoned(len(res.Tombstoned))

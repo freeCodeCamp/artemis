@@ -58,17 +58,11 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics) []worke
 				if err != nil {
 					return err
 				}
-				run := func() error {
-					if _, err := gcw.SiteGC.Run(ctx, site, dryRun); err != nil {
-						observability.CaptureBackground("gc.site.run", err)
-						return err
-					}
-					return nil
+				if _, err := gcw.SiteGC.Run(ctx, site, dryRun); err != nil {
+					observability.CaptureBackground("gc.site.run", err)
+					return err
 				}
-				if dryRun {
-					return run()
-				}
-				return gcw.Repo.WithSiteLock(ctx, site, run)
+				return nil
 			}),
 		},
 		{
