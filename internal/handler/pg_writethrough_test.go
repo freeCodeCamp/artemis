@@ -75,6 +75,32 @@ func TestDeployFinalize_PGWriteThrough(t *testing.T) {
 	assert.Equal(t, wantBytes, idx.finalizedBytes, "finalize must record the deploy's R2 byte size, not 0")
 }
 
+func TestDeployFinalize_BytesUnavailableSoftFails(t *testing.T) {
+	store := newFakeR2()
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
+	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
+	idx := &fakeIndex{}
+	h.Index = idx
+
+	deployID := "20260420-141522-abc1234"
+	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("hi")
+	store.listErr = errors.New("r2 list transient blip")
+
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+	body, _ := json.Marshal(DeployFinalizeRequest{Mode: "preview", Files: []string{"index.html"}})
+
+	w := withChiRoute(http.MethodPost, "/api/deploy/{deployId}/finalize",
+		"/api/deploy/"+deployID+"/finalize", body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployFinalize)).ServeHTTP,
+		context.Background(),
+	)
+	require.Equal(t, http.StatusOK, w.Code, "bytes is observability-only; a PrefixBytes blip must NOT block finalize")
+	assert.Equal(t, []string{"www.freecode.camp/" + deployID + "/preview"}, idx.finalized)
+	assert.Zero(t, idx.finalizedBytes, "soft-fails to bytes=0 when the size LIST errors")
+}
+
 func TestDeployFinalize_PGWriteFailure502(t *testing.T) {
 	store := newFakeR2()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)

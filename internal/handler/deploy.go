@@ -215,8 +215,9 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 
 	deployBytes, err := h.R2.PrefixBytes(r.Context(), prefix)
 	if err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.bytes.finalize", err)
-		return
+		slog.Warn("deploy.finalize.bytes_unavailable", "site", claims.Site, "deployId", deployID,
+			"err", err, "reqID", RequestIDFromContext(r.Context()))
+		deployBytes = 0
 	}
 
 	aliasKey := h.aliasKey(claims.Site, mode)
