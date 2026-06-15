@@ -414,6 +414,21 @@ func (f *fakeR2) VerifyDeployComplete(_ context.Context, prefix string, expected
 	return nil
 }
 
+func (f *fakeR2) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return 0, f.listErr
+	}
+	var total int64
+	for k, v := range f.objects {
+		if hasPrefix(k, prefix) {
+			total += int64(len(v))
+		}
+	}
+	return total, nil
+}
+
 func hasPrefix(s, p string) bool {
 	if len(s) < len(p) {
 		return false

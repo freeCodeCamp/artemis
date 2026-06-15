@@ -13,6 +13,7 @@ import (
 type Lister interface {
 	ListSites(ctx context.Context) ([]string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
+	PrefixBytes(ctx context.Context, prefix string) (int64, error)
 	GetAlias(ctx context.Context, key string) (string, error)
 }
 
@@ -70,7 +71,11 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 		}
 
 		for _, id := range order {
-			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), 0, markers[id], "active"); err != nil {
+			deployBytes, err := b.Lister.PrefixBytes(ctx, deploysPrefix+id+"/")
+			if err != nil {
+				return res, fmt.Errorf("backfill: size %s/%s: %w", site, id, err)
+			}
+			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {
 				return res, fmt.Errorf("backfill: index deploy %s/%s: %w", site, id, err)
 			}
 			res.Deploys++

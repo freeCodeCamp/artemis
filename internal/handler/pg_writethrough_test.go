@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,16 +14,18 @@ import (
 )
 
 type fakeIndex struct {
-	finalized []string
-	aliased   []string
-	fail      bool
+	finalized      []string
+	finalizedBytes int64
+	aliased        []string
+	fail           bool
 }
 
-func (f *fakeIndex) FinalizeAtomic(_ context.Context, site, deployID, mode string, _ time.Time, _ int64) error {
+func (f *fakeIndex) FinalizeAtomic(_ context.Context, site, deployID, mode string, _ time.Time, bytes int64) error {
 	if f.fail {
 		return errors.New("pg down")
 	}
 	f.finalized = append(f.finalized, site+"/"+deployID+"/"+mode)
+	f.finalizedBytes = bytes
 	return nil
 }
 
@@ -61,6 +64,15 @@ func TestDeployFinalize_PGWriteThrough(t *testing.T) {
 	assert.Equal(t, []string{"www.freecode.camp/" + deployID + "/preview"}, idx.finalized,
 		"finalize must index deploy+alias+event transactionally under the dirname key")
 	assert.Empty(t, ob.sites, "tx path owns the outbox event; no duplicate direct emit")
+
+	var wantBytes int64
+	for k, v := range store.objects {
+		if strings.HasPrefix(k, "www.freecode.camp/deploys/"+deployID+"/") {
+			wantBytes += int64(len(v))
+		}
+	}
+	assert.Positive(t, wantBytes)
+	assert.Equal(t, wantBytes, idx.finalizedBytes, "finalize must record the deploy's R2 byte size, not 0")
 }
 
 func TestDeployFinalize_PGWriteFailure502(t *testing.T) {

@@ -61,6 +61,34 @@ func TestRepo_DeployAliasRoundtrip(t *testing.T) {
 	assert.Len(t, deploys, 2, "re-upsert updates in place, no duplicate row")
 }
 
+func TestRepo_AliasAtomicStampsSupersededRelease(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", now.Add(-2*time.Hour), 100, true, "active"))
+	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d2", now.Add(-time.Hour), 200, true, "active"))
+	require.NoError(t, repo.UpsertAlias(ctx, "www", "production", "d1", now.Add(-time.Hour)))
+
+	release := now
+	require.NoError(t, repo.AliasAtomic(ctx, "www", "production", "d2", release))
+
+	byID := map[string]gc.Deploy{}
+	deploys, err := repo.DeploysForSite(ctx, "www")
+	require.NoError(t, err)
+	for _, d := range deploys {
+		byID[d.ID] = d
+	}
+	assert.WithinDuration(t, release, byID["d1"].AliasReleasedAt, time.Second,
+		"deploy losing the production alias is stamped alias_released_at in the same tx")
+	assert.True(t, byID["d2"].AliasReleasedAt.IsZero(),
+		"newly-aliased deploy carries no release stamp")
+
+	targets, _, err := repo.AliasTargets(ctx, "www")
+	require.NoError(t, err)
+	assert.Contains(t, targets, "d2", "alias moved to d2")
+}
+
 func TestRepo_TombstoneLifecycle(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

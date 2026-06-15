@@ -58,6 +58,7 @@ type R2Store interface {
 	HasPrefix(ctx context.Context, prefix string) (bool, error)
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
 	MovePrefix(ctx context.Context, src, dst string) (int, error)
+	PrefixBytes(ctx context.Context, prefix string) (int64, error)
 }
 
 type TombstoneStore interface {

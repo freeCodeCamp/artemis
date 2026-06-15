@@ -179,6 +179,31 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 	return out, nil
 }
 
+func (c *Client) PrefixBytes(ctx context.Context, prefix string) (int64, error) {
+	var total int64
+	var token *string
+	for {
+		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            awsv2.String(c.bucket),
+			Prefix:            awsv2.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("r2 prefix-bytes %s: %w", prefix, err)
+		}
+		for _, obj := range page.Contents {
+			if obj.Size != nil {
+				total += *obj.Size
+			}
+		}
+		if page.IsTruncated == nil || !*page.IsTruncated {
+			break
+		}
+		token = page.NextContinuationToken
+	}
+	return total, nil
+}
+
 func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: awsv2.String(c.bucket),

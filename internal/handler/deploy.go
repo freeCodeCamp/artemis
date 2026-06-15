@@ -213,6 +213,12 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deployBytes, err := h.R2.PrefixBytes(r.Context(), prefix)
+	if err != nil {
+		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.bytes.finalize", err)
+		return
+	}
+
 	aliasKey := h.aliasKey(claims.Site, mode)
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), func() error {
 		if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
@@ -220,7 +226,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.FinalizeAtomic(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), 0); err != nil {
+			if err := h.Index.FinalizeAtomic(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
 			}
