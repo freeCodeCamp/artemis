@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -209,17 +210,19 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		base = "_trash/"
 	}
 	dirname := h.DeployPrefix.SiteDirname(slug)
-	lockErr := h.withSiteLock(r.Context(), dirname, func() error {
-		moved, err := h.R2.MovePrefix(r.Context(), dirname+"/", base+dirname+"/")
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
+	defer cancel()
+	lockErr := h.withSiteLock(opCtx, dirname, func() error {
+		moved, err := h.R2.MovePrefix(opCtx, dirname+"/", base+dirname+"/")
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 			return nil
 		}
-		if err := h.Tombstones.RecordTombstone(r.Context(), dirname, "", 0); err != nil {
+		if err := h.Tombstones.RecordTombstone(opCtx, dirname, "", 0); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 			return nil
 		}
-		if err := h.Registry.Delete(r.Context(), slug); err != nil {
+		if err := h.Registry.Delete(opCtx, slug); err != nil {
 			writeRegistryDeleteError(w, r, err)
 			return nil
 		}

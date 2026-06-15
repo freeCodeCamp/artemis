@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/go-chi/chi/v5"
 )
+
+const destructiveMoveTimeout = 10 * time.Minute
 
 func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 	site := chi.URLParam(r, "site")
@@ -25,9 +29,11 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
+	defer cancel()
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		for _, mode := range []string{"production", "preview"} {
-			cur, err := h.R2.GetAlias(r.Context(), h.aliasKey(site, mode))
+			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
 			if err != nil && !r2.IsNotFound(err) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.delete", err)
 				return nil
@@ -46,12 +52,12 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		moved, err := h.R2.MovePrefix(r.Context(), h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
+		moved, err := h.R2.MovePrefix(opCtx, h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.tombstone", err)
 			return nil
 		}
-		if err := h.Tombstones.RecordTombstone(r.Context(), h.DeployPrefix.SiteDirname(site), deployID, 0); err != nil {
+		if err := h.Tombstones.RecordTombstone(opCtx, h.DeployPrefix.SiteDirname(site), deployID, 0); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
 			return nil
 		}

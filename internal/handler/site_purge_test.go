@@ -55,6 +55,37 @@ func TestSitePurge(t *testing.T) {
 	assert.Equal(t, []string{"example/"}, tomb.recorded, "site-level tombstone recorded (empty id = whole-site purge)")
 }
 
+func TestSitePurge_SurvivesRequestCancellation(t *testing.T) {
+	store := newFakeR2()
+	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
+
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
+	tomb := &fakeTombstones{}
+	h.Tombstones = tomb
+
+	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
+	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
+
+	ctx, cancel := context.WithCancel(contextWithLogin(context.Background(), "alice", "tok"))
+	cancel()
+
+	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
+		"/api/site/example?purge=true", nil,
+		map[string]string{},
+		h.SiteDelete,
+		ctx,
+	)
+	require.Equal(t, http.StatusOK, w.Code,
+		"whole-site purge MovePrefix runs on a ctx detached from the request deadline; a cancelled request must not leave a half-trashed tree + surviving registry row (TMO-1)")
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for k := range store.objects {
+		assert.Truef(t, hasPrefix(k, "_trash/example/"), "object cascaded to _trash despite cancelled request ctx, found live %q", k)
+	}
+	assert.Equal(t, []string{"example/"}, tomb.recorded, "site tombstone recorded, not skipped")
+}
+
 func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 	store := &flakyMoveR2{fakeR2: newFakeR2(), failMovesRemaining: 1}
 	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")

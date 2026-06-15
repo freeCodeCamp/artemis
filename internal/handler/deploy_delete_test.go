@@ -38,6 +38,31 @@ func callDeployDelete(h *Handlers, site, deployID string) *httptest.ResponseReco
 	)
 }
 
+func TestDelete_SurvivesRequestCancellation(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	prefix := "www/deploys/" + deployID + "/"
+	store.objects[prefix+"index.html"] = []byte("hi")
+
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	tomb := &fakeTombstones{}
+	h.Tombstones = tomb
+
+	ctx, cancel := context.WithCancel(contextWithLogin(context.Background(), "alice", "tok"))
+	cancel()
+
+	w := withSiteRoute(http.MethodDelete, "/api/site/{site}/deploys/{deployId}",
+		"/api/site/www/deploys/"+deployID, nil, ctx, h.SiteDeployDelete)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"tombstone-move runs on a ctx detached from the request deadline; a cancelled request must not abandon it mid-move (TMO-2)")
+	store.mu.Lock()
+	_, inTrash := store.objects["_trash/www/"+deployID+"/index.html"]
+	store.mu.Unlock()
+	assert.True(t, inTrash, "deploy reaches _trash despite cancelled request ctx")
+	assert.Equal(t, []string{"www/" + deployID}, tomb.recorded, "tombstone recorded, not skipped")
+}
+
 func TestDelete_Tombstone(t *testing.T) {
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()

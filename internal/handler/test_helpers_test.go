@@ -373,7 +373,10 @@ func (f *fakeR2) HasPrefix(_ context.Context, prefix string) (bool, error) {
 	return false, nil
 }
 
-func (f *fakeR2) MovePrefix(_ context.Context, src, dst string) (int, error) {
+func (f *fakeR2) MovePrefix(ctx context.Context, src, dst string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.listErr != nil {
