@@ -226,6 +226,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("deploy.finalize.bytes_unavailable", "site", claims.Site, "deployId", deployID,
 			"err", err, "reqID", RequestIDFromContext(r.Context()))
+		reportUpstream(r, "bytes_unavailable", "r2.list.bytes.finalize", err)
 		deployBytes = 0
 	}
 

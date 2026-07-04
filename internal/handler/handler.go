@@ -198,6 +198,11 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 		"reqID", RequestIDFromContext(r.Context()),
 		"path", r.URL.Path,
 	)
+	reportUpstream(r, code, op, err)
+	writeError(w, status, code, "upstream call failed")
+}
+
+func reportUpstream(r *http.Request, code, op string, err error) {
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
 	}
@@ -209,7 +214,6 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 			hub.CaptureException(err)
 		})
 	}
-	writeError(w, status, code, "upstream call failed")
 }
 
 func writeLockError(w http.ResponseWriter, r *http.Request, err error) {
