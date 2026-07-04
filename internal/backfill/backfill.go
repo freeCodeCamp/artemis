@@ -43,7 +43,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 	defer func() {
 		if bytesFailures > 0 {
 			observability.CaptureBackground("backfill.bytes",
-				fmt.Errorf("backfill: %d deploy byte-size probe(s) failed, recorded 0; last error: %v", bytesFailures, lastBytesErr))
+				fmt.Errorf("backfill: %d deploy byte-size probe(s) failed, recorded 0; last error: %w", bytesFailures, lastBytesErr))
 		}
 	}()
 	sites, err := b.Lister.ListSites(ctx)

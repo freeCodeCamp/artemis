@@ -3,6 +3,7 @@ package backfill
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -200,6 +201,33 @@ func TestBackfill_BytesUnavailable_CapturesSentry(t *testing.T) {
 	require.Len(t, rt.events, 1,
 		"N byte-probe failures in a run must raise EXACTLY ONE grouped Sentry event, not one per deploy (flood guard)")
 	assert.Equal(t, "backfill.bytes", rt.events[0].Tags["op"])
+}
+
+func TestBackfill_ShutdownCancel_NoSentryPage(t *testing.T) {
+	rt := &recordingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "https://public@example.test/1", Transport: rt})
+	require.NoError(t, err)
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	lister := &fakeLister{
+		sites: []string{"www"},
+		byPfx: map[string][]string{"www/deploys/": {"www/deploys/20260101-090000-old0001/index.html"}},
+		bytesErr: map[string]error{
+			"www/deploys/20260101-090000-old0001/": fmt.Errorf("r2 has_prefix: %w", context.Canceled),
+		},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
+
+	_, err = b.Run(context.Background())
+	require.NoError(t, err)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Empty(t, rt.events,
+		"byte-probe failures from shutdown cancellation must be IsTransient-suppressed (%w chain), not page on every SIGTERM")
 }
 
 func TestBackfill_SignalSurvivesHardErrorAfterPartialFailure(t *testing.T) {
