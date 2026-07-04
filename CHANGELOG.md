@@ -2,6 +2,22 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.2.0](https://github.com/freeCodeCamp/artemis/compare/v1.1.1...v1.2.0) (2026-07-04)
+
+
+### Features
+
+* **gc,server:** gc-site advisory lock per-move + chi request timeout ([c94a8a8](https://github.com/freeCodeCamp/artemis/commit/c94a8a8ef79988d4369b89170520f3b8a72811bf))
+* **gc:** blast-cap partial-progress + capped metric; grace 1h-&gt;72h ([86d0e75](https://github.com/freeCodeCamp/artemis/commit/86d0e7584fb866ca80727378eeb64cb7ee6a49a0))
+* **pg,r2,backfill:** populate deploys.bytes + supersede-stamp test ([25c7f8b](https://github.com/freeCodeCamp/artemis/commit/25c7f8bb956b0805c41e16d69b48cba3129e07a3))
+
+
+### Bug Fixes
+
+* **handler:** 409 on site-lock timeout; quiet transient sentry ([19669ee](https://github.com/freeCodeCamp/artemis/commit/19669eeab8ed984b9064adb63fbb050a67b4af43))
+* **handler:** deploy.bytes is best-effort, never gates finalize (DHP-1) ([5ac32e6](https://github.com/freeCodeCamp/artemis/commit/5ac32e6377c8d0b5a1cbf9692e73ba65c27730da))
+* **handler:** detach destructive purge/delete moves from request deadline (TMO-1/2) ([4290e2a](https://github.com/freeCodeCamp/artemis/commit/4290e2a39f9edcdf5c5acfd0ea2c12094462330b))
+
 ## [1.1.1](https://github.com/freeCodeCamp/artemis/compare/v1.1.0...v1.1.1) (2026-06-06)
 
 
