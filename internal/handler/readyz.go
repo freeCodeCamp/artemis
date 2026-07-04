@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -60,14 +59,14 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
-	valkeyStreak := recordProbe(&h.readyzValkeyFails, valkeyErr)
-	r2Streak := recordProbe(&h.readyzR2Fails, r2Err)
+	h.readyzValkey.observe(valkeyErr != nil)
+	h.readyzR2.observe(r2Err != nil)
 
 	switch {
 	case valkeyErr != nil:
-		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, valkeyStreak >= readyzPageThreshold)
+		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, h.readyzValkey.takePage())
 	case r2Err != nil:
-		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, r2Streak >= readyzPageThreshold)
+		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, h.readyzR2.takePage())
 	case pgErr != nil:
 		slog.Error("readyz: postgres degraded", "err", pgErr)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
@@ -76,12 +75,31 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func recordProbe(counter *atomic.Int64, err error) int64 {
-	if err != nil {
-		return counter.Add(1)
+type probeState struct {
+	mu    sync.Mutex
+	fails int
+	paged bool
+}
+
+func (p *probeState) observe(failed bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !failed {
+		p.fails = 0
+		p.paged = false
+		return
 	}
-	counter.Store(0)
-	return 0
+	p.fails++
+}
+
+func (p *probeState) takePage() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.fails >= readyzPageThreshold && !p.paged {
+		p.paged = true
+		return true
+	}
+	return false
 }
 
 func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error, page bool) {
