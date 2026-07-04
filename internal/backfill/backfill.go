@@ -3,6 +3,7 @@ package backfill
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -73,7 +74,8 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 		for _, id := range order {
 			deployBytes, err := b.Lister.PrefixBytes(ctx, deploysPrefix+id+"/")
 			if err != nil {
-				return res, fmt.Errorf("backfill: size %s/%s: %w", site, id, err)
+				slog.Warn("backfill.bytes_unavailable", "site", site, "deployId", id, "err", err)
+				deployBytes = 0
 			}
 			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {
 				return res, fmt.Errorf("backfill: index deploy %s/%s: %w", site, id, err)

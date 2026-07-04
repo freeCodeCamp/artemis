@@ -2,6 +2,7 @@ package backfill
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ type fakeLister struct {
 	sites      []string
 	byPfx      map[string][]string
 	bytesByPfx map[string]int64
+	bytesErr   map[string]error
 	aliases    map[string]string
 }
 
@@ -25,6 +27,9 @@ func (f *fakeLister) ListPrefix(_ context.Context, prefix string) ([]string, err
 }
 
 func (f *fakeLister) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	if e := f.bytesErr[prefix]; e != nil {
+		return 0, e
+	}
 	return f.bytesByPfx[prefix], nil
 }
 
@@ -109,6 +114,38 @@ func TestBackfill(t *testing.T) {
 		"mtime parsed from deploy-id timestamp")
 	assert.Equal(t, int64(300), byID["20260420-141522-abc1234"].bytes, "backfill records per-deploy R2 byte size")
 	assert.Equal(t, int64(100), byID["20260101-090000-old0001"].bytes)
+}
+
+func TestBackfill_BytesUnavailable_SoftFailsRecordsZero(t *testing.T) {
+	lister := &fakeLister{
+		sites: []string{"www"},
+		byPfx: map[string][]string{
+			"www/deploys/": {
+				"www/deploys/20260420-141522-abc1234/index.html",
+				"www/deploys/20260101-090000-old0001/index.html",
+			},
+		},
+		bytesByPfx: map[string]int64{
+			"www/deploys/20260420-141522-abc1234/": 300,
+		},
+		bytesErr: map[string]error{
+			"www/deploys/20260101-090000-old0001/": errors.New("r2 list bytes: SlowDown 503 throttled"),
+		},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
+
+	res, err := b.Run(context.Background())
+	require.NoError(t, err, "a transient PrefixBytes blip must NOT crash the whole fleet backfill")
+	assert.Equal(t, 2, res.Deploys, "both deploys still indexed; the bytes-failed one records 0")
+
+	byID := map[string]idxDeploy{}
+	for _, d := range idx.deploys {
+		byID[d.id] = d
+	}
+	assert.Equal(t, int64(300), byID["20260420-141522-abc1234"].bytes)
+	assert.Equal(t, int64(0), byID["20260101-090000-old0001"].bytes,
+		"bytes unavailable → recorded 0 (idempotent re-run corrects); never a fleet-wide crash")
 }
 
 func TestBackfill_AliasKeyIsR2DirRelative(t *testing.T) {
