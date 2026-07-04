@@ -2,6 +2,18 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.2.2](https://github.com/freeCodeCamp/artemis/compare/v1.2.1...v1.2.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* **backfill:** one aggregate byte-failure capture per run ([9fcf4f6](https://github.com/freeCodeCamp/artemis/commit/9fcf4f6c4de18c1abdcff30f1933846f55575725))
+* **backfill:** report bytes soft-fail to Sentry (grouped) ([6b69984](https://github.com/freeCodeCamp/artemis/commit/6b699848c212ebfc099483d9eb2baeaec2de36b5))
+* **backfill:** unwrap last error so shutdown cancel suppressed ([de9dac4](https://github.com/freeCodeCamp/artemis/commit/de9dac40179600aa3a2275f49444691f255e53e5))
+* **handler:** edge-triggered readyz paging via reset-latch ([51fead1](https://github.com/freeCodeCamp/artemis/commit/51fead1885df1760a59d5742e31d205064f1254d))
+* **handler:** readyz streak-based paging for sustained outages ([9167af7](https://github.com/freeCodeCamp/artemis/commit/9167af7e330560d08bd80013ad1f2add0420ccb8))
+* **pg:** zero bytes upsert must not clobber a known value ([190f34f](https://github.com/freeCodeCamp/artemis/commit/190f34f55f01c0c582e33a24f1cc03306caa1642))
+
 ## [1.2.1](https://github.com/freeCodeCamp/artemis/compare/v1.2.0...v1.2.1) (2026-07-04)
 
 
