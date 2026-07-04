@@ -2,6 +2,15 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.2.1](https://github.com/freeCodeCamp/artemis/compare/v1.2.0...v1.2.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **backfill:** soft-fail bytes probe, never crash fleet backfill ([36eb530](https://github.com/freeCodeCamp/artemis/commit/36eb53004267671dbc35983d0a61fc1d4ae0d139))
+* **handler:** page Sentry on sustained readyz outage ([73c6d9b](https://github.com/freeCodeCamp/artemis/commit/73c6d9b3c00aaadd3e41f74089b77fea8e4a8ef7))
+* **handler:** restore R2 signal on finalize bytes soft-fail ([98ce16c](https://github.com/freeCodeCamp/artemis/commit/98ce16c752ade104ef207b2e73679e556590e11f))
+
 ## [1.2.0](https://github.com/freeCodeCamp/artemis/compare/v1.1.1...v1.2.0) (2026-07-04)
 
 
