@@ -30,16 +30,20 @@ func (r *recordingTransport) FlushWithContext(context.Context) bool { return tru
 func (r *recordingTransport) Close()                                {}
 
 type fakeLister struct {
-	sites      []string
-	byPfx      map[string][]string
-	bytesByPfx map[string]int64
-	bytesErr   map[string]error
-	aliases    map[string]string
+	sites         []string
+	byPfx         map[string][]string
+	bytesByPfx    map[string]int64
+	bytesErr      map[string]error
+	listPrefixErr map[string]error
+	aliases       map[string]string
 }
 
 func (f *fakeLister) ListSites(context.Context) ([]string, error) { return f.sites, nil }
 
 func (f *fakeLister) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+	if e := f.listPrefixErr[prefix]; e != nil {
+		return nil, e
+	}
 	return f.byPfx[prefix], nil
 }
 
@@ -176,9 +180,13 @@ func TestBackfill_BytesUnavailable_CapturesSentry(t *testing.T) {
 
 	lister := &fakeLister{
 		sites: []string{"www"},
-		byPfx: map[string][]string{"www/deploys/": {"www/deploys/20260101-090000-old0001/index.html"}},
+		byPfx: map[string][]string{"www/deploys/": {
+			"www/deploys/20260101-090000-old0001/index.html",
+			"www/deploys/20260202-100000-new0002/index.html",
+		}},
 		bytesErr: map[string]error{
 			"www/deploys/20260101-090000-old0001/": errors.New("r2 list bytes: SlowDown 503 throttled"),
+			"www/deploys/20260202-100000-new0002/": errors.New("r2 list bytes: SlowDown 503 throttled"),
 		},
 	}
 	idx := &fakeIndexer{}
@@ -186,11 +194,40 @@ func TestBackfill_BytesUnavailable_CapturesSentry(t *testing.T) {
 
 	res, err := b.Run(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 1, res.Deploys)
+	require.Equal(t, 2, res.Deploys)
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.GreaterOrEqual(t, len(rt.events), 1,
-		"a backfill bytes failure must raise a grouped Sentry issue, not vanish into a WARN log")
+	require.Len(t, rt.events, 1,
+		"N byte-probe failures in a run must raise EXACTLY ONE grouped Sentry event, not one per deploy (flood guard)")
+	assert.Equal(t, "backfill.bytes", rt.events[0].Tags["op"])
+}
+
+func TestBackfill_SignalSurvivesHardErrorAfterPartialFailure(t *testing.T) {
+	rt := &recordingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "https://public@example.test/1", Transport: rt})
+	require.NoError(t, err)
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	lister := &fakeLister{
+		sites: []string{"aaa", "bbb"},
+		byPfx: map[string][]string{"aaa/deploys/": {"aaa/deploys/20260101-090000-old0001/index.html"}},
+		bytesErr: map[string]error{
+			"aaa/deploys/20260101-090000-old0001/": errors.New("r2 list bytes: SlowDown 503"),
+		},
+		listPrefixErr: map[string]error{"bbb/deploys/": errors.New("r2 list: 500 internal")},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
+
+	_, err = b.Run(context.Background())
+	require.Error(t, err, "a hard ListPrefix error still aborts the run")
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1,
+		"the aggregate byte-failure signal must survive a hard-error early return (defer), not be dropped")
 	assert.Equal(t, "backfill.bytes", rt.events[0].Tags["op"])
 }
 

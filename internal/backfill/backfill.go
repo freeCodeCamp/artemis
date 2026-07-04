@@ -38,6 +38,14 @@ type Result struct {
 
 func (b *Backfill) Run(ctx context.Context) (Result, error) {
 	var res Result
+	var bytesFailures int
+	var lastBytesErr error
+	defer func() {
+		if bytesFailures > 0 {
+			observability.CaptureBackground("backfill.bytes",
+				fmt.Errorf("backfill: %d deploy byte-size probe(s) failed, recorded 0; last error: %v", bytesFailures, lastBytesErr))
+		}
+	}()
 	sites, err := b.Lister.ListSites(ctx)
 	if err != nil {
 		return res, fmt.Errorf("backfill: list sites: %w", err)
@@ -76,7 +84,8 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 			deployBytes, err := b.Lister.PrefixBytes(ctx, deploysPrefix+id+"/")
 			if err != nil {
 				slog.Warn("backfill.bytes_unavailable", "site", site, "deployId", id, "err", err)
-				observability.CaptureBackground("backfill.bytes", err)
+				bytesFailures++
+				lastBytesErr = err
 				deployBytes = 0
 			}
 			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {
