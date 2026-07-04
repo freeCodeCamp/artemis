@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
@@ -136,6 +137,9 @@ type Handlers struct {
 	// writeUpstreamError reaches for the package-level handle installed
 	// via SetMetrics.
 	Metrics *Metrics
+
+	readyzValkeyFails atomic.Int64
+	readyzR2Fails     atomic.Int64
 }
 
 var errAliasWriteHandled = errors.New("alias write failure already written to response")

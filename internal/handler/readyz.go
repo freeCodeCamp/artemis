@@ -2,10 +2,10 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -17,6 +17,8 @@ import (
 const readyZProbePrefix = "_artemis_readyz_probe_no_match"
 
 const readyZProbeTimeout = 5 * time.Second
+
+const readyzPageThreshold = 3
 
 // ReadyZ implements GET /readyz. Returns {"ready":true} when both
 // Valkey and R2 are reachable, otherwise 503 with a code naming the
@@ -58,11 +60,14 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
+	valkeyStreak := recordProbe(&h.readyzValkeyFails, valkeyErr)
+	r2Streak := recordProbe(&h.readyzR2Fails, r2Err)
+
 	switch {
 	case valkeyErr != nil:
-		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr)
+		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, valkeyStreak >= readyzPageThreshold)
 	case r2Err != nil:
-		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err)
+		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, r2Streak >= readyzPageThreshold)
 	case pgErr != nil:
 		slog.Error("readyz: postgres degraded", "err", pgErr)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
@@ -71,7 +76,15 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error) {
+func recordProbe(counter *atomic.Int64, err error) int64 {
+	if err != nil {
+		return counter.Add(1)
+	}
+	counter.Store(0)
+	return 0
+}
+
+func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error, page bool) {
 	slog.Warn("readiness probe upstream unavailable",
 		"op", op,
 		"err", err,
@@ -80,7 +93,7 @@ func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op stri
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
 	}
-	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+	if page {
 		if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", op)

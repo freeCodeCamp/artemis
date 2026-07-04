@@ -126,40 +126,65 @@ func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
 }
 
-func TestReadyz_HardUpstreamFailure_CapturesSentry(t *testing.T) {
-	hub, ft := newHubWithTransport(t)
+func readyzProbe(t *testing.T, h *Handlers, hub *sentry.Hub) *httptest.ResponseRecorder {
+	t.Helper()
 	ctx := sentry.SetHubOnContext(t.Context(), hub)
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+	return w
+}
+
+func TestReadyz_SingleFailure_DoesNotPage(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
 	h := &Handlers{
 		Health: &fakeHealth{err: errors.New("dial tcp valkey:6379: connection refused")},
 		R2:     newFakeR2(),
 	}
 
-	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
-	w := httptest.NewRecorder()
-	h.ReadyZ(w, r)
+	w := readyzProbe(t, h, hub)
 	hub.Flush(time.Second)
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	require.Len(t, ft.events, 1, "a hard (non-transient) readyz upstream failure is a real outage — must page Sentry, the only alerting channel")
-	assert.Equal(t, "valkey.ping", ft.events[0].Tags["op"])
-	assert.Equal(t, []string{"readyz", "valkey.ping"}, ft.events[0].Fingerprint)
+	require.Empty(t, ft.events, "a single readyz failure is a blip (streak < threshold) — must not page")
 }
 
-func TestReadyz_TransientProbeDeadline_NoSentry(t *testing.T) {
+func TestReadyz_SustainedHang_PagesAtThreshold(t *testing.T) {
 	hub, ft := newHubWithTransport(t)
-	ctx := sentry.SetHubOnContext(t.Context(), hub)
 	r2 := newFakeR2()
-	r2.listErr = fmt.Errorf("r2 has_prefix: %w", context.DeadlineExceeded)
-	h := &Handlers{
-		Health: &fakeHealth{},
-		R2:     r2,
-	}
+	r2.listErr = fmt.Errorf("r2 has_prefix: %w", context.DeadlineExceeded) // wedged/black-holed upstream
+	h := &Handlers{Health: &fakeHealth{}, R2: r2}
 
-	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
-	w := httptest.NewRecorder()
-	h.ReadyZ(w, r)
+	for i := 0; i < readyzPageThreshold; i++ {
+		require.Equal(t, http.StatusServiceUnavailable, readyzProbe(t, h, hub).Code)
+	}
 	hub.Flush(time.Second)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	require.Empty(t, ft.events, "5s-probe DeadlineExceeded is the ARTEMIS-1 transient-blip class — must NOT create a Sentry issue")
+	require.Len(t, ft.events, 1,
+		"a SUSTAINED hang (DeadlineExceeded on every probe) must page once the streak crosses threshold — the v1.2.1 blocker fix")
+	assert.Equal(t, "r2.has_prefix", ft.events[0].Tags["op"])
+	assert.Equal(t, []string{"readyz", "r2.has_prefix"}, ft.events[0].Fingerprint)
+}
+
+func TestReadyz_SuccessResetsStreak(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
+	r2 := newFakeR2()
+	h := &Handlers{Health: &fakeHealth{}, R2: r2}
+
+	probe := func(fail bool) {
+		if fail {
+			r2.listErr = errors.New("s3: connection refused")
+		} else {
+			r2.listErr = nil
+		}
+		readyzProbe(t, h, hub)
+	}
+	probe(true)
+	probe(true)  // streak 2
+	probe(false) // heals → reset
+	probe(true)
+	probe(true) // streak 2 again, never reaches 3
+	hub.Flush(time.Second)
+
+	require.Empty(t, ft.events, "a success between failures resets the streak; 2+reset+2 never crosses threshold")
 }
