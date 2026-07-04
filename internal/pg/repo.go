@@ -27,7 +27,8 @@ func (r *Repo) UpsertDeploy(ctx context.Context, site, id string, mtime time.Tim
 		INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (site, id) DO UPDATE SET
-			mtime = EXCLUDED.mtime, bytes = EXCLUDED.bytes,
+			mtime = EXCLUDED.mtime,
+			bytes = CASE WHEN EXCLUDED.bytes > 0 THEN EXCLUDED.bytes ELSE deploys.bytes END,
 			has_marker = EXCLUDED.has_marker, state = EXCLUDED.state`,
 		site, id, mtime, bytes, hasMarker, state)
 	if err != nil {

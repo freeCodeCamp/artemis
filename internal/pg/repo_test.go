@@ -61,6 +61,27 @@ func TestRepo_DeployAliasRoundtrip(t *testing.T) {
 	assert.Len(t, deploys, 2, "re-upsert updates in place, no duplicate row")
 }
 
+func TestRepo_UpsertDeploy_ZeroBytesDoesNotClobber(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", now, 300, true, "active"))
+	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", now, 0, true, "active"),
+		"a later soft-fail re-upserts with bytes=0")
+
+	deploys, err := repo.DeploysForSite(ctx, "www")
+	require.NoError(t, err)
+	require.Len(t, deploys, 1)
+	assert.EqualValues(t, 300, deploys[0].Bytes,
+		"bytes=0 upsert must NOT clobber a known-good nonzero value")
+
+	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", now, 500, true, "active"))
+	deploys, err = repo.DeploysForSite(ctx, "www")
+	require.NoError(t, err)
+	assert.EqualValues(t, 500, deploys[0].Bytes, "a real nonzero bytes still updates in place")
+}
+
 func TestRepo_AliasAtomicStampsSupersededRelease(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
