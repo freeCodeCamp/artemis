@@ -3,10 +3,13 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,4 +124,42 @@ func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
+}
+
+func TestReadyz_HardUpstreamFailure_CapturesSentry(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
+	ctx := sentry.SetHubOnContext(t.Context(), hub)
+	h := &Handlers{
+		Health: &fakeHealth{err: errors.New("dial tcp valkey:6379: connection refused")},
+		R2:     newFakeR2(),
+	}
+
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+	hub.Flush(time.Second)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Len(t, ft.events, 1, "a hard (non-transient) readyz upstream failure is a real outage — must page Sentry, the only alerting channel")
+	assert.Equal(t, "valkey.ping", ft.events[0].Tags["op"])
+	assert.Equal(t, []string{"readyz", "valkey.ping"}, ft.events[0].Fingerprint)
+}
+
+func TestReadyz_TransientProbeDeadline_NoSentry(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
+	ctx := sentry.SetHubOnContext(t.Context(), hub)
+	r2 := newFakeR2()
+	r2.listErr = fmt.Errorf("r2 has_prefix: %w", context.DeadlineExceeded)
+	h := &Handlers{
+		Health: &fakeHealth{},
+		R2:     r2,
+	}
+
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+	hub.Flush(time.Second)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Empty(t, ft.events, "5s-probe DeadlineExceeded is the ARTEMIS-1 transient-blip class — must NOT create a Sentry issue")
 }

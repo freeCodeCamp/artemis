@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/getsentry/sentry-go"
 )
 
 // readyZProbePrefix is intentionally non-matching: HasPrefix on a key
@@ -76,6 +79,16 @@ func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op stri
 	)
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("op", op)
+				scope.SetTag("error_code", code)
+				scope.SetFingerprint([]string{"readyz", op})
+				hub.CaptureException(err)
+			})
+		}
 	}
 	writeError(w, http.StatusServiceUnavailable, code, "upstream call failed")
 }
