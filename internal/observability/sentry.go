@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
 	sentryslog "github.com/getsentry/sentry-go/slog"
@@ -228,11 +229,19 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 // (e.g. the registry refresh goroutine). op becomes a tag and the
 // fingerprint so the failures group on their own. No-op when disabled.
 func CaptureBackground(op string, err error) {
+	if IsTransient(err) {
+		slog.Warn("background op transient error (not reported to sentry)", "op", op, "err", err)
+		return
+	}
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("op", op)
 		scope.SetFingerprint([]string{op})
 		sentry.CaptureException(err)
 	})
+}
+
+func IsTransient(err error) bool {
+	return errors.Is(err, context.Canceled) || pg.IsInRecovery(err)
 }
 
 // CaptureFatal reports a boot/fatal error at level fatal and flushes

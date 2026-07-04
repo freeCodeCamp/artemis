@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -139,6 +140,14 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 				"upload body exceeds configured limit")
 			return
 		}
+		if errors.Is(err, context.Canceled) {
+			slog.Warn("deploy upload canceled by client",
+				"op", "r2.put.upload",
+				"reqID", RequestIDFromContext(r.Context()),
+				"path", r.URL.Path,
+			)
+			return
+		}
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.upload", err)
 		return
 	}
@@ -238,7 +247,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	})
 	if lockErr != nil {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+			writeLockError(w, r, lockErr)
 		}
 		return
 	}

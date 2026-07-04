@@ -57,13 +57,25 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case valkeyErr != nil:
-		writeUpstreamError(w, r, http.StatusServiceUnavailable, "valkey_unreachable", "valkey.ping", valkeyErr)
+		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr)
 	case r2Err != nil:
-		writeUpstreamError(w, r, http.StatusServiceUnavailable, "r2_unreachable", "r2.has_prefix", r2Err)
+		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err)
 	case pgErr != nil:
 		slog.Error("readyz: postgres degraded", "err", pgErr)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
 	default:
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
 	}
+}
+
+func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error) {
+	slog.Warn("readiness probe upstream unavailable",
+		"op", op,
+		"err", err,
+		"reqID", RequestIDFromContext(r.Context()),
+	)
+	if pkgMetrics != nil {
+		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
+	}
+	writeError(w, http.StatusServiceUnavailable, code, "upstream call failed")
 }

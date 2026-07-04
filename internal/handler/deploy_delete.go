@@ -73,7 +73,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if lockErr != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+		writeLockError(w, r, lockErr)
 	}
 }
 

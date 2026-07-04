@@ -2,10 +2,13 @@ package observability
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/getsentry/sentry-go"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,4 +91,24 @@ func TestCaptureBackground_DistinctOpsGroupSeparately(t *testing.T) {
 	require.Len(t, rt.events, 2)
 	require.Equal(t, []string{"registry.refresh"}, rt.events[0].Fingerprint)
 	require.Equal(t, []string{"token.rotate"}, rt.events[1].Fingerprint)
+}
+
+func TestCaptureBackground_SuppressesTransient(t *testing.T) {
+	rt := bindRecordingHub(t)
+
+	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
+	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Empty(t, rt.events, "context.Canceled and 57P03 must not create Sentry issues")
+}
+
+func TestCaptureBackground_CapturesRealError(t *testing.T) {
+	rt := bindRecordingHub(t)
+
+	CaptureBackground("gc.site.run", errors.New("genuine gc failure"))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "a non-transient error must still page Sentry")
+	require.Equal(t, "gc.site.run", rt.events[0].Tags["op"])
 }

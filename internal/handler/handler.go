@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/getsentry/sentry-go"
 )
@@ -200,11 +201,6 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
 	}
-	// Capture as a Sentry issue grouped by op, so r2.put.upload failures
-	// cluster apart from valkey.register etc. The raw err goes to Sentry
-	// (internal, access-controlled) even though the client sees only the
-	// opaque message; request headers carrying tokens are scrubbed in
-	// observability.scrubEvent before delivery.
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 		hub.WithScope(func(scope *sentry.Scope) {
 			scope.SetTag("op", op)
@@ -214,6 +210,22 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 		})
 	}
 	writeError(w, status, code, "upstream call failed")
+}
+
+func writeLockError(w http.ResponseWriter, r *http.Request, err error) {
+	if pg.IsLockTimeout(err) {
+		slog.Warn("site lock contended",
+			"op", "pg.lock.site",
+			"reqID", RequestIDFromContext(r.Context()),
+			"path", r.URL.Path,
+		)
+		if pkgMetrics != nil {
+			pkgMetrics.UpstreamErrors.WithLabelValues("pg.lock.site.contended").Inc()
+		}
+		writeError(w, http.StatusConflict, "site_locked", "another operation on this site is in progress; retry shortly")
+		return
+	}
+	writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", err)
 }
 
 // errBadRequest is a sentinel for malformed bodies.

@@ -147,7 +147,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	})
 	if lockErr != nil {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+			writeLockError(w, r, lockErr)
 		}
 		return
 	}
@@ -252,7 +252,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	})
 	if lockErr != nil {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
-			writeUpstreamError(w, r, http.StatusBadGateway, "site_lock_failed", "pg.lock.site", lockErr)
+			writeLockError(w, r, lockErr)
 		}
 		return
 	}
