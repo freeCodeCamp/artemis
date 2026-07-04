@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 )
 
@@ -75,6 +76,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 			deployBytes, err := b.Lister.PrefixBytes(ctx, deploysPrefix+id+"/")
 			if err != nil {
 				slog.Warn("backfill.bytes_unavailable", "site", site, "deployId", id, "err", err)
+				observability.CaptureBackground("backfill.bytes", err)
 				deployBytes = 0
 			}
 			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {

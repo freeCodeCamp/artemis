@@ -3,14 +3,31 @@ package backfill
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
 )
+
+type recordingTransport struct {
+	mu     sync.Mutex
+	events []*sentry.Event
+}
+
+func (r *recordingTransport) Configure(sentry.ClientOptions) {}
+func (r *recordingTransport) SendEvent(e *sentry.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, e)
+}
+func (r *recordingTransport) Flush(time.Duration) bool              { return true }
+func (r *recordingTransport) FlushWithContext(context.Context) bool { return true }
+func (r *recordingTransport) Close()                                {}
 
 type fakeLister struct {
 	sites      []string
@@ -146,6 +163,35 @@ func TestBackfill_BytesUnavailable_SoftFailsRecordsZero(t *testing.T) {
 	assert.Equal(t, int64(300), byID["20260420-141522-abc1234"].bytes)
 	assert.Equal(t, int64(0), byID["20260101-090000-old0001"].bytes,
 		"bytes unavailable → recorded 0 (idempotent re-run corrects); never a fleet-wide crash")
+}
+
+func TestBackfill_BytesUnavailable_CapturesSentry(t *testing.T) {
+	rt := &recordingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "https://public@example.test/1", Transport: rt})
+	require.NoError(t, err)
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	lister := &fakeLister{
+		sites: []string{"www"},
+		byPfx: map[string][]string{"www/deploys/": {"www/deploys/20260101-090000-old0001/index.html"}},
+		bytesErr: map[string]error{
+			"www/deploys/20260101-090000-old0001/": errors.New("r2 list bytes: SlowDown 503 throttled"),
+		},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
+
+	res, err := b.Run(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Deploys)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.GreaterOrEqual(t, len(rt.events), 1,
+		"a backfill bytes failure must raise a grouped Sentry issue, not vanish into a WARN log")
+	assert.Equal(t, "backfill.bytes", rt.events[0].Tags["op"])
 }
 
 func TestBackfill_AliasKeyIsR2DirRelative(t *testing.T) {
