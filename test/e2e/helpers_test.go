@@ -80,6 +80,18 @@ func hasPrefix(t *testing.T, c *r2.Client, prefix string) bool {
 	return has
 }
 
+func waitTrash(t *testing.T, c *r2.Client, trashPrefix, deployPrefix string) {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		if hasPrefix(t, c, trashPrefix) && !hasPrefix(t, c, deployPrefix) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("gc-site did not tombstone-move %q -> %q within 90s", deployPrefix, trashPrefix)
+}
+
 func waitOutbox(t *testing.T, pool *pgxpool.Pool, site string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
