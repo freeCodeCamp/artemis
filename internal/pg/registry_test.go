@@ -38,6 +38,13 @@ func TestRegistryPG(t *testing.T) {
 	_, err = store.UpdateTeams(ctx, "absent", []string{"x"})
 	assert.ErrorIs(t, err, registry.ErrNotFound)
 
+	got, err := store.GetSite(ctx, "www")
+	require.NoError(t, err)
+	assert.Equal(t, "www", got.Slug)
+	assert.Equal(t, []string{"team-platform"}, got.Teams, "GetSite reflects the latest authoritative row")
+	_, err = store.GetSite(ctx, "absent")
+	assert.ErrorIs(t, err, registry.ErrNotFound)
+
 	_, err = store.Register(ctx, "learn", []string{"team-eng"}, "carol")
 	require.NoError(t, err)
 	sites, err := store.Sites(ctx)
@@ -48,6 +55,9 @@ func TestRegistryPG(t *testing.T) {
 
 	require.NoError(t, store.Delete(ctx, "www"))
 	assert.ErrorIs(t, store.Delete(ctx, "www"), registry.ErrNotFound, "double delete -> not found")
+
+	_, err = store.GetSite(ctx, "www")
+	assert.ErrorIs(t, err, registry.ErrNotFound, "GetSite after delete -> not found")
 
 	assert.Equal(t, []string{"www", "www", "learn", "www"}, changed,
 		"registry.changed fires on register/update/register/delete for Valkey cache invalidation")

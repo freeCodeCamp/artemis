@@ -25,6 +25,7 @@ type fakeRegistry struct {
 	fixedNow time.Time
 	// registerErr forces Register to return this error on the next call.
 	registerErr error
+	getErr      error
 }
 
 func newFakeRegistry() *fakeRegistry {
@@ -91,6 +92,20 @@ func (f *fakeRegistry) Delete(_ context.Context, slug string) error {
 	return nil
 }
 
+func (f *fakeRegistry) GetSite(_ context.Context, slug string) (registry.Site, error) {
+	if f.getErr != nil {
+		return registry.Site{}, f.getErr
+	}
+	site, ok := f.bySite[slug]
+	if !ok {
+		return registry.Site{}, registry.ErrNotFound
+	}
+	dup := make([]string, len(site.Teams))
+	copy(dup, site.Teams)
+	site.Teams = dup
+	return site, nil
+}
+
 func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	out := make([]registry.Site, 0, len(f.bySite))
 	for _, s := range f.bySite {
@@ -119,6 +134,9 @@ func (e *erroringRegistry) Delete(_ context.Context, _ string) error {
 }
 func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	return nil, e.err
+}
+func (e *erroringRegistry) GetSite(_ context.Context, _ string) (registry.Site, error) {
+	return registry.Site{}, e.err
 }
 
 // fakeGH implements GitHubAuthenticator with deterministic behaviour.
@@ -451,11 +469,15 @@ func trimPrefix(s, p string) string {
 func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store R2Store) (*Handlers, *fakeJWT) {
 	t.Helper()
 	jwt := newFakeJWT(t)
+	reg := newFakeRegistry()
+	for slug, teams := range st.bySite {
+		_, _ = reg.Register(context.Background(), slug, teams, "test")
+	}
 	h := &Handlers{
 		GH:                 gh,
 		JWT:                jwt,
 		Sites:              st,
-		Registry:           newFakeRegistry(),
+		Registry:           reg,
 		R2:                 store,
 		AliasProductionFmt: "<site>/production",
 		AliasPreviewFmt:    "<site>/preview",

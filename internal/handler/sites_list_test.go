@@ -21,7 +21,7 @@ func callSitesList(h *Handlers, login, token string) *httptest.ResponseRecorder 
 }
 
 func TestSitesList_EmptyRegistry(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
 
 	w := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -32,7 +32,7 @@ func TestSitesList_EmptyRegistry(t *testing.T) {
 }
 
 func TestSitesList_PopulatedReturnsRowsSorted(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
 
 	for _, slug := range []string{"charlie", "alpha", "bravo"} {
 		body := []byte(`{"slug":"` + slug + `","teams":["staff"]}`)

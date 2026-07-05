@@ -13,6 +13,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -232,6 +233,14 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 
 	aliasKey := h.aliasKey(claims.Site, mode)
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), func() error {
+		if _, err := h.Registry.GetSite(r.Context(), claims.Site); err != nil {
+			if errors.Is(err, registry.ErrNotFound) {
+				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be finalized")
+				return errAliasWriteHandled
+			}
+			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.finalize", err)
+			return errAliasWriteHandled
+		}
 		if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled

@@ -28,7 +28,7 @@ func callDelete(h *Handlers, slug, login, token string) *httptest.ResponseRecord
 }
 
 func TestSiteDelete_HappyPath(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
 
 	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
 	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)

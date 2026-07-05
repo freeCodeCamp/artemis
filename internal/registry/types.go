@@ -45,6 +45,8 @@ type Writer interface {
 	// reflects the source-of-truth at call time.
 	Sites(ctx context.Context) ([]Site, error)
 
+	GetSite(ctx context.Context, slug string) (Site, error)
+
 	// Register creates a new site row and publishes a
 	// registry.changed event on success. Returns ErrAlreadyExists
 	// when slug is already registered.

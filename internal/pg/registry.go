@@ -133,6 +133,20 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 	return imported, nil
 }
 
+func (s *RegistryStore) GetSite(ctx context.Context, slug string) (registry.Site, error) {
+	var site registry.Site
+	err := s.pool.QueryRow(ctx,
+		`SELECT slug, teams, created_at, updated_at, created_by FROM sites WHERE slug = $1`,
+		slug).Scan(&site.Slug, &site.Teams, &site.CreatedAt, &site.UpdatedAt, &site.CreatedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return registry.Site{}, registry.ErrNotFound
+	}
+	if err != nil {
+		return registry.Site{}, fmt.Errorf("pg registry get %s: %w", slug, err)
+	}
+	return site, nil
+}
+
 func (s *RegistryStore) Sites(ctx context.Context) ([]registry.Site, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT slug, teams, created_at, updated_at, created_by FROM sites ORDER BY slug`)

@@ -50,6 +50,8 @@ func (fakeWriter) UpdateTeams(context.Context, string, []string) (Site, error) {
 
 func (fakeWriter) Delete(context.Context, string) error { return nil }
 
+func (fakeWriter) GetSite(context.Context, string) (Site, error) { return Site{}, nil }
+
 var (
 	_ Snapshot = fakeSnapshot{}
 	_ Reader   = fakeReader{}
