@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -235,4 +237,28 @@ func TestReadyz_DualOutageThenValkeyHeals_R2StillPages(t *testing.T) {
 	}
 	require.Equal(t, 1, ops["r2.has_prefix"],
 		"an ongoing R2 outage must page once even after being masked by a valkey outage that healed — latch dead-zone fix")
+}
+
+func TestProbeState_ConcurrentObserveAtThreshold_PagesExactlyOnce(t *testing.T) {
+	var p probeState
+	for i := 0; i < readyzPageThreshold-1; i++ {
+		p.observe(true, true)
+	}
+
+	const n = 64
+	var pages atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if p.observe(true, true) {
+				pages.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int64(1), pages.Load(),
+		"merged observe-and-decide latches under one lock: N concurrent threshold-crossing failures emit exactly one page")
 }

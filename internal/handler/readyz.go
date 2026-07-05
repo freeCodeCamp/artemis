@@ -59,18 +59,23 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
-	h.readyzValkey.observe(valkeyErr != nil)
-	h.readyzR2.observe(r2Err != nil)
-
 	switch {
 	case valkeyErr != nil:
-		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, h.readyzValkey.takePage())
+		page := h.readyzValkey.observe(true, true)
+		h.readyzR2.observe(r2Err != nil, false)
+		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, page)
 	case r2Err != nil:
-		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, h.readyzR2.takePage())
+		h.readyzValkey.observe(false, false)
+		page := h.readyzR2.observe(true, true)
+		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, page)
 	case pgErr != nil:
+		h.readyzValkey.observe(false, false)
+		h.readyzR2.observe(false, false)
 		slog.Error("readyz: postgres degraded", "err", pgErr)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
 	default:
+		h.readyzValkey.observe(false, false)
+		h.readyzR2.observe(false, false)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
 	}
 }
@@ -81,21 +86,16 @@ type probeState struct {
 	paged bool
 }
 
-func (p *probeState) observe(failed bool) {
+func (p *probeState) observe(failed, report bool) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !failed {
 		p.fails = 0
 		p.paged = false
-		return
+		return false
 	}
 	p.fails++
-}
-
-func (p *probeState) takePage() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.fails >= readyzPageThreshold && !p.paged {
+	if report && p.fails >= readyzPageThreshold && !p.paged {
 		p.paged = true
 		return true
 	}
