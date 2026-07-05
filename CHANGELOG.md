@@ -2,6 +2,21 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.3.0](https://github.com/freeCodeCamp/artemis/compare/v1.2.2...v1.3.0) (2026-07-05)
+
+
+### Features
+
+* **handler:** add deploy restore and trash-list endpoints ([33a6ede](https://github.com/freeCodeCamp/artemis/commit/33a6edea8d3ca756a7b85ccf7cd4de699676618a))
+
+
+### Bug Fixes
+
+* **gc:** detach tombstone-move from workflow context cancellation ([d07f155](https://github.com/freeCodeCamp/artemis/commit/d07f15559e8274e947e07c95ec84e6deae7d0f66))
+* **gc:** reuse one advisory-lock conn across a GC run's per-move locks ([fbc3bc7](https://github.com/freeCodeCamp/artemis/commit/fbc3bc778886a16dce5fe197a64e6c179cfa57bc))
+* **handler:** close purge-vs-finalize race with in-lock site re-check ([beeb786](https://github.com/freeCodeCamp/artemis/commit/beeb7866c6d0bf36dd099526407e784e7e3890c3))
+* **handler:** reject deploy JWT when scoped site is unregistered ([ec9188c](https://github.com/freeCodeCamp/artemis/commit/ec9188c4b2df3b243a8e62908e3d6b38e6f5bd93))
+
 ## [1.2.2](https://github.com/freeCodeCamp/artemis/compare/v1.2.1...v1.2.2) (2026-07-04)
 
 
