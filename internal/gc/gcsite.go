@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const destructiveMoveTimeout = 10 * time.Minute
+
 type Store interface {
 	DeploysForSite(ctx context.Context, site string) ([]Deploy, error)
 	AliasTargets(ctx context.Context, site string) (targets map[string]struct{}, lastChange time.Time, err error)
@@ -84,8 +86,9 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	}
 	for _, d := range plan.Delete {
 		d := d
-		if err := g.Locker.WithSiteLock(ctx, site, func() error {
-			live, err := g.LiveAliases(ctx, site)
+		opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
+		err := g.Locker.WithSiteLock(opCtx, site, func() error {
+			live, err := g.LiveAliases(opCtx, site)
 			if err != nil {
 				return fmt.Errorf("re-read live aliases: %w", err)
 			}
@@ -95,16 +98,18 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 			}
 			src := g.DeployPrefix(site, d.ID)
 			dst := g.TrashPrefix(site, d.ID)
-			if _, err := g.Mover.MovePrefix(ctx, src, dst); err != nil {
+			if _, err := g.Mover.MovePrefix(opCtx, src, dst); err != nil {
 				return fmt.Errorf("tombstone-move %s: %w", d.ID, err)
 			}
-			if err := g.Store.Tombstone(ctx, site, d); err != nil {
+			if err := g.Store.Tombstone(opCtx, site, d); err != nil {
 				return fmt.Errorf("record tombstone %s: %w", d.ID, err)
 			}
 			res.Tombstoned = append(res.Tombstoned, d.ID)
 			res.BytesReclaimed += d.Bytes
 			return nil
-		}); err != nil {
+		})
+		cancel()
+		if err != nil {
 			return res, fmt.Errorf("gc %s: %w", site, err)
 		}
 	}

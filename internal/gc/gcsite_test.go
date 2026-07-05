@@ -227,3 +227,32 @@ func TestGC_LiveRunRequiresLocker(t *testing.T) {
 	require.Error(t, err, "live run without a Locker is a wiring bug, fail loud")
 	assert.Contains(t, err.Error(), "Locker")
 }
+
+type ctxCapturingMover struct {
+	moves      [][2]string
+	moveCtxErr []error
+}
+
+func (m *ctxCapturingMover) MovePrefix(ctx context.Context, src, dst string) (int, error) {
+	m.moveCtxErr = append(m.moveCtxErr, ctx.Err())
+	m.moves = append(m.moves, [2]string{src, dst})
+	return 1, nil
+}
+
+func TestGC_DestructiveMoveDetachedFromWorkflowCtx(t *testing.T) {
+	store := &fakeStore{deploys: map[string][]Deploy{"www": sixOld()}, targetsSeq: []map[string]struct{}{{}}}
+	mv := &ctxCapturingMover{}
+	g := newSiteGC(store, mv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // workflow interrupted (SIGTERM/cancel) before the tombstone move
+
+	res, err := g.Run(ctx, "www", false)
+	require.NoError(t, err)
+	require.Len(t, res.Tombstoned, 3, "destructive moves complete under a cancelled workflow ctx")
+	require.Len(t, mv.moveCtxErr, 3)
+	for i, cerr := range mv.moveCtxErr {
+		assert.NoError(t, cerr,
+			"move %d must run on a ctx detached from the cancelled workflow ctx — no torn tombstone-move on SIGTERM (T44)", i)
+	}
+}
