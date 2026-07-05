@@ -4,63 +4,166 @@ Audience: artemis contributors + maintainers. Architecture, API contract, config
 
 ## API
 
+Full route table, cross-checked against `internal/server/server.go` (`chi` wiring — source of truth):
+
 ```
+GET    /healthz                                               → { ok: true }
+GET    /readyz                                                → readiness (probes Valkey + R2)
+GET    /metrics                                                → prometheus exposition
+
+GET    /api/whoami                                             → { login, authorizedSites }
 POST   /api/deploy/init                   { site, sha, files? } → { deployId, jwt, expiresAt }
-PUT    /api/deploy/{deployId}/upload      multipart stream      → { received }
-POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
+GET    /api/sites                         [?slug=…]             → { count, sites: [SiteRow] }
+POST   /api/site/register                 { slug, teams? }      → 201 SiteRow
+PATCH  /api/site/{slug}                   { teams }             → 200 SiteRow
+DELETE /api/site/{slug}                   [?purge=true]         → 204 · or 200 { slug, status: "purged", moved } when purging
+GET    /api/site/{site}/deploys                                 → [{ deployId, ts, sha, size }]
+DELETE /api/site/{site}/deploys/{deployId}                      → 200 { site, deployId, status: "tombstoned", moved } · 409 deploy_aliased
+GET    /api/site/{site}/alias/{mode}                            → { site, mode, deployId, url }
 POST   /api/site/{site}/promote                                 → { url }
 POST   /api/site/{site}/rollback          { to }                → { url }
-GET    /api/site/{site}/deploys                                 → [{ deployId, ts, sha, size }]
-GET    /api/whoami                                              → { login, authorizedSites }
-GET    /healthz                                                 → { ok: true }
+
+POST   /api/repo                          { name, visibility?, description?, template? } → 201 RepoRow  (feature-gated)
+GET    /api/repos                         [?status=&mine=]      → [RepoRow]                              (feature-gated)
+GET    /api/repo/templates                                      → { templates: string[] }                (feature-gated)
+GET    /api/repo/{id}                                           → RepoRow                                 (feature-gated)
+POST   /api/repo/{id}/approve                                   → { outcome, request: RepoRow }           (feature-gated)
+POST   /api/repo/{id}/reject              { reason? }           → RepoRow                                 (feature-gated)
+DELETE /api/repo/{id}                                           → 204                                     (feature-gated)
+
+PUT    /api/deploy/{deployId}/upload      multipart stream      → { received }
+POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
 ```
 
-Auth headers (`/api/*` except `/healthz`):
+`/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row.
 
-| Endpoint                                                                    | Bearer                                                                       |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `POST /api/deploy/init`, `POST /api/site/*`, `GET /api/*`                   | GitHub token (PAT / OIDC)                                                    |
-| `PUT /api/deploy/{deployId}/upload`, `POST /api/deploy/{deployId}/finalize` | Deploy-session JWT (HS256, ≤15 min, scoped to one `(login, site, deployId)`) |
+Auth headers (`/api/*` except `/healthz`, `/readyz`, `/metrics`):
+
+| Endpoint                                                                                    | Bearer                                                                       |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `GET /api/*`, `POST /api/deploy/init`, `POST /api/site/*`, `POST`/`GET`/`DELETE /api/repo*` | GitHub token (PAT / OIDC)                                                    |
+| `PUT /api/deploy/{deployId}/upload`, `POST /api/deploy/{deployId}/finalize`                 | Deploy-session JWT (HS256, ≤15 min, scoped to one `(login, site, deployId)`) |
+
+Team-gated beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`). All other `/api/*` reads are open to any authenticated GitHub bearer.
 
 ## Configuration (env-driven)
 
-| Variable                      | Default                      | Description                                    |
-| ----------------------------- | ---------------------------- | ---------------------------------------------- |
-| `PORT`                        | `8080`                       | HTTP listen port                               |
-| `R2_ENDPOINT`                 | _(required)_                 | `https://<account>.r2.cloudflarestorage.com`   |
-| `R2_ACCESS_KEY_ID`            | _(required)_                 | Admin S3 key                                   |
-| `R2_SECRET_ACCESS_KEY`        | _(required)_                 | Admin S3 secret                                |
-| `R2_BUCKET`                   | `universe-static-apps-01`    | Single shared bucket (prefix-scoped per site)  |
-| `GH_CLIENT_ID`                | _(required)_                 | GitHub OAuth app client ID (CLI device flow)   |
-| `GH_ORG`                      | `freeCodeCamp`               | GitHub org for team probes                     |
-| `GH_API_BASE`                 | `https://api.github.com`     | GitHub REST API base                           |
-| `VALKEY_ADDR`                 | _(required)_                 | Valkey `host:port` for the sites registry      |
-| `VALKEY_PASSWORD`             | _(required)_                 | Valkey AUTH password                           |
-| `REGISTRY_AUTHZ_TEAM`         | `staff`                      | GH team allowed to mutate the sites registry   |
-| `JWT_SIGNING_KEY`             | _(required)_                 | 32-byte random; mounted from k8s Secret        |
-| `JWT_TTL_SECONDS`             | `900`                        | Deploy-session JWT TTL (15 min)                |
-| `GH_MEMBERSHIP_CACHE_TTL`     | `300`                        | GH `/user` + team membership cache TTL (5 min) |
-| `GH_APP_ID`                   | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)       |
-| `GH_APP_INSTALLATION_ID`      | _(empty)_                    | App installation id (numeric string)           |
-| `GH_APP_PRIVATE_KEY`          | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)         |
-| `ALIAS_PRODUCTION_KEY_FORMAT` | `<site>/production`          | R2 alias key for production env                |
-| `ALIAS_PREVIEW_KEY_FORMAT`    | `<site>/preview`             | R2 alias key for preview env                   |
-| `DEPLOY_PREFIX_FORMAT`        | `<site>/deploys/<ts>-<sha>/` | R2 prefix per immutable deploy                 |
-| `LOG_LEVEL`                   | `info`                       | `debug`, `info`, `warn`, `error`               |
-| `SENTRY_DSN`                  | _(empty → off)_              | Sentry DSN; empty disables the SDK entirely    |
-| `ENVIRONMENT`                 | _(empty)_                    | Sentry environment tag (`production`, …)       |
-| `SENTRY_TRACES_SAMPLE_RATE`   | `0.2`                        | Tracing sample rate `[0,1]`; probes dropped    |
-| `SENTRY_DEBUG`                | `false`                      | Log SDK internals to stderr (`1`/`true`)       |
+Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on the first bad var).
+
+**Core / R2 / server**
+
+| Variable               | Default                   | Description                                            |
+| ---------------------- | -------------------------- | -------------------------------------------------------- |
+| `PORT`                 | `8080`                     | HTTP listen port                                          |
+| `R2_ENDPOINT`          | _(required)_               | `https://<account>.r2.cloudflarestorage.com`             |
+| `R2_ACCESS_KEY_ID`     | _(required)_               | Admin S3 key                                              |
+| `R2_SECRET_ACCESS_KEY` | _(required)_               | Admin S3 secret                                           |
+| `R2_BUCKET`            | `universe-static-apps-01` | Single shared bucket (prefix-scoped per site)             |
+| `UPLOAD_MAX_BYTES`     | `104857600` (100 MiB)      | Body-size cap on `PUT /api/deploy/{deployId}/upload`     |
+| `LOG_LEVEL`            | `info`                     | `debug`, `info`, `warn`, `error`                          |
+
+**GitHub identity + site registry**
+
+| Variable                 | Default                  | Description                                              |
+| ------------------------- | -------------------------- | ------------------------------------------------------------ |
+| `GH_CLIENT_ID`            | _(required)_              | GitHub OAuth app client ID (CLI device flow)              |
+| `GH_ORG`                  | `freeCodeCamp`            | GitHub org for site-registry team probes                  |
+| `GH_API_BASE`             | `https://api.github.com` | GitHub REST API base                                       |
+| `GH_MEMBERSHIP_CACHE_TTL` | `300`                     | GH `/user` + team membership cache TTL, seconds (5 min)   |
+| `VALKEY_ADDR`             | _(required)_              | Valkey `host:port` for the sites registry                  |
+| `VALKEY_PASSWORD`         | _(empty)_                 | Valkey AUTH password; empty for unauthenticated dev        |
+| `REGISTRY_AUTHZ_TEAM`     | `staff`                  | GH team allowed to mutate the sites registry                |
+
+**Deploy-session JWT + R2 key layout**
+
+| Variable                     | Default                     | Description                                                          |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------------------------ |
+| `JWT_SIGNING_KEY`             | _(required)_                 | ≥32-byte random; mounted from k8s Secret                              |
+| `JWT_TTL_SECONDS`             | `900`                        | Deploy-session JWT TTL, seconds (15 min)                              |
+| `ALIAS_PRODUCTION_KEY_FORMAT` | `<site>/production`          | R2 alias key for production env                                       |
+| `ALIAS_PREVIEW_KEY_FORMAT`    | `<site>/preview`             | R2 alias key for preview env                                           |
+| `DEPLOY_PREFIX_FORMAT`        | `<site>/deploys/<ts>-<sha>/` | R2 prefix per immutable deploy; must contain `<site>` and `<ts>-<sha>` |
+
+**Repo-creation (Apollo-11, feature-gated)**
+
+| Variable                 | Default                     | Description                                                                       |
+| ------------------------- | ------------------------------ | -------------------------------------------------------------------------------------- |
+| `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)        |
+| `REPO_CREATE_AUTHZ_TEAM`  | `staff`                     | GH team gating `POST /api/repo`                                                        |
+| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating approve/reject/delete; placeholder — production must override           |
+| `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                              |
+| `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
+| `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                                 |
 
 `GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY` are all-or-none: set all three to enable the `/api/repo*` self-service repo-creation feature, or none. The two ids must be digit-only strings — `validate()` rejects a malformed value at boot (a YAML int sealed in sops renders as scientific notation through Helm `quote`; seal them as strings).
+
+**Sentry**
+
+| Variable                   | Default          | Description                                    |
+| --------------------------- | ------------------ | -------------------------------------------------- |
+| `SENTRY_DSN`                | _(empty → off)_  | Sentry DSN; empty disables the SDK entirely       |
+| `ENVIRONMENT`               | _(empty)_         | Sentry environment tag (`production`, …)          |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.2`             | Tracing sample rate `[0,1]`; probes dropped       |
+| `SENTRY_DEBUG`              | `false`           | Log SDK internals to stderr (`1`/`true`)          |
+
+**Postgres + retention GC + Hatchet** (feature-gated on `DATABASE_URL`; see [local ADR 0001](design/0001-durable-execution-model.md))
+
+| Variable                 | Default                    | Description                                                                                |
+| ------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`            | _(empty → GC off)_           | artemis-owned Postgres DSN; empty runs deploy-only mode (no GC, no repo-creation queue)          |
+| `PG_CONNECT_RETRY_WINDOW` | `45s`                         | Boot-time retry window for the initial Postgres connect (Go duration; `0` disables retry)       |
+| `BACKFILL_ON_BOOT`        | `false`                       | One-shot: scan R2, backfill the Postgres deploy index, then exit (requires `DATABASE_URL`)       |
+| `HATCHET_CLIENT_TOKEN`    | _(empty)_                     | Hatchet engine auth token                                                                         |
+| `HATCHET_ADDR`            | _(empty → workflows off)_     | Hatchet gRPC address; empty leaves GC wired but workflow scheduling + outbox relay unstarted     |
+| `CLEANUP_RETENTION_DAYS`  | `7`                           | Days before a superseded deploy becomes GC-eligible                                               |
+| `CLEANUP_RECENT_KEEP`     | `3`                           | Newest N deploys per site kept regardless of age (rollback floor)                                 |
+| `CLEANUP_GRACE`           | `72h`                         | Minimum deploy age before GC; must be ≥ `JWT_TTL_SECONDS` and ≥ the 15s serve-cache TTL           |
+| `CLEANUP_BLAST_CAP`       | `0` (disabled)                | Max deploys reclaimed per sweep; an over-cap sweep reaps only the oldest N this run               |
+| `CLEANUP_TRASH_PREFIX`    | `_trash/`                     | R2 prefix soft-deleted (tombstoned) objects move to before hard purge                             |
+| `CLEANUP_RECOVERY_DAYS`   | `7`                           | Days a tombstone survives before the purge pass hard-deletes it                                   |
+| `CLEANUP_DRY_RUN`         | `false`                       | Plan-only GC: compute + log the delete set, execute nothing                                       |
 
 ## Observability
 
 Three signals, all optional and independently degradable:
 
 - **Structured logs** — JSON to stdout via `log/slog` (`LOG_LEVEL`). Source of truth; scraped by Loki. Probe paths (`/healthz`, `/readyz`, `/metrics`) are silenced.
-- **Prometheus** — `/metrics` exposes deploy/promote counters, `artemis_upstream_error_total{op}`, `artemis_alias_drift_total`, and `artemis_registry_refresh_failures_total`.
+- **Prometheus** — `/metrics` exposes the standard Go + process collectors plus 15 artemis-specific metrics (full inventory below).
 - **Sentry** — errors, panics, performance traces, and a slog→Sentry Logs tee. **Off unless `SENTRY_DSN` is set**, so dev/test runs send nothing.
+
+### Metric inventory
+
+Registered in `internal/handler/metrics.go`, `internal/gc/metrics.go`, `internal/worker/metrics.go`; wired onto one `prometheus.Registry` in `cmd/artemis/main.go`.
+
+**Handler** (`handler.NewMetrics`)
+
+| Metric                                     | Type       | Meaning                                                                                     |
+| -------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `artemis_registry_refresh_failures_total`    | Counter    | Full-snapshot registry/valkey refresh that errored; stale snapshot stays served                    |
+| `artemis_alias_drift_total`                  | Counter    | 409 `alias_drift` responses from `SitePromote` / `SiteRollback` (CAS body-pin mismatch)             |
+| `artemis_promote_legacy_bare_total`          | Counter    | Empty-body `POST /api/site/{site}/promote` (no `expectedCurrent` CAS pin)                          |
+| `artemis_upstream_error_total{op}`           | CounterVec | `writeUpstreamError` invocations, labelled by `op` (e.g. `r2.put.alias`, `valkey.register`)         |
+
+**GC** (`gc.NewMetrics`)
+
+| Metric                                     | Type       | Meaning                                                                                          |
+| -------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------- |
+| `artemis_gc_deploys_tombstoned_total`        | Counter    | Deploys soft-deleted (moved to `_trash`) by retention GC, manual delete, or site purge                   |
+| `artemis_gc_bytes_reclaimed_total`           | Counter    | Bytes hard-reclaimed from `_trash` by the tombstone-purge pass past the recovery window                  |
+| `artemis_gc_runs_total{workflow,outcome}`    | CounterVec | GC workflow runs, labelled by workflow (`gc-site`, `manual-delete`, `site-purge`, `tombstone-purge`, `reconcile`) and outcome |
+| `artemis_gc_drift_total{kind}`               | CounterVec | Reconcile drift events, labelled by kind (`reindexed`, `orphan`, `pruned`, `aliased_missing`)             |
+
+**Worker / Hatchet** (`worker.NewMetrics`)
+
+| Metric                                              | Type       | Meaning                                                                     |
+| ------------------------------------------------------ | ------------ | -------------------------------------------------------------------------------- |
+| `artemis_worker_queue_depth{workflow}`                 | GaugeVec   | Pending tasks per workflow queue (sampled from the engine)                       |
+| `artemis_worker_dlq_depth`                             | Gauge      | Dead-lettered workflow runs awaiting operator attention                          |
+| `artemis_worker_workflow_runs_total{workflow,outcome}` | CounterVec | Workflow runs, labelled by workflow and outcome                                  |
+| `artemis_worker_workflow_failures_total{workflow}`     | CounterVec | Workflow run failures, labelled by workflow                                       |
+| `artemis_worker_dead_lettered_total{workflow}`         | CounterVec | Workflow runs that exhausted retries and dead-lettered, labelled by workflow      |
+| `artemis_relay_published_total`                        | Counter    | Outbox rows published to the engine by the relay loop (at-least-once)            |
+| `artemis_relay_failures_total`                         | Counter    | Relay `RunOnce` passes that errored before draining the batch                    |
 
 When enabled, Sentry captures:
 
