@@ -20,7 +20,12 @@ type Mover interface {
 }
 
 type Locker interface {
+	NewLockSession(ctx context.Context) (LockSession, error)
+}
+
+type LockSession interface {
 	WithSiteLock(ctx context.Context, site string, fn func() error) error
+	Close(ctx context.Context)
 }
 
 type SiteGC struct {
@@ -84,10 +89,17 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	if g.Locker == nil {
 		return res, fmt.Errorf("gc %s: live run without site Locker (wiring bug)", site)
 	}
+	sessCtx, sessCancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
+	sess, err := g.Locker.NewLockSession(sessCtx)
+	sessCancel()
+	if err != nil {
+		return res, fmt.Errorf("gc %s: open lock session: %w", site, err)
+	}
+	defer sess.Close(ctx)
 	for _, d := range plan.Delete {
 		d := d
 		opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
-		err := g.Locker.WithSiteLock(opCtx, site, func() error {
+		err := sess.WithSiteLock(opCtx, site, func() error {
 			live, err := g.LiveAliases(opCtx, site)
 			if err != nil {
 				return fmt.Errorf("re-read live aliases: %w", err)

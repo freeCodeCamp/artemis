@@ -55,8 +55,15 @@ func (m *fakeMover) MovePrefix(_ context.Context, src, dst string) (int, error) 
 }
 
 type fakeLocker struct {
-	calls int
-	sites []string
+	calls    int
+	sites    []string
+	sessions int
+	closed   int
+}
+
+func (l *fakeLocker) NewLockSession(_ context.Context) (LockSession, error) {
+	l.sessions++
+	return l, nil
 }
 
 func (l *fakeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
@@ -64,6 +71,8 @@ func (l *fakeLocker) WithSiteLock(_ context.Context, site string, fn func() erro
 	l.sites = append(l.sites, site)
 	return fn()
 }
+
+func (l *fakeLocker) Close(context.Context) { l.closed++ }
 
 func newSiteGC(store Store, mover Mover) *SiteGC {
 	return &SiteGC{

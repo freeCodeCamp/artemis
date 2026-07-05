@@ -13,7 +13,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
+func newMaxConns2Repo(t *testing.T) *Repo {
 	t.Helper()
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
@@ -36,7 +36,12 @@ func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { go pool.Close() })
 	require.NoError(t, Migrate(ctx, pool))
-	repo := &Repo{pool: pool}
+	return &Repo{pool: pool}
+}
+
+func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
+	repo := newMaxConns2Repo(t)
+	ctx := context.Background()
 
 	now := time.Now().UTC()
 	done := make(chan struct{})
@@ -61,5 +66,38 @@ func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
 	case <-done:
 	case <-time.After(20 * time.Second):
 		t.Fatal("nested pool acquire under site lock deadlocked at MaxConns=2 (B19)")
+	}
+}
+
+func TestLockSession_NoPoolSelfDeadlock(t *testing.T) {
+	repo := newMaxConns2Repo(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := range 2 {
+			wg.Add(1)
+			go func(n int) {
+				defer wg.Done()
+				site := []string{"a.freecode.camp", "b.freecode.camp"}[n]
+				sess, err := repo.NewLockSession(ctx)
+				assert.NoError(t, err)
+				defer sess.Close(ctx)
+				err = sess.WithSiteLock(ctx, site, func() error {
+					return repo.FinalizeAtomic(ctx, site, "20260101-000000-aaaaaaa", "production", now, 0)
+				})
+				assert.NoError(t, err)
+			}(i)
+		}
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("nested pool acquire under lock session deadlocked at MaxConns=2 (B19 session path)")
 	}
 }

@@ -92,3 +92,79 @@ func TestAliasSupersede_StampsReleaseOnPreviousTarget(t *testing.T) {
 	assert.True(t, byID["20260102-000000-bbbbbbb"].AliasReleasedAt.IsZero(),
 		"current alias target carries no release stamp")
 }
+
+func TestLockSession_PerMoveReleaseAcrossSessions(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	sessA, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+	defer sessA.Close(ctx)
+
+	for range 3 {
+		require.NoError(t, sessA.WithSiteLock(ctx, "www.freecode.camp", func() error { return nil }))
+	}
+
+	sessB, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+	defer sessB.Close(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		_ = sessB.WithSiteLock(ctx, "www.freecode.camp", func() error { return nil })
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second session blocked on a site the first session already released per-move")
+	}
+}
+
+func TestLockSession_MutualExclusionAcrossSessions(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	sessA, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+	sessB, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+	aDone := make(chan struct{})
+	go func() {
+		defer close(aDone)
+		_ = sessA.WithSiteLock(ctx, "s.freecode.camp", func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	acquired := make(chan struct{})
+	bDone := make(chan struct{})
+	go func() {
+		defer close(bDone)
+		_ = sessB.WithSiteLock(ctx, "s.freecode.camp", func() error {
+			close(acquired)
+			return nil
+		})
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("sessB acquired the lock while sessA held the same site")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-acquired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sessB never acquired after sessA released")
+	}
+	<-aDone
+	<-bDone
+	sessA.Close(ctx)
+	sessB.Close(ctx)
+}
