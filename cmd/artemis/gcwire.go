@@ -18,6 +18,7 @@ import (
 var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
+	_ handler.TrashStore        = (*pg.Repo)(nil)
 	_ handler.DeployIndexWriter = (*pg.Repo)(nil)
 	_ handler.SiteLocker        = (*pg.Repo)(nil)
 	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
@@ -153,6 +154,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 			TrashBase: cfg.Cleanup.TrashPrefix,
 			Now:       time.Now,
 			Metrics:   metrics,
+			Locker:    repo,
 		},
 	}, nil
 }

@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 )
 
 type Repo struct {
@@ -159,4 +161,46 @@ func (r *Repo) ClearTombstone(ctx context.Context, site, id string) error {
 		return fmt.Errorf("pg clear tombstone %s/%s: %w", site, id, err)
 	}
 	return nil
+}
+
+func (r *Repo) TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT site, id, trashed_at, bytes FROM tombstones WHERE site = $1 ORDER BY trashed_at DESC`, site)
+	if err != nil {
+		return nil, fmt.Errorf("pg tombstones for site %s: %w", site, err)
+	}
+	defer rows.Close()
+
+	var out []gc.Tombstone
+	for rows.Next() {
+		var t gc.Tombstone
+		if err := rows.Scan(&t.Site, &t.ID, &t.TrashedAt, &t.Bytes); err != nil {
+			return nil, fmt.Errorf("pg scan tombstone %s: %w", site, err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) RestoreDeploy(ctx context.Context, site, id string, restoredMtime time.Time, bytes int64) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		var existed string
+		scanErr := tx.QueryRow(ctx,
+			`DELETE FROM tombstones WHERE site = $1 AND id = $2 RETURNING id`, site, id).Scan(&existed)
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return registry.ErrNotFound
+		}
+		if scanErr != nil {
+			return fmt.Errorf("pg restore deploy delete tombstone %s/%s: %w", site, id, scanErr)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
+			 VALUES ($1, $2, $3, $4, true, 'active')
+			 ON CONFLICT (site, id) DO UPDATE SET
+			 	state = 'active', mtime = EXCLUDED.mtime, bytes = EXCLUDED.bytes, has_marker = true`,
+			site, id, restoredMtime, bytes); err != nil {
+			return fmt.Errorf("pg restore deploy insert %s/%s: %w", site, id, err)
+		}
+		return nil
+	})
 }

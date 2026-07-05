@@ -274,6 +274,7 @@ func run() error {
 		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
 		DeployPrefix:         deployPrefix,
 		TrashPrefixBase:      cfg.Cleanup.TrashPrefix,
+		TrashRecovery:        time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
 		UploadMaxBytes:       cfg.UploadMaxBytes,
 		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
 		RepoOrg:              cfg.Repo.Org,
@@ -296,6 +297,7 @@ func run() error {
 	if pgRepo != nil {
 		h.Outbox = pgRepo
 		h.Tombstones = pgRepo
+		h.Trash = pgRepo
 		h.Index = pgRepo
 		h.Locker = pgRepo
 	}

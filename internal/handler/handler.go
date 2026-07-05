@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/getsentry/sentry-go"
@@ -66,6 +67,11 @@ type TombstoneStore interface {
 	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
 }
 
+type TrashStore interface {
+	TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error)
+	RestoreDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64) error
+}
+
 type SiteChangeEmitter interface {
 	EnqueueSiteChanged(ctx context.Context, site string) error
 }
@@ -103,6 +109,8 @@ type Handlers struct {
 	AliasPreviewFmt    string // e.g. "<site>/preview"
 	Tombstones         TombstoneStore
 	TrashPrefixBase    string // e.g. "_trash/"
+	Trash              TrashStore
+	TrashRecovery      time.Duration
 	Outbox             SiteChangeEmitter
 	Index              DeployIndexWriter
 	Locker             SiteLocker

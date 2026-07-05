@@ -54,6 +54,17 @@ func newPurge(reaper *fakeReaper, del *fakeDeleter) *TombstonePurge {
 	}
 }
 
+type fakePurgeLocker struct {
+	calls int
+	sites []string
+}
+
+func (f *fakePurgeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
+	f.calls++
+	f.sites = append(f.sites, site)
+	return fn()
+}
+
 func TestTombstonePurge(t *testing.T) {
 	reaper := &fakeReaper{tombstones: []Tombstone{
 		{Site: "www", ID: "d-expired", TrashedAt: ago(8 * 24 * time.Hour), Bytes: 100},
@@ -104,4 +115,36 @@ func TestTombstonePurge_Idempotent(t *testing.T) {
 	res2, err := p.Run(context.Background(), false)
 	require.NoError(t, err)
 	assert.Empty(t, res2.Purged, "re-run after reclaim finds no expired tombstones (V10)")
+}
+
+func TestTombstonePurge_TakesSiteLockPerTombstone(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d-expired", TrashedAt: ago(8 * 24 * time.Hour), Bytes: 100},
+		{Site: "learn", ID: "d-old", TrashedAt: ago(9 * 24 * time.Hour), Bytes: 50},
+	}}
+	del := &fakeDeleter{}
+	locker := &fakePurgeLocker{}
+	p := newPurge(reaper, del)
+	p.Locker = locker
+
+	_, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, locker.calls, "one WithSiteLock call per purged tombstone")
+	assert.ElementsMatch(t, []string{"www", "learn"}, locker.sites)
+}
+
+func TestTombstonePurge_DryRunDoesNotLock(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d-expired", TrashedAt: ago(8 * 24 * time.Hour)},
+	}}
+	del := &fakeDeleter{}
+	locker := &fakePurgeLocker{}
+	p := newPurge(reaper, del)
+	p.Locker = locker
+
+	_, err := p.Run(context.Background(), true)
+	require.NoError(t, err)
+
+	assert.Zero(t, locker.calls, "dry-run computes the delete set but takes no lock")
 }

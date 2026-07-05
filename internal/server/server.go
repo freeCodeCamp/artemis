@@ -79,6 +79,8 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 			r.Delete("/site/{slug}", h.SiteDelete)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
 			r.Delete("/site/{site}/deploys/{deployId}", h.SiteDeployDelete)
+			r.Post("/site/{site}/deploys/{deployId}/restore", h.SiteDeployRestore)
+			r.Get("/site/{site}/trash", h.SiteTrashList)
 			r.Get("/site/{site}/alias/{mode}", h.AliasGet)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)
