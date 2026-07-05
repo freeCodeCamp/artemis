@@ -99,7 +99,7 @@ func TestRequireDeployJWT_BadToken_Returns403(t *testing.T) {
 }
 
 func TestRequireDeployJWT_OK_AttachesClaims(t *testing.T) {
-	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{"www": {"team-a"}}}, newFakeR2())
 
 	tok, _, err := jwt.Sign("alice", "www", "d-1")
 	require.NoError(t, err)
@@ -115,6 +115,22 @@ func TestRequireDeployJWT_OK_AttachesClaims(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "d-1", sawDeploy)
+}
+
+func TestRequireDeployJWT_RejectsUnregisteredSite(t *testing.T) {
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+
+	tok, _, err := jwt.Sign("alice", "purged", "d-9")
+	require.NoError(t, err)
+
+	r := httptest.NewRequest(http.MethodPut, "/api/deploy/d-9/upload", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	h.RequireDeployJWT(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("must not pass: JWT-scoped site no longer registered (purged mid-session)")
+	})).ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 func TestRequestID_AddsHeader(t *testing.T) {

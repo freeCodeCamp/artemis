@@ -147,6 +147,10 @@ func (h *Handlers) RequireDeployJWT(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "jwt_invalid", "invalid deploy-session jwt")
 			return
 		}
+		if len(h.Sites.Snapshot().TeamsForSite(claims.Site)) == 0 {
+			writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+			return
+		}
 		ctx := context.WithValue(r.Context(), ctxKeyJWT, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
