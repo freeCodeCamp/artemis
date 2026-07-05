@@ -42,4 +42,7 @@ jobs:
             -threshold 80 \
             -pkg github.com/freeCodeCamp/artemis/internal/auth \
             -pkg github.com/freeCodeCamp/artemis/internal/handler \
+            -pkg github.com/freeCodeCamp/artemis/internal/gc \
+            -pkg github.com/freeCodeCamp/artemis/internal/worker \
+            -pkg github.com/freeCodeCamp/artemis/internal/pg \
             coverage.txt
