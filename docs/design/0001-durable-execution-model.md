@@ -165,3 +165,10 @@ Audited this plan against the Universe Architecture ADRs. Building blocks + plac
 - R2 lifecycle = prefix + age(days), no tag filters, has AbortIncompleteMultipartUpload — developers.cloudflare.com/r2/buckets/object-lifecycles.
 - Serve plane: Caddy `r2_alias` 15s LRU, separate RO token — `infra/docker/images/caddy-s3/modules/r2alias/r2alias.go`.
 - GC patterns (reachability-not-age, registry-GC race, grace window, soft-delete) — Docker/Distribution #3045, Harbor #10167/#23199, Vercel/Netlify retention docs, Git GC; full set in the research scratchpad.
+
+## Known limitations (2026-07-05)
+
+Two latent gaps confirmed in code against the shipped v1.3.0 tag. Canonical record + full citations: Universe ADR-020 § "2026-07-05 — known limitations (v1.3.0)" (`~/DEV/fCC-U/Architecture/decisions/020-durable-execution.md`).
+
+- **Reconcile drift-audit backstop (E4) not wired** — `WorkflowReconcile` consumes `site.reconcile` (`cmd/artemis/gcworkflows.go:79-94`) but no producer emits it; the §5 E4 backstop has never run in prod.
+- **Outbox relay duplicate-publish** — `FetchUnpublished` (`internal/pg/outbox.go:41`) lacks `FOR UPDATE SKIP LOCKED`; `runRelayLoop` runs per-replica (`cmd/artemis/main.go:262`, `replicaCount: 3`), so duplicate publishes are possible (bounded by concurrency-key + idempotency).
