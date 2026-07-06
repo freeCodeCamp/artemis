@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -126,6 +127,24 @@ func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
+}
+
+func TestReadyz_LevelMatchesStatus(t *testing.T) {
+	cap := captureAccessLog(t)
+
+	down := &Handlers{Health: &fakeHealth{err: errors.New("valkey down")}, R2: newFakeR2()}
+	w := httptest.NewRecorder()
+	down.ReadyZ(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Equal(t, slog.LevelError, cap.levelOf(t, "readyz.probe.unavailable"),
+		"the 503-causing check must log at Error so it pages")
+
+	degraded := &Handlers{Health: &fakeHealth{}, R2: newFakeR2(), PGHealth: &fakeHealth{err: errors.New("pg down")}}
+	w2 := httptest.NewRecorder()
+	degraded.ReadyZ(w2, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	require.Equal(t, http.StatusOK, w2.Code)
+	assert.Equal(t, slog.LevelWarn, cap.levelOf(t, "readyz.postgres.degraded"),
+		"the 200-tolerated degraded path must log at Warn, not out-rank the failing check")
 }
 
 func readyzProbe(t *testing.T, h *Handlers, hub *sentry.Hub) *httptest.ResponseRecorder {

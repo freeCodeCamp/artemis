@@ -71,6 +71,19 @@ func (h *capturingHandler) findAction(action, outcome string) (map[string]string
 	return nil, false
 }
 
+func (h *capturingHandler) levelOf(t *testing.T, msg string) slog.Level {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, rec := range h.records {
+		if rec.Message == msg {
+			return rec.Level
+		}
+	}
+	t.Fatalf("no record with message %q", msg)
+	return 0
+}
+
 func (h *capturingHandler) httpKeyCount(t *testing.T, key string) int {
 	t.Helper()
 	h.mu.Lock()
