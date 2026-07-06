@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
@@ -151,14 +153,27 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 				if err != nil {
 					return err
 				}
-				if _, err := gcw.Reconciler.ReconcileSite(ctx, site); err != nil {
+				report, err := gcw.Reconciler.ReconcileSite(ctx, site)
+				if err != nil {
 					observability.CaptureBackground("reconcile.run", err)
 					return err
 				}
+				reconcileDriftIssue(ctx, site, report)
 				return nil
 			}),
 		},
 	}
+}
+
+func reconcileDriftIssue(ctx context.Context, site string, report gc.DriftReport) {
+	if len(report.AliasedMissing) == 0 {
+		return
+	}
+	slog.ErrorContext(ctx, "reconcile.aliased_missing",
+		"site", site,
+		"count", len(report.AliasedMissing))
+	observability.CaptureBackground("reconcile.aliased_missing",
+		fmt.Errorf("reconcile %s: %d deploys aliased but missing from R2/index (dangerous drift)", site, len(report.AliasedMissing)))
 }
 
 func siteFromInput(input map[string]any) (string, error) {

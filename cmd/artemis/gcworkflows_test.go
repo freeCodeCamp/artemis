@@ -117,6 +117,44 @@ func (h *capturingHandler) attr(msg, key string) string {
 	return ""
 }
 
+func (h *capturingHandler) levelOf(msg string) (slog.Level, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Message == msg {
+			return r.Level, true
+		}
+	}
+	return 0, false
+}
+
+func TestReconcileDriftIssue_ErrorsOnAliasedMissing(t *testing.T) {
+	rec := &capturingHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	reconcileDriftIssue(context.Background(), "www", gc.DriftReport{AliasedMissing: []string{"d1", "d2"}})
+
+	assert.Equal(t, "www", rec.attr("reconcile.aliased_missing", "site"),
+		"the dangerous aliased_missing drift must surface for paging")
+	lvl, ok := rec.levelOf("reconcile.aliased_missing")
+	require.True(t, ok)
+	assert.Equal(t, slog.LevelError, lvl, "aliased_missing is error-level: a human must investigate")
+}
+
+func TestReconcileDriftIssue_SilentWhenClean(t *testing.T) {
+	rec := &capturingHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	reconcileDriftIssue(context.Background(), "www", gc.DriftReport{Reindexed: []string{"d1"}})
+
+	_, ok := rec.levelOf("reconcile.aliased_missing")
+	assert.False(t, ok, "no aliased_missing -> no dangerous-drift signal")
+}
+
 func TestWorkflowScope_RunID(t *testing.T) {
 	rec := &capturingHandler{}
 	old := slog.Default()
