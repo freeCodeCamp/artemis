@@ -164,6 +164,9 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
+	h.logAction(r.Context(), "deploy.upload", "success",
+		slog.String("path", relPath), slog.Int64("bytes", contentLength))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"received": relPath,
 		"key":      key,
@@ -272,7 +275,9 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("deploy.finalize.live", "site", claims.Site, "deployId", deployID, "mode", mode, "reqID", RequestIDFromContext(r.Context()))
+	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
+	h.logAction(r.Context(), "deploy.finalize", "success",
+		slog.String("mode", mode), slog.Int64("bytes", deployBytes))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(claims.Site, mode),
 		"deployId": deployID,
