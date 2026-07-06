@@ -171,7 +171,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.create", err)
 		return
 	}
-	slog.Info("repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "requestedBy", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "actor", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusCreated, toRepoRow(created))
 }
 
@@ -281,7 +281,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	login := LoginFromContext(r.Context())
-	slog.Info("repo.approve.start", "id", id, "approver", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("repo.approve.start", "id", id, "actor", login, "reqID", RequestIDFromContext(r.Context()))
 
 	approved, err := h.Repos.Approve(r.Context(), id, login)
 	resume := false
@@ -372,7 +372,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markactive", mErr)
 		return
 	}
-	slog.Info("repo.approve.created", "id", id, "name", active.Name, "url", created.URL, "approver", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("repo.approve.created", "id", id, "name", active.Name, "url", created.URL, "actor", login, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: toRepoRow(active)})
 }
 
@@ -412,7 +412,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("repo.reject.recorded", "id", id, "approver", login, "reason", body.Reason, "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("repo.reject.recorded", "id", id, "actor", login, "reason", body.Reason, "reqID", RequestIDFromContext(r.Context()))
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
 }
 
@@ -429,7 +429,7 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.delete", err)
 		return
 	}
-	slog.Info("repo.delete.removed", "id", id, "approver", LoginFromContext(r.Context()), "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("repo.delete.removed", "id", id, "actor", LoginFromContext(r.Context()), "reqID", RequestIDFromContext(r.Context()))
 	w.WriteHeader(http.StatusNoContent)
 }
 

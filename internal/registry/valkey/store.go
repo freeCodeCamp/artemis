@@ -158,7 +158,7 @@ func (s *Store) Publish(ctx context.Context, slug string) error {
 func PublishOnChange(ctx context.Context, store *Store) func(slug string) {
 	return func(slug string) {
 		if err := store.Publish(ctx, slug); err != nil {
-			slog.Warn("valkey registry publish failed", "slug", slug, "err", err)
+			slog.Warn("valkey registry publish failed", "site", slug, "err", err)
 		}
 	}
 }

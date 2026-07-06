@@ -107,7 +107,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("site.register", "slug", req.Slug, "teams", teams, "by", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.Info("site.register", "site", req.Slug, "teams", teams, "actor", login, "reqID", RequestIDFromContext(r.Context()))
 	telemetry.FromContext(r.Context()).SetResource(req.Slug, "")
 	h.auditFromScope(r.Context(), "site.register", "success", map[string]any{"teams": teams, "createdBy": login})
 	writeJSON(w, http.StatusCreated, toSiteRow(site))
@@ -205,7 +205,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		telemetry.FromContext(r.Context()).SetResource(slug, "")
-		h.logAction(r.Context(), "site.delete", "success", slog.String("slug", slug))
+		h.logAction(r.Context(), "site.delete", "success")
 		h.auditFromScope(r.Context(), "site.delete", "success", nil)
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -237,7 +237,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		telemetry.FromContext(r.Context()).SetResource(slug, "")
-		h.logAction(r.Context(), "site.purge", "success", slog.String("slug", slug), slog.Int("moved", moved))
+		h.logAction(r.Context(), "site.purge", "success", slog.Int("moved", moved))
 		h.auditFromScope(r.Context(), "site.purge", "success", map[string]any{"moved": moved})
 		if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
 			pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()

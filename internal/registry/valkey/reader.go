@@ -193,7 +193,7 @@ func (r *Reader) invokeOnRefreshError(err error) {
 		if p := recover(); p != nil {
 			slog.Error("valkey registry OnRefreshError callback panicked",
 				"panic", p,
-				"refresh_err", err,
+				"err", err,
 			)
 		}
 	}()
