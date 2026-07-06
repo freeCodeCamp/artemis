@@ -92,7 +92,7 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 		}
 		if _, aliased := aliases[id]; aliased {
 			report.AliasedMissing = append(report.AliasedMissing, id)
-			slog.Error("reconcile.aliased_unindexed", "site", site, "deployId", id,
+			slog.WarnContext(ctx, "reconcile.aliased_unindexed", "site", site, "deploy_id", id,
 				"detail", "alias targets a deploy with no PG row; reindex, never tombstone (V1)")
 			if info.hasMarker {
 				if err := rc.Store.UpsertDeploy(ctx, site, id, info.mtime, 0, true, "active"); err != nil {
@@ -115,7 +115,7 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 			}
 			if _, nowAliased := nowAliases[id]; nowAliased {
 				report.AliasedMissing = append(report.AliasedMissing, id)
-				slog.Error("reconcile.aliased_raced", "site", site, "deployId", id,
+				slog.WarnContext(ctx, "reconcile.aliased_raced", "site", site, "deploy_id", id,
 					"detail", "alias appeared after snapshot read; skip tombstone (V1)")
 				continue
 			}
@@ -135,7 +135,7 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 		}
 		if _, aliased := aliases[id]; aliased {
 			report.AliasedMissing = append(report.AliasedMissing, id)
-			slog.Error("reconcile.aliased_bytes_missing", "site", site, "deployId", id,
+			slog.WarnContext(ctx, "reconcile.aliased_bytes_missing", "site", site, "deploy_id", id,
 				"detail", "alias targets a deploy whose R2 bytes are gone")
 			continue
 		}

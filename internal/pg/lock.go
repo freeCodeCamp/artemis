@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
-	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) error {
@@ -21,8 +20,7 @@ func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) e
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := conn.Close(closeCtx); err != nil {
-			slog.Error("lock.site.close_failed", "site", site, "err", err,
-				"reqID", telemetry.FromContext(ctx).ReqID)
+			slog.WarnContext(ctx, "lock.site.close_failed", "site", site, "err", err)
 		}
 	}()
 
@@ -44,8 +42,7 @@ func (r *Repo) NewLockSession(ctx context.Context) (gc.LockSession, error) {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if cerr := conn.Close(closeCtx); cerr != nil {
-			slog.Error("lock.session.settimeout_close_failed", "err", cerr,
-				"reqID", telemetry.FromContext(ctx).ReqID)
+			slog.WarnContext(ctx, "lock.session.settimeout_close_failed", "err", cerr)
 		}
 		return nil, fmt.Errorf("lock session: set lock_timeout: %w", err)
 	}
@@ -64,8 +61,7 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site string, fn func() e
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if _, err := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, site); err != nil {
-			slog.Error("lock.site.unlock_failed", "site", site, "err", err,
-				"reqID", telemetry.FromContext(ctx).ReqID)
+			slog.WarnContext(ctx, "lock.site.unlock_failed", "site", site, "err", err)
 		}
 	}()
 	return fn()
@@ -75,7 +71,6 @@ func (s *lockSession) Close(ctx context.Context) {
 	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.conn.Close(closeCtx); err != nil {
-		slog.Error("lock.session.close_failed", "err", err,
-			"reqID", telemetry.FromContext(ctx).ReqID)
+		slog.WarnContext(ctx, "lock.session.close_failed", "err", err)
 	}
 }

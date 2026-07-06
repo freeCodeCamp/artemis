@@ -2,6 +2,8 @@ package gc
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +12,45 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type levelCapture struct {
+	mu   sync.Mutex
+	recs []slog.Record
+}
+
+func (h *levelCapture) Enabled(context.Context, slog.Level) bool { return true }
+func (h *levelCapture) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.recs = append(h.recs, r.Clone())
+	return nil
+}
+func (h *levelCapture) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *levelCapture) WithGroup(string) slog.Handler      { return h }
+
+func TestSelfHealing_WarnNotError(t *testing.T) {
+	cap := &levelCapture{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(cap))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	lister := &fakeReconcileLister{keys: []string{}}
+	store := &fakeReconcileStore{
+		deploys: map[string][]Deploy{"www": {{ID: "live", Mtime: ago(time.Hour)}}},
+		aliases: map[string]struct{}{"live": {}},
+	}
+	_, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+
+	var found bool
+	for _, r := range cap.recs {
+		if r.Message == "reconcile.aliased_bytes_missing" {
+			found = true
+			assert.Equal(t, slog.LevelWarn, r.Level, "self-healing success-path branch must not page")
+		}
+	}
+	require.True(t, found, "expected the aliased_bytes_missing self-heal line")
+}
 
 type fakeReconcileStore struct {
 	deploys      map[string][]Deploy
