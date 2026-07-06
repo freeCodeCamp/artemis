@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHealthZ(t *testing.T) {
@@ -34,23 +33,6 @@ func TestReadyZ_FullyHealthy(t *testing.T) {
 	}
 	if resp.Degraded {
 		t.Fatalf("readyz degraded=true with PG up; want non-degraded (valkey+r2+pg all reachable)")
-	}
-}
-
-func TestMetrics(t *testing.T) {
-	e := requireStack(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	status, body, err := e.raw(ctx, http.MethodGet, "/metrics", "", nil)
-	if err != nil {
-		t.Fatalf("metrics: %v", err)
-	}
-	mustStatus(t, status, http.StatusOK, "metrics")
-	if !strings.Contains(string(body), "artemis_") {
-		t.Fatalf("metrics body missing artemis_ prefix: %s", truncate(body, 200))
-	}
-	if !strings.Contains(string(body), "go_") {
-		t.Fatalf("metrics body missing go_ prefix: %s", truncate(body, 200))
 	}
 }
 

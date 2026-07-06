@@ -4,7 +4,6 @@
 //
 //	GET    /healthz                                       — no auth (liveness)
 //	GET    /readyz                                        — no auth (readiness; probes Valkey + R2)
-//	GET    /metrics                                       — no auth (prometheus exposition)
 //	GET    /api/whoami                                    — GitHub bearer
 //	POST   /api/deploy/init                               — GitHub bearer
 //	PUT    /api/deploy/{deployId}/upload                  — Deploy-session JWT
@@ -34,7 +33,6 @@ import (
 	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const apiRequestTimeout = 60 * time.Second
@@ -42,9 +40,7 @@ const apiRequestTimeout = 60 * time.Second
 // New returns a chi router fully wired with the Handlers' endpoints +
 // the standard middleware chain (Sentry → RequestID → AccessLog →
 // Recoverer).
-// metricsGatherer, when non-nil, is mounted at /metrics; pass nil to
-// disable the endpoint (useful for tests that don't care).
-func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler {
+func New(h *handler.Handlers) http.Handler {
 	r := chi.NewRouter()
 	// Mount the Sentry request middleware only when a client is actually
 	// configured (Init ran with a DSN). When Sentry is disabled this adds
@@ -63,9 +59,6 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 	// Public.
 	r.Get("/healthz", h.HealthZ)
 	r.Get("/readyz", h.ReadyZ)
-	if metricsGatherer != nil {
-		r.Method(http.MethodGet, "/metrics", handler.MetricsHandler(metricsGatherer))
-	}
 
 	// /api/* — GitHub bearer required for the human-driven endpoints.
 	r.Route("/api", func(r chi.Router) {

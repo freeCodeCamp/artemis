@@ -20,7 +20,7 @@ type stubHandlers struct {
 }
 
 func TestRouter_HealthzNoAuth(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -31,7 +31,7 @@ func TestRouter_HealthzNoAuth(t *testing.T) {
 }
 
 func TestRouter_WhoamiRequiresBearer(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
 	w := httptest.NewRecorder()
@@ -41,7 +41,7 @@ func TestRouter_WhoamiRequiresBearer(t *testing.T) {
 }
 
 func TestRouter_UploadRequiresJWT(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 
 	req := httptest.NewRequest(http.MethodPut, "/api/deploy/d1/upload?path=index.html", nil)
 	w := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestRouter_UploadRequiresJWT(t *testing.T) {
 }
 
 func TestRouter_UnknownRoute_404(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/nonsense", nil)
 	w := httptest.NewRecorder()
@@ -61,7 +61,7 @@ func TestRouter_UnknownRoute_404(t *testing.T) {
 }
 
 func TestRouter_RequestIDHeaderEcho(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("X-Request-ID", "trace-7")
@@ -120,7 +120,7 @@ func (stubRepoGH) AuthorizeForSite(context.Context, string, string, []string) (b
 func (stubRepoGH) UserTeams(context.Context, string) ([]string, error) { return nil, nil }
 
 func TestRouter_RepoRoutesUnmountedByDefault(t *testing.T) {
-	r := New(&handler.Handlers{}, nil)
+	r := New(&handler.Handlers{})
 	req := httptest.NewRequest(http.MethodPost, "/api/repo", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -133,7 +133,7 @@ func TestRouter_RepoRoutesMountedWhenEnabled(t *testing.T) {
 		GitHubApp: stubRepoCreator{},
 		RepoGH:    stubRepoGH{},
 	}
-	r := New(h, nil)
+	r := New(h)
 	// Route present but unauthenticated → bearer middleware returns 401.
 	req := httptest.NewRequest(http.MethodPost, "/api/repo", nil)
 	w := httptest.NewRecorder()

@@ -45,7 +45,6 @@ const flushTimeout = 2 * time.Second
 var probePaths = map[string]struct{}{
 	"/healthz": {},
 	"/readyz":  {},
-	"/metrics": {},
 }
 
 // secretPatterns redact secret-shaped substrings from any free text bound

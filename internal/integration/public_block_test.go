@@ -16,10 +16,6 @@ import (
 //
 // The Gateway URLRewrite is configured in
 // k3s/gxy-management/apps/artemis/charts/artemis/templates/httproute.yaml.
-// Internal scrape and kubelet readiness still hit /metrics + /readyz
-// directly on Service:port and Pod IP respectively — those bypass the
-// Gateway and are exercised by handler-level unit tests in
-// internal/handler/{metrics_test.go,readyz_test.go}.
 func TestPublicRouteBlock(t *testing.T) {
 	c := loadCfg(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -30,7 +30,7 @@ func TestInit_DisabledWhenNoDSN(t *testing.T) {
 
 func TestProbeSampleRate(t *testing.T) {
 	const base = 0.3
-	for _, name := range []string{"GET /healthz", "GET /readyz", "GET /metrics"} {
+	for _, name := range []string{"GET /healthz", "GET /readyz"} {
 		require.Zero(t, probeSampleRate(name, base), name)
 	}
 	require.InDelta(t, base, probeSampleRate("POST /api/deploy/init", base), 1e-9)

@@ -307,7 +307,7 @@ func run() error {
 	addr := ":" + strconv.Itoa(cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(h, metricsReg),
+		Handler:           server.New(h),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No global ReadTimeout — uploads are streamed and may run long.
 		WriteTimeout: 0,
