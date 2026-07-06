@@ -1,6 +1,10 @@
 package telemetry
 
-import "net/http"
+import (
+	"net/http"
+
+	sentryhttpclient "github.com/getsentry/sentry-go/httpclient"
+)
 
 const RequestIDHeader = "X-Request-Id"
 
@@ -12,7 +16,7 @@ func NewRoundTripper(base http.RoundTripper) *RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return &RoundTripper{base: base}
+	return &RoundTripper{base: sentryhttpclient.NewSentryRoundTripper(base)}
 }
 
 func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {

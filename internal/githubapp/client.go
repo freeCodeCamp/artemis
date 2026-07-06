@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 const (
@@ -115,7 +117,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 15 * time.Second}
+		hc = &http.Client{Timeout: 15 * time.Second, Transport: telemetry.NewRoundTripper(nil)}
 	}
 	now := cfg.Now
 	if now == nil {
