@@ -57,6 +57,7 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 	}
 	r.Use(handler.RequestID)
 	r.Use(handler.AccessLog)
+	r.Use(retagTransaction)
 	r.Use(handler.Recoverer)
 
 	// Public.
@@ -108,4 +109,22 @@ func New(h *handler.Handlers, metricsGatherer prometheus.Gatherer) http.Handler 
 	})
 
 	return r
+}
+
+func retagTransaction(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		tx := sentry.TransactionFromContext(r.Context())
+		if tx == nil {
+			return
+		}
+		rc := chi.RouteContext(r.Context())
+		if rc == nil {
+			return
+		}
+		if pattern := rc.RoutePattern(); pattern != "" {
+			tx.Name = r.Method + " " + pattern
+			tx.Source = sentry.SourceRoute
+		}
+	})
 }
