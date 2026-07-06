@@ -222,8 +222,13 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	dirname := h.DeployPrefix.SiteDirname(slug)
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
 	defer cancel()
+	var (
+		moved   int
+		success bool
+	)
 	lockErr := h.withSiteLock(opCtx, dirname, func() error {
-		moved, err := h.R2.MovePrefix(opCtx, dirname+"/", base+dirname+"/")
+		var err error
+		moved, err = h.R2.MovePrefix(opCtx, dirname+"/", base+dirname+"/")
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 			return nil
@@ -236,18 +241,24 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			writeRegistryDeleteError(w, r, err)
 			return nil
 		}
-		telemetry.FromContext(r.Context()).SetResource(slug, "")
-		h.logAction(r.Context(), "site.purge", "success", slog.Int("moved", moved))
-		h.auditFromScope(r.Context(), "site.purge", "success", map[string]any{"moved": moved})
-		if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
-			pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
+		success = true
 		return nil
 	})
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
+		return
 	}
+	if !success {
+		return
+	}
+
+	telemetry.FromContext(r.Context()).SetResource(slug, "")
+	h.logAction(r.Context(), "site.purge", "success", slog.Int("moved", moved))
+	h.auditFromScope(r.Context(), "site.purge", "success", map[string]any{"moved": moved})
+	if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
+		pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
 }
 
 func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error) {

@@ -32,6 +32,10 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
 	defer cancel()
+	var (
+		moved   int
+		success bool
+	)
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		for _, mode := range []string{"production", "preview"} {
 			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
@@ -53,7 +57,8 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		moved, err := h.R2.MovePrefix(opCtx, h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
+		var err error
+		moved, err = h.R2.MovePrefix(opCtx, h.deployPrefix(site, deployID), h.trashPrefix(site, deployID))
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.tombstone", err)
 			return nil
@@ -63,23 +68,29 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		telemetry.FromContext(r.Context()).SetResource(site, deployID)
-		h.logAction(r.Context(), "site.deploy.delete", "success", slog.Int("moved", moved))
-		h.auditFromScope(r.Context(), "site.deploy.delete", "success", map[string]any{"moved": moved})
-		if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
-			pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"site":     site,
-			"deployId": deployID,
-			"status":   "tombstoned",
-			"moved":    moved,
-		})
+		success = true
 		return nil
 	})
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
+		return
 	}
+	if !success {
+		return
+	}
+
+	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	h.logAction(r.Context(), "site.deploy.delete", "success", slog.Int("moved", moved))
+	h.auditFromScope(r.Context(), "site.deploy.delete", "success", map[string]any{"moved": moved})
+	if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
+		pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"site":     site,
+		"deployId": deployID,
+		"status":   "tombstoned",
+		"moved":    moved,
+	})
 }
 
 func (h *Handlers) trashPrefix(site, id string) string {

@@ -32,6 +32,11 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
 	defer cancel()
+	var (
+		moved     int
+		liveBytes int64
+		outcome   string
+	)
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		if _, err := h.Registry.GetSite(opCtx, site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
@@ -43,13 +48,15 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		}
 
 		dst := h.deployPrefix(site, deployID)
-		moved, err := h.R2.MovePrefix(opCtx, h.trashPrefix(site, deployID), dst)
+		var err error
+		moved, err = h.R2.MovePrefix(opCtx, h.trashPrefix(site, deployID), dst)
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.restore", err)
 			return nil
 		}
 
-		liveBytes, bytesErr := h.R2.PrefixBytes(opCtx, dst)
+		var bytesErr error
+		liveBytes, bytesErr = h.R2.PrefixBytes(opCtx, dst)
 		if bytesErr != nil {
 			slog.WarnContext(r.Context(), "deploy.restore.bytes_unavailable", "site", site, "deploy_id", deployID,
 				"err", bytesErr)
@@ -72,34 +79,37 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusGone, "already_purged", "tombstone is gone; deploy was already hard-purged")
 				return nil
 			}
-			telemetry.FromContext(r.Context()).SetResource(site, deployID)
-			h.logAction(r.Context(), "site.deploy.restore", "idempotent", slog.Int("moved", moved))
-			h.auditFromScope(r.Context(), "site.deploy.restore", "idempotent", map[string]any{"moved": moved})
-			writeJSON(w, http.StatusOK, map[string]any{
-				"site":     site,
-				"deployId": deployID,
-				"status":   "restored",
-				"moved":    moved,
-				"bytes":    liveBytes,
-			})
+			outcome = "idempotent"
 			return nil
 		}
 
-		telemetry.FromContext(r.Context()).SetResource(site, deployID)
-		h.logAction(r.Context(), "site.deploy.restore", "success", slog.Int("moved", moved), slog.Int64("bytes", liveBytes))
-		h.auditFromScope(r.Context(), "site.deploy.restore", "success", map[string]any{"moved": moved, "bytes": liveBytes})
-		writeJSON(w, http.StatusOK, map[string]any{
-			"site":     site,
-			"deployId": deployID,
-			"status":   "restored",
-			"moved":    moved,
-			"bytes":    liveBytes,
-		})
+		outcome = "success"
 		return nil
 	})
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
+		return
 	}
+	if outcome == "" {
+		return
+	}
+
+	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	attrs := []slog.Attr{slog.Int("moved", moved)}
+	detail := map[string]any{"moved": moved}
+	if outcome == "success" {
+		attrs = append(attrs, slog.Int64("bytes", liveBytes))
+		detail["bytes"] = liveBytes
+	}
+	h.logAction(r.Context(), "site.deploy.restore", outcome, attrs...)
+	h.auditFromScope(r.Context(), "site.deploy.restore", outcome, detail)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"site":     site,
+		"deployId": deployID,
+		"status":   "restored",
+		"moved":    moved,
+		"bytes":    liveBytes,
+	})
 }
 
 func (h *Handlers) SiteTrashList(w http.ResponseWriter, r *http.Request) {
