@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 const (
@@ -44,8 +42,7 @@ func retryConnect(ctx context.Context, window, base, max time.Duration, connect 
 		slog.Warn("pg.connect.retrying",
 			"attempt", attempt,
 			"backoff", backoff,
-			"err", err,
-			"reqID", telemetry.FromContext(ctx).ReqID)
+			"err", err)
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
