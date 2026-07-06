@@ -213,7 +213,9 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.deployPrefix(claims.Site, deployID)
-	if err := h.R2.VerifyDeployComplete(r.Context(), prefix, req.Files); err != nil {
+	if err := telemetry.WithSpan(r.Context(), "r2.list.verify", func(ctx context.Context) error {
+		return h.R2.VerifyDeployComplete(ctx, prefix, req.Files)
+	}); err != nil {
 		var verr *r2.VerifyError
 		if errors.As(err, &verr) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
@@ -232,12 +234,19 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	markerKey := prefix + gc.MarkerObjectName
 	meta := fmt.Sprintf(`{"site":%q,"deployId":%q,"mode":%q,"finalizedAt":%q}`,
 		claims.Site, deployID, mode, time.Now().UTC().Format(time.RFC3339))
-	if err := h.R2.PutObject(r.Context(), markerKey, strings.NewReader(meta), "application/json", int64(len(meta))); err != nil {
+	if err := telemetry.WithSpan(r.Context(), "r2.put.marker.finalize", func(ctx context.Context) error {
+		return h.R2.PutObject(ctx, markerKey, strings.NewReader(meta), "application/json", int64(len(meta)))
+	}); err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.marker.finalize", err)
 		return
 	}
 
-	deployBytes, err := h.R2.PrefixBytes(r.Context(), prefix)
+	var deployBytes int64
+	err = telemetry.WithSpan(r.Context(), "r2.list.bytes.finalize", func(ctx context.Context) error {
+		var e error
+		deployBytes, e = h.R2.PrefixBytes(ctx, prefix)
+		return e
+	})
 	if err != nil {
 		slog.Warn("deploy.finalize.bytes_unavailable", "site", claims.Site, "deployId", deployID,
 			"err", err, "reqID", RequestIDFromContext(r.Context()))
@@ -255,12 +264,16 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.finalize", err)
 			return errAliasWriteHandled
 		}
-		if err := h.R2.PutAlias(r.Context(), aliasKey, deployID); err != nil {
+		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.finalize", func(ctx context.Context) error {
+			return h.R2.PutAlias(ctx, aliasKey, deployID)
+		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.FinalizeAtomic(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes); err != nil {
+			if err := telemetry.WithSpan(r.Context(), "pg.finalize.index", func(ctx context.Context) error {
+				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
+			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
 			}
