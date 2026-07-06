@@ -65,6 +65,48 @@ func (f *fakePurgeLocker) WithSiteLock(_ context.Context, site string, fn func()
 	return fn()
 }
 
+type fakePurgeAuditor struct {
+	recorded [][2]string
+	err      error
+}
+
+func (f *fakePurgeAuditor) RecordPurge(_ context.Context, site, deployID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.recorded = append(f.recorded, [2]string{site, deployID})
+	return nil
+}
+
+func TestTombstonePurge_AuditsEachPurged(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d1", TrashedAt: ago(8 * 24 * time.Hour), Bytes: 100},
+		{Site: "learn", ID: "d2", TrashedAt: ago(9 * 24 * time.Hour), Bytes: 200},
+	}}
+	aud := &fakePurgeAuditor{}
+	p := newPurge(reaper, &fakeDeleter{})
+	p.Audit = aud
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+	require.Len(t, res.Purged, 2)
+	require.Len(t, aud.recorded, 2, "one audit row per purged deploy (actor=system:gc)")
+	assert.Contains(t, aud.recorded, [2]string{"www", "d1"})
+	assert.Contains(t, aud.recorded, [2]string{"learn", "d2"})
+}
+
+func TestTombstonePurge_AuditFailureDoesNotAbortPurge(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d1", TrashedAt: ago(8 * 24 * time.Hour), Bytes: 100},
+	}}
+	p := newPurge(reaper, &fakeDeleter{})
+	p.Audit = &fakePurgeAuditor{err: context.DeadlineExceeded}
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err, "a failed audit write must not abort the purge")
+	assert.Len(t, res.Purged, 1)
+}
+
 func TestTombstonePurge(t *testing.T) {
 	reaper := &fakeReaper{tombstones: []Tombstone{
 		{Site: "www", ID: "d-expired", TrashedAt: ago(8 * 24 * time.Hour), Bytes: 100},

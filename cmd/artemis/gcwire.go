@@ -27,6 +27,18 @@ var (
 	_ pg.SitesSource            = (*valkey.Store)(nil)
 )
 
+type gcPurgeAuditor struct{ repo *pg.Repo }
+
+func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site, deployID string) error {
+	return a.repo.RecordAudit(ctx, pg.AuditEvent{
+		Actor:    "system:gc",
+		Action:   "gc.purge",
+		Site:     site,
+		DeployID: deployID,
+		Outcome:  "success",
+	})
+}
+
 func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {
 	if pgDB == nil {
 		return nil, fmt.Errorf("repo-creation feature requires DATABASE_URL")
@@ -155,6 +167,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 			Now:       time.Now,
 			Metrics:   metrics,
 			Locker:    repo,
+			Audit:     gcPurgeAuditor{repo: repo},
 		},
 	}, nil
 }

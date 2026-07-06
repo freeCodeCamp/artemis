@@ -27,6 +27,10 @@ type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site string, fn func() error) error
 }
 
+type PurgeAuditor interface {
+	RecordPurge(ctx context.Context, site, deployID string) error
+}
+
 type TombstonePurge struct {
 	Store     TombstoneReaper
 	Deleter   Deleter
@@ -35,6 +39,7 @@ type TombstonePurge struct {
 	Now       func() time.Time
 	Metrics   *Metrics
 	Locker    SiteLocker
+	Audit     PurgeAuditor
 }
 
 func (p *TombstonePurge) withLock(ctx context.Context, site string, fn func() error) error {
@@ -88,6 +93,11 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 		}
 		res.Purged = append(res.Purged, label)
 		res.BytesReclaimed += t.Bytes
+		if p.Audit != nil {
+			if err := p.Audit.RecordPurge(ctx, t.Site, t.ID); err != nil {
+				slog.Error("gc.tombstone-purge.audit_failed", "site", t.Site, "deployId", t.ID, "err", err)
+			}
+		}
 	}
 
 	if !dryRun {
