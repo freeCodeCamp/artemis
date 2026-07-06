@@ -16,6 +16,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -145,6 +146,20 @@ func (f *capturingPublisher) Publish(_ context.Context, topic string, payload []
 }
 
 func noSites() []string { return nil }
+
+func TestBackgroundDurationHistograms(t *testing.T) {
+	m := worker.NewMetrics(prometheus.NewRegistry())
+
+	wrapped := observeWorkflow(m, worker.WorkflowGCSite, func(context.Context, map[string]any) error { return nil })
+	require.NoError(t, wrapped(context.Background(), nil))
+	assert.Equal(t, 1, testutil.CollectAndCount(m.WorkflowDuration),
+		"a workflow run observes a duration sample")
+
+	m.ObserveRelayDuration(0.05)
+	var mt dto.Metric
+	require.NoError(t, m.RelayDuration.Write(&mt))
+	assert.Equal(t, uint64(1), mt.Histogram.GetSampleCount(), "relay RunOnce observes a duration sample")
+}
 
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}

@@ -68,8 +68,10 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 			return
 		case <-ticker.C:
 			rctx := telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
+			start := time.Now()
 			n, err := relay.RunOnce(rctx)
 			metrics.ObserveRelay(n, err)
+			metrics.ObserveRelayDuration(time.Since(start).Seconds())
 			if err != nil {
 				slog.ErrorContext(rctx, "relay.run", "err", err)
 				observability.CaptureBackground("relay.run", err)
@@ -82,7 +84,9 @@ func observeWorkflow(metrics *worker.Metrics, name string, fn worker.Handler) wo
 	return func(ctx context.Context, input map[string]any) error {
 		ctx = telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
 		slog.InfoContext(ctx, "workflow.start", "workflow", name)
+		start := time.Now()
 		err := fn(ctx, input)
+		metrics.ObserveDuration(name, time.Since(start).Seconds())
 		outcome := "ok"
 		if err != nil {
 			outcome = "failed"
