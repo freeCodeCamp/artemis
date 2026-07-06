@@ -20,25 +20,29 @@ type fakeOutbox struct {
 	marked []int64
 }
 
-func (f *fakeOutbox) FetchUnpublished(_ context.Context, limit int) ([]pg.OutboxEvent, error) {
+func (f *fakeOutbox) RelayBatch(_ context.Context, limit int, publish func(pg.OutboxEvent) error, _ time.Time) (int, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]pg.OutboxEvent, 0, len(f.events))
-	for _, e := range f.events {
-		if len(out) >= limit {
-			break
-		}
-		out = append(out, e)
+	batch := f.events
+	if len(batch) > limit {
+		batch = batch[:limit]
 	}
-	return out, nil
-}
+	f.mu.Unlock()
 
-func (f *fakeOutbox) MarkPublished(_ context.Context, ids []int64, _ time.Time) error {
+	done := 0
+	for _, e := range batch {
+		if err := publish(e); err != nil {
+			return done, err
+		}
+		done++
+	}
+
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.marked = append(f.marked, ids...)
+	for _, e := range batch {
+		f.marked = append(f.marked, e.ID)
+	}
 	f.events = nil
-	return nil
+	f.mu.Unlock()
+	return done, nil
 }
 
 type fakePublisher struct {
@@ -86,11 +90,9 @@ func TestRelayLoop(t *testing.T) {
 
 type erroringOutbox struct{}
 
-func (erroringOutbox) FetchUnpublished(context.Context, int) ([]pg.OutboxEvent, error) {
-	return nil, errors.New("db down")
+func (erroringOutbox) RelayBatch(context.Context, int, func(pg.OutboxEvent) error, time.Time) (int, error) {
+	return 0, errors.New("db down")
 }
-
-func (erroringOutbox) MarkPublished(context.Context, []int64, time.Time) error { return nil }
 
 func TestRelayLoop_FailedTickBumpsFailures(t *testing.T) {
 	relay := &worker.Relay{Source: erroringOutbox{}, Publisher: &fakePublisher{}, Batch: 10, Now: time.Now}
