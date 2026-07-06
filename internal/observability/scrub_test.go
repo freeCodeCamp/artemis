@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"testing"
@@ -11,17 +13,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRedactSecrets(t *testing.T) {
+func TestScrubText(t *testing.T) {
 	for _, in := range []string{
 		"Bearer ghp_abc123DEF",
 		"token=supersecret",
 		"password: hunter2",
 		"-----BEGIN RSA PRIVATE KEY-----x\n-----END RSA PRIVATE KEY-----",
 	} {
-		require.Contains(t, redactSecrets(in), "[REDACTED]", in)
+		require.Contains(t, ScrubText(in), "[REDACTED]", in)
 	}
-	require.Equal(t, "", redactSecrets(""), "empty stays empty")
-	require.Equal(t, "nothing secret here", redactSecrets("nothing secret here"))
+	require.Equal(t, "", ScrubText(""), "empty stays empty")
+	require.Equal(t, "nothing secret here", ScrubText("nothing secret here"))
+}
+
+func TestScrubbingHandler_RedactsStdoutLog(t *testing.T) {
+	var buf bytes.Buffer
+	h := NewScrubbingHandler(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(h)
+
+	logger.Info("auth Bearer ghp_leak123 done",
+		"op", "r2.put",
+		"authorization", "Bearer ghp_x",
+		"err", "valkey password=secret123",
+	)
+
+	out := buf.String()
+	require.Contains(t, out, "[REDACTED]")
+	require.NotContains(t, out, "ghp_leak123", "secret in message redacted")
+	require.NotContains(t, out, "ghp_x", "secret in dropped attr must not survive")
+	require.NotContains(t, out, "secret123", "secret in string value redacted")
+	require.NotContains(t, out, "authorization", "sensitive-keyed attr dropped from stdout")
+	require.Contains(t, out, "r2.put", "benign attr kept")
+}
+
+func TestScrubbingHandler_ScrubsGroupedAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	h := NewScrubbingHandler(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(h)
+
+	logger.Info("grouped",
+		slog.Group("upstream",
+			slog.String("token", "ghp_grouped"),
+			slog.String("op", "github.probe"),
+		),
+	)
+
+	out := buf.String()
+	require.NotContains(t, out, "ghp_grouped", "secret-keyed attr inside a group is dropped")
+	require.Contains(t, out, "github.probe", "benign grouped attr kept")
 }
 
 func TestIsSensitiveKey(t *testing.T) {

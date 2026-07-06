@@ -127,9 +127,9 @@ func probeSampleRate(spanName string, base float64) float64 {
 	return base
 }
 
-// redactSecrets replaces secret-shaped substrings with a marker. Safe on
+// ScrubText replaces secret-shaped substrings with a marker. Safe on
 // the empty string.
-func redactSecrets(s string) string {
+func ScrubText(s string) string {
 	if s == "" {
 		return s
 	}
@@ -164,9 +164,9 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	if event == nil {
 		return event
 	}
-	event.Message = redactSecrets(event.Message)
+	event.Message = ScrubText(event.Message)
 	for i := range event.Exception {
-		event.Exception[i].Value = redactSecrets(event.Exception[i].Value)
+		event.Exception[i].Value = ScrubText(event.Exception[i].Value)
 	}
 	event.Breadcrumbs = nil
 	if event.Request == nil {
@@ -192,17 +192,70 @@ func scrubLog(log *sentry.Log) *sentry.Log {
 	if log == nil {
 		return log
 	}
-	log.Body = redactSecrets(log.Body)
+	log.Body = ScrubText(log.Body)
 	for k, v := range log.Attributes {
 		if isSensitiveKey(k) {
 			delete(log.Attributes, k)
 			continue
 		}
 		if v.Type() == attribute.STRING {
-			log.Attributes[k] = attribute.StringValue(redactSecrets(v.AsString()))
+			log.Attributes[k] = attribute.StringValue(ScrubText(v.AsString()))
 		}
 	}
 	return log
+}
+
+func ScrubAttrs(attrs []slog.Attr) []slog.Attr {
+	out := make([]slog.Attr, 0, len(attrs))
+	for _, a := range attrs {
+		if sa, ok := scrubAttr(a); ok {
+			out = append(out, sa)
+		}
+	}
+	return out
+}
+
+func scrubAttr(a slog.Attr) (slog.Attr, bool) {
+	if isSensitiveKey(a.Key) {
+		return slog.Attr{}, false
+	}
+	switch a.Value.Kind() {
+	case slog.KindString:
+		return slog.String(a.Key, ScrubText(a.Value.String())), true
+	case slog.KindGroup:
+		return slog.Attr{Key: a.Key, Value: slog.GroupValue(ScrubAttrs(a.Value.Group())...)}, true
+	default:
+		return a, true
+	}
+}
+
+func NewScrubbingHandler(inner slog.Handler) slog.Handler {
+	return scrubbingHandler{inner: inner}
+}
+
+type scrubbingHandler struct{ inner slog.Handler }
+
+func (h scrubbingHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.inner.Enabled(ctx, l)
+}
+
+func (h scrubbingHandler) Handle(ctx context.Context, r slog.Record) error {
+	nr := slog.NewRecord(r.Time, r.Level, ScrubText(r.Message), r.PC)
+	attrs := make([]slog.Attr, 0, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		attrs = append(attrs, a)
+		return true
+	})
+	nr.AddAttrs(ScrubAttrs(attrs)...)
+	return h.inner.Handle(ctx, nr)
+}
+
+func (h scrubbingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return scrubbingHandler{inner: h.inner.WithAttrs(ScrubAttrs(attrs))}
+}
+
+func (h scrubbingHandler) WithGroup(name string) slog.Handler {
+	return scrubbingHandler{inner: h.inner.WithGroup(name)}
 }
 
 // NewSlogHandler returns a slog.Handler that forwards records to Sentry
