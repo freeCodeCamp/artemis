@@ -32,6 +32,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"github.com/freeCodeCamp/artemis/internal/server"
 	"github.com/freeCodeCamp/artemis/internal/teamcache"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -443,5 +444,5 @@ func configureLogger(lvl slog.Level, extra slog.Handler) {
 	if extra != nil {
 		h = observability.NewMultiHandler(h, extra)
 	}
-	slog.SetDefault(slog.New(h))
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(h)))
 }

@@ -40,7 +40,7 @@ func TestDeployInit_LogsActionWithActor(t *testing.T) {
 	require.True(t, ok, "deploy.init success line emitted")
 	assert.Equal(t, "alice", done["actor"])
 	assert.Equal(t, "www", done["site"])
-	assert.NotEmpty(t, done["deployId"], "success line carries the minted deployId")
+	assert.NotEmpty(t, done["deploy_id"], "success line carries the minted deployId")
 }
 
 func TestDeployInit_LogsDeniedWithActor(t *testing.T) {
@@ -88,7 +88,7 @@ func TestDeployUpload_LogsSuccessWithActor(t *testing.T) {
 	require.True(t, ok, "deploy.upload success line emitted")
 	assert.Equal(t, "alice", m["actor"])
 	assert.Equal(t, "www", m["site"])
-	assert.Equal(t, deployID, m["deployId"])
+	assert.Equal(t, deployID, m["deploy_id"])
 }
 
 func TestDeployFinalize_LogsSuccessWithActorAndBytes(t *testing.T) {
@@ -117,6 +117,6 @@ func TestDeployFinalize_LogsSuccessWithActorAndBytes(t *testing.T) {
 	m, ok := cap.findAction("deploy.finalize", "success")
 	require.True(t, ok, "deploy.finalize success line emitted")
 	assert.Equal(t, "alice", m["actor"])
-	assert.Equal(t, deployID, m["deployId"])
+	assert.Equal(t, deployID, m["deploy_id"])
 	assert.NotEqual(t, "0", m["bytes"], "deployBytes carried on the success line")
 }

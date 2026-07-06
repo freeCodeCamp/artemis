@@ -90,12 +90,12 @@ func TestLogAttrs_OrderAndOmitEmpty(t *testing.T) {
 	for i, a := range attrs {
 		keys[i] = a.Key
 	}
-	assert.Equal(t, []string{"reqID", "actor", "action", "site", "deployId", "outcome", "route"}, keys)
+	assert.Equal(t, []string{"request_id", "actor", "action", "site", "deploy_id", "outcome", "route"}, keys)
 
 	empty := telemetry.New("req-5")
 	got := empty.LogAttrs()
 	require.Len(t, got, 1)
-	assert.Equal(t, "reqID", got[0].Key)
+	assert.Equal(t, "request_id", got[0].Key)
 	assert.Equal(t, slog.KindString, got[0].Value.Kind())
 	assert.Equal(t, "req-5", got[0].Value.String())
 }

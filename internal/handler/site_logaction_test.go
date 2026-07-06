@@ -34,7 +34,7 @@ func TestSitePromote_LogsActionWithActor(t *testing.T) {
 	require.True(t, ok, "site.promote success line emitted")
 	assert.Equal(t, "alice", m["actor"])
 	assert.Equal(t, "www", m["site"])
-	assert.Equal(t, "20260420-141522-abc1234", m["deployId"])
+	assert.Equal(t, "20260420-141522-abc1234", m["deploy_id"])
 	assert.Equal(t, "success", m["outcome"])
 }
 

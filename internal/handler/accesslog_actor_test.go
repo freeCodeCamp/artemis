@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,7 +75,7 @@ func captureAccessLog(t *testing.T) *capturingHandler {
 	t.Helper()
 	cap := &capturingHandler{}
 	old := slog.Default()
-	slog.SetDefault(slog.New(cap))
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(cap)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 	return cap
 }

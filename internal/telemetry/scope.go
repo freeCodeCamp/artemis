@@ -84,12 +84,12 @@ func (s *Scope) LogAttrs() []slog.Attr {
 	defer s.mu.Unlock()
 
 	attrs := make([]slog.Attr, 0, 7)
-	attrs = append(attrs, slog.String("reqID", s.ReqID))
 	for _, kv := range []struct{ k, v string }{
+		{"request_id", s.ReqID},
 		{"actor", s.actor},
 		{"action", s.action},
 		{"site", s.site},
-		{"deployId", s.deployID},
+		{"deploy_id", s.deployID},
 		{"outcome", s.outcome},
 		{"route", s.route},
 	} {

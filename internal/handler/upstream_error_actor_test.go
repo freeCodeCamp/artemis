@@ -29,6 +29,6 @@ func TestWriteUpstreamError_LogsActorSiteDeploy(t *testing.T) {
 	require.True(t, ok, "upstream error log line captured")
 	assert.Equal(t, "alice", m["actor"])
 	assert.Equal(t, "www", m["site"])
-	assert.Equal(t, "d-9", m["deployId"])
-	assert.Equal(t, "req-x", m["reqID"])
+	assert.Equal(t, "d-9", m["deploy_id"])
+	assert.Equal(t, "req-x", m["request_id"])
 }

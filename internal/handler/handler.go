@@ -226,7 +226,7 @@ func (h *Handlers) logAction(ctx context.Context, action, outcome string, attrs 
 	if pkgMetrics != nil && pkgMetrics.ActionTotal != nil {
 		pkgMetrics.ActionTotal.WithLabelValues(action, outcome).Inc()
 	}
-	slog.LogAttrs(ctx, slog.LevelInfo, action, append(sc.LogAttrs(), attrs...)...)
+	slog.LogAttrs(ctx, slog.LevelInfo, action, attrs...)
 }
 
 func writeGitHubProbeError(w http.ResponseWriter, err error) {
@@ -264,15 +264,10 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // a short filterable label for the failing operation (e.g.,
 // "r2.put.alias", "valkey.register").
 func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code, op string, err error) {
-	sc := telemetry.FromContext(r.Context())
-	slog.Error("upstream error",
+	slog.ErrorContext(r.Context(), "upstream error",
 		"op", op,
 		"err", err,
-		"reqID", sc.ReqID,
 		"path", r.URL.Path,
-		"actor", sc.Actor(),
-		"site", sc.Site(),
-		"deployId", sc.DeployID(),
 	)
 	reportUpstream(r, code, op, err)
 	writeError(w, status, code, "upstream call failed")
@@ -301,9 +296,8 @@ func reportUpstream(r *http.Request, code, op string, err error) {
 
 func writeLockError(w http.ResponseWriter, r *http.Request, err error) {
 	if pg.IsLockTimeout(err) {
-		slog.Warn("site lock contended",
+		slog.WarnContext(r.Context(), "site lock contended",
 			"op", "pg.lock.site",
-			"reqID", RequestIDFromContext(r.Context()),
 			"path", r.URL.Path,
 		)
 		if pkgMetrics != nil {
