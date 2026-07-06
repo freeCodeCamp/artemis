@@ -2,6 +2,8 @@ package observability
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -13,6 +15,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestScrubbingHandler_RedactsErrorValue(t *testing.T) {
+	var buf bytes.Buffer
+	h := NewScrubbingHandler(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(h)
+
+	logger.Error("op failed",
+		"err", errors.New("dial failed password=hunter2SECRET Bearer ghp_realErrToken"),
+		"wrapped", fmt.Errorf("outer: %w", errors.New("token=innerSECRETval")),
+	)
+
+	out := buf.String()
+	require.NotContains(t, out, "hunter2SECRET", "secret in a real error value must be redacted")
+	require.NotContains(t, out, "ghp_realErrToken", "bearer token in a real error value must be redacted")
+	require.NotContains(t, out, "innerSECRETval", "secret in a wrapped error must be redacted")
+	require.Contains(t, out, "[REDACTED]")
+}
 
 func TestScrubText(t *testing.T) {
 	for _, in := range []string{

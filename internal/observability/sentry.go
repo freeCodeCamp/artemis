@@ -23,6 +23,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
@@ -299,13 +300,26 @@ func scrubAttr(a slog.Attr) (slog.Attr, bool) {
 	if isSensitiveKey(a.Key) {
 		return slog.Attr{}, false
 	}
-	switch a.Value.Kind() {
+	v := a.Value
+	if v.Kind() == slog.KindLogValuer {
+		v = v.Resolve()
+	}
+	switch v.Kind() {
 	case slog.KindString:
-		return slog.String(a.Key, ScrubText(a.Value.String())), true
+		return slog.String(a.Key, ScrubText(v.String())), true
 	case slog.KindGroup:
-		return slog.Attr{Key: a.Key, Value: slog.GroupValue(ScrubAttrs(a.Value.Group())...)}, true
+		return slog.Attr{Key: a.Key, Value: slog.GroupValue(ScrubAttrs(v.Group())...)}, true
+	case slog.KindAny:
+		switch t := v.Any().(type) {
+		case error:
+			return slog.String(a.Key, ScrubText(t.Error())), true
+		case fmt.Stringer:
+			return slog.String(a.Key, ScrubText(t.String())), true
+		default:
+			return slog.Attr{Key: a.Key, Value: v}, true
+		}
 	default:
-		return a, true
+		return slog.Attr{Key: a.Key, Value: v}, true
 	}
 }
 
