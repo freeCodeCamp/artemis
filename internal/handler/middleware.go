@@ -14,6 +14,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Per-key unexported struct{} types are the idiomatic Go pattern for
@@ -237,7 +238,7 @@ func AccessLog(next http.Handler) http.Handler {
 				pkgMetrics.HTTPRequestsTotal.WithLabelValues(route, r.Method, class).Inc()
 			}
 			if pkgMetrics.HTTPRequestDuration != nil {
-				pkgMetrics.HTTPRequestDuration.WithLabelValues(route, r.Method, class).Observe(time.Since(start).Seconds())
+				observeWithTrace(pkgMetrics.HTTPRequestDuration.WithLabelValues(route, r.Method, class), time.Since(start).Seconds(), r.Context())
 			}
 		}
 		args := []any{
@@ -251,6 +252,23 @@ func AccessLog(next http.Handler) http.Handler {
 		}
 		slog.InfoContext(r.Context(), "http", args...)
 	})
+}
+
+func traceID(ctx context.Context) string {
+	if span := sentry.SpanFromContext(ctx); span != nil && span.TraceID != (sentry.TraceID{}) {
+		return span.TraceID.String()
+	}
+	return ""
+}
+
+func observeWithTrace(obs prometheus.Observer, seconds float64, ctx context.Context) {
+	if ex, ok := obs.(prometheus.ExemplarObserver); ok {
+		if tid := traceID(ctx); tid != "" {
+			ex.ObserveWithExemplar(seconds, prometheus.Labels{"trace_id": tid})
+			return
+		}
+	}
+	obs.Observe(seconds)
 }
 
 type statusWriter struct {

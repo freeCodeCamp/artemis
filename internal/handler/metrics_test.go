@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +50,36 @@ func TestWriteUpstreamError_IncrementsUpstreamErrorsCounter(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code)
 	got := testutil.ToFloat64(m.UpstreamErrors.WithLabelValues("r2.put.alias.finalize"))
 	assert.Equal(t, float64(1), got)
+}
+
+func TestHTTPDuration_Exemplar(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+	resetMetricsForTest()
+	t.Cleanup(resetMetricsForTest)
+	SetMetrics(m)
+
+	span := sentry.StartSpan(context.Background(), "tx")
+	final := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	r := httptest.NewRequestWithContext(span.Context(), http.MethodGet, "/api/whoami", nil)
+	AccessLog(final).ServeHTTP(httptest.NewRecorder(), r)
+
+	obs := m.HTTPRequestDuration.WithLabelValues("unmatched", http.MethodGet, "2xx")
+	var mt dto.Metric
+	require.NoError(t, obs.(prometheus.Metric).Write(&mt))
+
+	var got string
+	for _, b := range mt.Histogram.Bucket {
+		if b.Exemplar == nil {
+			continue
+		}
+		for _, l := range b.Exemplar.Label {
+			if l.GetName() == "trace_id" {
+				got = l.GetValue()
+			}
+		}
+	}
+	assert.Equal(t, span.TraceID.String(), got, "http duration exemplar carries the request trace_id")
 }
 
 func TestAccessLog_SkipsHealthzReadyzMetrics(t *testing.T) {
