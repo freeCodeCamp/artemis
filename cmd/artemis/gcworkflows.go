@@ -13,7 +13,37 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
+	"github.com/getsentry/sentry-go"
 )
+
+var captureCheckIn = sentry.CaptureCheckIn
+
+func withCheckIn(slug, cron string, fn worker.Handler) worker.Handler {
+	return func(ctx context.Context, input map[string]any) error {
+		cfg := &sentry.MonitorConfig{Schedule: sentry.CrontabSchedule(cron)}
+		id := captureCheckIn(&sentry.CheckIn{
+			MonitorSlug: slug,
+			Status:      sentry.CheckInStatusInProgress,
+		}, cfg)
+		start := time.Now()
+		err := fn(ctx, input)
+		status := sentry.CheckInStatusOK
+		if err != nil {
+			status = sentry.CheckInStatusError
+		}
+		var cid sentry.EventID
+		if id != nil {
+			cid = *id
+		}
+		captureCheckIn(&sentry.CheckIn{
+			ID:          cid,
+			MonitorSlug: slug,
+			Status:      status,
+			Duration:    time.Since(start),
+		}, cfg)
+		return err
+	}
+}
 
 func newRunID() string {
 	var b [12]byte
@@ -70,7 +100,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 		{
 			Name: workflowReconcileScheduler,
 			Cron: []string{cronReconcile},
-			Handler: observeWorkflow(metrics, workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
+			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(metrics, workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
 				var firstErr error
 				for _, site := range reconcileSites() {
 					payload, err := json.Marshal(map[string]string{"site": site})
@@ -88,7 +118,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 					}
 				}
 				return firstErr
-			}),
+			})),
 		},
 		{
 			Name:           worker.WorkflowGCSite,
@@ -109,13 +139,13 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 		{
 			Name: worker.WorkflowTombstonePurge,
 			Cron: []string{cronTombstonePurge},
-			Handler: observeWorkflow(metrics, worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
+			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(metrics, worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
 				if _, err := gcw.Purge.Run(ctx, dryRun); err != nil {
 					observability.CaptureBackground("tombstone.purge", err)
 					return err
 				}
 				return nil
-			}),
+			})),
 		},
 		{
 			Name:           worker.WorkflowReconcile,

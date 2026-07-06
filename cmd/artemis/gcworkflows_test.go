@@ -2,20 +2,85 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
+	"github.com/getsentry/sentry-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeReaper struct{}
+
+func (fakeReaper) ExpiredTombstones(context.Context, time.Time) ([]gc.Tombstone, error) {
+	return nil, nil
+}
+func (fakeReaper) ClearTombstone(context.Context, string, string) error { return nil }
+
+func TestCronCheckIn_ReconcileAndPurge(t *testing.T) {
+	type ci struct {
+		slug   string
+		sched  string
+		status sentry.CheckInStatus
+	}
+	var got []ci
+	orig := captureCheckIn
+	captureCheckIn = func(c *sentry.CheckIn, cfg *sentry.MonitorConfig) *sentry.EventID {
+		b, _ := json.Marshal(cfg.Schedule)
+		var s struct {
+			Value string `json:"value"`
+		}
+		_ = json.Unmarshal(b, &s)
+		got = append(got, ci{c.MonitorSlug, s.Value, c.Status})
+		id := sentry.EventID("stub")
+		return &id
+	}
+	t.Cleanup(func() { captureCheckIn = orig })
+
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{Store: fakeReaper{}, Now: time.Now}, Reconciler: &gc.Reconciler{}}
+	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
+	byName := map[string]worker.WorkflowDef{}
+	for _, d := range defs {
+		byName[d.Name] = d
+	}
+
+	require.NoError(t, byName[workflowReconcileScheduler].Handler(context.Background(), nil))
+	require.NoError(t, byName[worker.WorkflowTombstonePurge].Handler(context.Background(), nil))
+
+	require.Len(t, got, 4, "two check-ins (in_progress+ok) per cron workflow")
+	assert.Equal(t, ci{workflowReconcileScheduler, cronReconcile, sentry.CheckInStatusInProgress}, got[0])
+	assert.Equal(t, workflowReconcileScheduler, got[1].slug)
+	assert.Equal(t, sentry.CheckInStatusOK, got[1].status)
+	assert.Equal(t, ci{worker.WorkflowTombstonePurge, cronTombstonePurge, sentry.CheckInStatusInProgress}, got[2])
+	assert.Equal(t, worker.WorkflowTombstonePurge, got[3].slug)
+	assert.Equal(t, sentry.CheckInStatusOK, got[3].status)
+}
+
+func TestWithCheckIn_ErrorStatus(t *testing.T) {
+	var statuses []sentry.CheckInStatus
+	orig := captureCheckIn
+	captureCheckIn = func(c *sentry.CheckIn, _ *sentry.MonitorConfig) *sentry.EventID {
+		statuses = append(statuses, c.Status)
+		return nil
+	}
+	t.Cleanup(func() { captureCheckIn = orig })
+
+	wrapped := withCheckIn("slug", "0 4 * * *", func(context.Context, map[string]any) error {
+		return errors.New("boom")
+	})
+	require.Error(t, wrapped(context.Background(), nil))
+	assert.Equal(t, []sentry.CheckInStatus{sentry.CheckInStatusInProgress, sentry.CheckInStatusError}, statuses)
+}
 
 type capturingHandler struct {
 	mu      sync.Mutex
