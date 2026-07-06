@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -98,6 +99,9 @@ func (h *Handlers) RequireGitHubBearer(next http.Handler) http.Handler {
 			return
 		}
 		login, err := h.GH.ValidateToken(r.Context(), token)
+		if err == nil {
+			telemetry.FromContext(r.Context()).SetActor(login)
+		}
 		if err != nil {
 			switch {
 			case auth.IsGitHubRateLimited(err):
@@ -151,6 +155,7 @@ func (h *Handlers) RequireDeployJWT(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
 			return
 		}
+		telemetry.FromContext(r.Context()).SetActor(claims.Subject)
 		ctx := context.WithValue(r.Context(), ctxKeyJWT, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -168,6 +173,7 @@ func RequestID(next http.Handler) http.Handler {
 		}
 		w.Header().Set("X-Request-ID", id)
 		ctx := context.WithValue(r.Context(), ctxKeyReqID, id)
+		ctx = telemetry.NewContext(ctx, telemetry.New(id))
 		// Tag the per-request Sentry hub so every event/transaction is
 		// filterable by request id — the join key across Sentry, the
 		// stdout logs, and the X-Request-ID response header.
@@ -220,13 +226,15 @@ func AccessLog(next http.Handler) http.Handler {
 		if _, skip := accessLogSkipPaths[r.URL.Path]; skip {
 			return
 		}
+		sc := telemetry.FromContext(r.Context())
 		args := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.code,
 			"durMS", time.Since(start).Milliseconds(),
-			"reqID", RequestIDFromContext(r.Context()),
-			"login", LoginFromContext(r.Context()),
+			"reqID", sc.ReqID,
+			"login", sc.Actor(),
+			"actor", sc.Actor(),
 		}
 		if sw.code >= 400 && sw.errCode != "" {
 			args = append(args, "errCode", sw.errCode)
