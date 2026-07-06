@@ -15,6 +15,7 @@ import (
 type fakeSource struct {
 	events    []pg.OutboxEvent
 	published map[int64]bool
+	failMark  bool
 }
 
 func newFakeSource(topics ...string) *fakeSource {
@@ -25,24 +26,28 @@ func newFakeSource(topics ...string) *fakeSource {
 	return s
 }
 
-func (s *fakeSource) FetchUnpublished(_ context.Context, limit int) ([]pg.OutboxEvent, error) {
-	var out []pg.OutboxEvent
+func (s *fakeSource) RelayBatch(_ context.Context, limit int, publish func(pg.OutboxEvent) error, _ time.Time) (int, error) {
+	var batch []pg.OutboxEvent
 	for _, e := range s.events {
 		if !s.published[e.ID] {
-			out = append(out, e)
+			batch = append(batch, e)
 		}
-		if len(out) >= limit {
+		if len(batch) >= limit {
 			break
 		}
 	}
-	return out, nil
-}
-
-func (s *fakeSource) MarkPublished(_ context.Context, ids []int64, _ time.Time) error {
-	for _, id := range ids {
-		s.published[id] = true
+	done := 0
+	for _, e := range batch {
+		if err := publish(e); err != nil {
+			return done, err
+		}
+		if s.failMark {
+			return done, errors.New("db down")
+		}
+		s.published[e.ID] = true
+		done++
 	}
-	return nil
+	return done, nil
 }
 
 type fakePublisher struct {
@@ -91,7 +96,8 @@ func TestOutboxRelay_StopsAtFailurePreservingOrder(t *testing.T) {
 }
 
 func TestOutboxRelay_AtLeastOnceOnMarkFailure(t *testing.T) {
-	src := &markFailSource{fakeSource: newFakeSource("a"), failMark: true}
+	src := newFakeSource("a")
+	src.failMark = true
 	pub := &fakePublisher{}
 	relay := &Relay{Source: src, Publisher: pub}
 
@@ -103,16 +109,4 @@ func TestOutboxRelay_AtLeastOnceOnMarkFailure(t *testing.T) {
 	_, err = relay.RunOnce(context.Background())
 	require.NoError(t, err)
 	assert.Len(t, pub.got, 2, "unmarked event re-published (at-least-once; consumer must be idempotent, E1)")
-}
-
-type markFailSource struct {
-	*fakeSource
-	failMark bool
-}
-
-func (s *markFailSource) MarkPublished(ctx context.Context, ids []int64, at time.Time) error {
-	if s.failMark {
-		return errors.New("db down")
-	}
-	return s.fakeSource.MarkPublished(ctx, ids, at)
 }

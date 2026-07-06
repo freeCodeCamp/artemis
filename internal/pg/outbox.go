@@ -60,6 +60,56 @@ func (r *Repo) FetchUnpublished(ctx context.Context, limit int) ([]OutboxEvent, 
 	return out, rows.Err()
 }
 
+func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEvent) error, at time.Time) (int, error) {
+	var published int
+	var pubErr error
+	txErr := r.WithTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx,
+			`SELECT id, topic, payload FROM outbox
+			 WHERE published_at IS NULL
+			 ORDER BY id
+			 LIMIT $1
+			 FOR UPDATE SKIP LOCKED`, limit)
+		if err != nil {
+			return fmt.Errorf("pg outbox claim: %w", err)
+		}
+		var events []OutboxEvent
+		for rows.Next() {
+			var e OutboxEvent
+			if err := rows.Scan(&e.ID, &e.Topic, &e.Payload); err != nil {
+				rows.Close()
+				return fmt.Errorf("pg outbox claim scan: %w", err)
+			}
+			events = append(events, e)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("pg outbox claim rows: %w", err)
+		}
+
+		var doneIDs []int64
+		for _, e := range events {
+			if err := publish(e); err != nil {
+				pubErr = fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
+				break
+			}
+			doneIDs = append(doneIDs, e.ID)
+		}
+		if len(doneIDs) > 0 {
+			if _, err := tx.Exec(ctx,
+				`UPDATE outbox SET published_at = $1 WHERE id = ANY($2)`, at, doneIDs); err != nil {
+				return fmt.Errorf("pg outbox mark: %w", err)
+			}
+		}
+		published = len(doneIDs)
+		return nil
+	})
+	if txErr != nil {
+		return 0, txErr
+	}
+	return published, pubErr
+}
+
 func (r *Repo) MarkPublished(ctx context.Context, ids []int64, at time.Time) error {
 	if len(ids) == 0 {
 		return nil

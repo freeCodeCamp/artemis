@@ -2,16 +2,13 @@ package worker
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
 )
 
 type OutboxSource interface {
-	FetchUnpublished(ctx context.Context, limit int) ([]pg.OutboxEvent, error)
-	MarkPublished(ctx context.Context, ids []int64, at time.Time) error
+	RelayBatch(ctx context.Context, limit int, publish func(pg.OutboxEvent) error, at time.Time) (int, error)
 }
 
 type Publisher interface {
@@ -30,35 +27,11 @@ func (r *Relay) RunOnce(ctx context.Context) (int, error) {
 	if batch <= 0 {
 		batch = 100
 	}
-	events, err := r.Source.FetchUnpublished(ctx, batch)
-	if err != nil {
-		return 0, fmt.Errorf("relay: fetch: %w", err)
-	}
-
-	var done []int64
-	for _, e := range events {
-		if err := r.Publisher.Publish(ctx, e.Topic, e.Payload); err != nil {
-			pubErr := fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
-			return len(done), errors.Join(pubErr, r.mark(ctx, done))
-		}
-		done = append(done, e.ID)
-	}
-	if err := r.mark(ctx, done); err != nil {
-		return len(done), err
-	}
-	return len(done), nil
-}
-
-func (r *Relay) mark(ctx context.Context, ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
 	now := time.Now
 	if r.Now != nil {
 		now = r.Now
 	}
-	if err := r.Source.MarkPublished(ctx, ids, now()); err != nil {
-		return fmt.Errorf("relay: mark published: %w", err)
-	}
-	return nil
+	return r.Source.RelayBatch(ctx, batch, func(e pg.OutboxEvent) error {
+		return r.Publisher.Publish(ctx, e.Topic, e.Payload)
+	}, now())
 }
