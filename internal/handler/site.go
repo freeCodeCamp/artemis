@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -133,7 +134,10 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := h.R2.PutAlias(r.Context(), prodKey, deployID); err != nil {
+		telemetry.Breadcrumb(r.Context(), "promote", "production alias write")
+		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.promote", func(ctx context.Context) error {
+			return h.R2.PutAlias(ctx, prodKey, deployID)
+		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 			return errAliasWriteHandled
 		}
@@ -240,7 +244,10 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := h.R2.PutAlias(r.Context(), prodKey, req.To); err != nil {
+		telemetry.Breadcrumb(r.Context(), "rollback", "production alias write")
+		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.rollback", func(ctx context.Context) error {
+			return h.R2.PutAlias(ctx, prodKey, req.To)
+		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 			return errAliasWriteHandled
 		}

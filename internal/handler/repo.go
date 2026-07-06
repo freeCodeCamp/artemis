@@ -14,6 +14,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/reporequest"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 const maxRepoDescriptionLen = 350
@@ -318,11 +319,17 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	// the row stays `approved` with no resolution (PR freeCodeCamp/artemis#3, #2).
 	durCtx := context.WithoutCancel(r.Context())
 
-	created, ghErr := h.GitHubApp.CreateRepo(durCtx, githubapp.CreateSpec{
-		Name:        approved.Name,
-		Private:     approved.Visibility == reporequest.VisibilityPrivate,
-		Description: approved.Description,
-		Template:    approved.Template,
+	telemetry.Breadcrumb(r.Context(), "repo", "github repo create")
+	var created githubapp.Created
+	ghErr := telemetry.WithSpan(durCtx, "githubapp.createrepo", func(ctx context.Context) error {
+		var e error
+		created, e = h.GitHubApp.CreateRepo(ctx, githubapp.CreateSpec{
+			Name:        approved.Name,
+			Private:     approved.Visibility == reporequest.VisibilityPrivate,
+			Description: approved.Description,
+			Template:    approved.Template,
+		})
+		return e
 	})
 	var existsErr *githubapp.RepoExistsError
 	if errors.As(ghErr, &existsErr) && resume {
