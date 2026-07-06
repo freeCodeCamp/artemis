@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,8 +11,15 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
+
+func newRunID() string {
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 const (
 	topicSiteReconcile         = "site.reconcile"
@@ -28,10 +37,11 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			n, err := relay.RunOnce(ctx)
+			rctx := telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
+			n, err := relay.RunOnce(rctx)
 			metrics.ObserveRelay(n, err)
 			if err != nil {
-				slog.Error("relay.run", "err", err)
+				slog.ErrorContext(rctx, "relay.run", "err", err)
 				observability.CaptureBackground("relay.run", err)
 			}
 		}
@@ -40,10 +50,15 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 
 func observeWorkflow(metrics *worker.Metrics, name string, fn worker.Handler) worker.Handler {
 	return func(ctx context.Context, input map[string]any) error {
+		ctx = telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
+		slog.InfoContext(ctx, "workflow.start", "workflow", name)
 		err := fn(ctx, input)
 		outcome := "ok"
 		if err != nil {
 			outcome = "failed"
+			slog.ErrorContext(ctx, "workflow.failed", "workflow", name, "err", err)
+		} else {
+			slog.InfoContext(ctx, "workflow.done", "workflow", name)
 		}
 		metrics.ObserveRun(name, outcome)
 		return err

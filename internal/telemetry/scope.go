@@ -8,6 +8,7 @@ import (
 
 type Scope struct {
 	ReqID string
+	runID string
 
 	mu       sync.Mutex
 	actor    string
@@ -20,6 +21,10 @@ type Scope struct {
 
 func New(reqID string) *Scope {
 	return &Scope{ReqID: reqID}
+}
+
+func NewRun(runID string) *Scope {
+	return &Scope{runID: runID}
 }
 
 type scopeKey struct{}
@@ -86,6 +91,7 @@ func (s *Scope) LogAttrs() []slog.Attr {
 	attrs := make([]slog.Attr, 0, 7)
 	for _, kv := range []struct{ k, v string }{
 		{"request_id", s.ReqID},
+		{"run_id", s.runID},
 		{"actor", s.actor},
 		{"action", s.action},
 		{"site", s.site},

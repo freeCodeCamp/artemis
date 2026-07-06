@@ -3,16 +3,70 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *capturingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *capturingHandler) attr(msg, key string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Message != msg {
+			continue
+		}
+		var out string
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == key {
+				out = a.Value.String()
+				return false
+			}
+			return true
+		})
+		return out
+	}
+	return ""
+}
+
+func TestWorkflowScope_RunID(t *testing.T) {
+	rec := &capturingHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	wrapped := observeWorkflow(nil, worker.WorkflowGCSite, func(context.Context, map[string]any) error { return nil })
+	require.NoError(t, wrapped(context.Background(), nil))
+
+	runID := rec.attr("workflow.start", "run_id")
+	assert.NotEmpty(t, runID, "workflow.start line carries a run_id")
+	assert.Equal(t, runID, rec.attr("workflow.done", "run_id"), "same run_id on the done line")
+}
 
 type capturingPublisher struct {
 	topics   []string

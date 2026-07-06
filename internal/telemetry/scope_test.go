@@ -54,6 +54,16 @@ func TestSetters_MutateThroughSharedPointer(t *testing.T) {
 	assert.Equal(t, "/api/site/{site}/promote", sc.Route())
 }
 
+func TestNewRun_ProjectsRunID(t *testing.T) {
+	t.Parallel()
+
+	sc := telemetry.NewRun("run-abc")
+	attrs := sc.LogAttrs()
+	require.Len(t, attrs, 1)
+	assert.Equal(t, "run_id", attrs[0].Key)
+	assert.Equal(t, "run-abc", attrs[0].Value.String())
+}
+
 func TestSetters_ConcurrentNoRace(t *testing.T) {
 	t.Parallel()
 
