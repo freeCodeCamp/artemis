@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -82,16 +83,16 @@ type Config struct {
 // slog bridge. When cfg.DSN is empty the SDK is left uninitialised:
 // flush is a no-op, enabled is false, and every capture helper here
 // becomes a no-op.
-func Init(cfg Config) (flush func(), enabled bool, err error) {
-	noop := func() {}
-	if cfg.DSN == "" {
-		return noop, false, nil
-	}
+const maxBreadcrumbs = 50
+
+func buildClientOptions(cfg Config) sentry.ClientOptions {
 	rate := cfg.TracesSampleRate
-	if err = sentry.Init(sentry.ClientOptions{
+	return sentry.ClientOptions{
 		Dsn:                   cfg.DSN,
 		Environment:           cfg.Environment,
 		Release:               cfg.Release,
+		ServerName:            os.Getenv("HOSTNAME"),
+		MaxBreadcrumbs:        maxBreadcrumbs,
 		TracesSampleRate:      rate,
 		EnableLogs:            true,
 		SendDefaultPII:        false, // never auto-attach request headers / client IPs
@@ -100,6 +101,7 @@ func Init(cfg Config) (flush func(), enabled bool, err error) {
 		BeforeSend:            scrubEvent,
 		BeforeSendTransaction: scrubEvent,
 		BeforeSendLog:         scrubLog,
+		BeforeBreadcrumb:      scrubBreadcrumb,
 		TracesSampler: sentry.TracesSampler(func(sc sentry.SamplingContext) float64 {
 			name := ""
 			if sc.Span != nil {
@@ -107,10 +109,27 @@ func Init(cfg Config) (flush func(), enabled bool, err error) {
 			}
 			return sampleRate(name, rate)
 		}),
-	}); err != nil {
+	}
+}
+
+func Init(cfg Config) (flush func(), enabled bool, err error) {
+	noop := func() {}
+	if cfg.DSN == "" {
+		return noop, false, nil
+	}
+	if err = sentry.Init(buildClientOptions(cfg)); err != nil {
 		return noop, false, err
 	}
 	return func() { sentry.Flush(flushTimeout) }, true, nil
+}
+
+func scrubBreadcrumb(bc *sentry.Breadcrumb, _ *sentry.BreadcrumbHint) *sentry.Breadcrumb {
+	if bc == nil {
+		return nil
+	}
+	bc.Message = ScrubText(bc.Message)
+	bc.Data = scrubBreadcrumbData(bc.Data)
+	return bc
 }
 
 // probeSampleRate drops k8s liveness / readiness / metrics probe
