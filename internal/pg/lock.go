@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) error {
@@ -20,7 +21,8 @@ func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) e
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := conn.Close(closeCtx); err != nil {
-			slog.Error("site lock: close failed; server reaps the session lock", "site", site, "err", err)
+			slog.Error("site lock: close failed; server reaps the session lock", "site", site, "err", err,
+				"reqID", telemetry.FromContext(ctx).ReqID)
 		}
 	}()
 
@@ -42,7 +44,8 @@ func (r *Repo) NewLockSession(ctx context.Context) (gc.LockSession, error) {
 		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if cerr := conn.Close(closeCtx); cerr != nil {
-			slog.Error("lock session: close after set-timeout failure", "err", cerr)
+			slog.Error("lock session: close after set-timeout failure", "err", cerr,
+				"reqID", telemetry.FromContext(ctx).ReqID)
 		}
 		return nil, fmt.Errorf("lock session: set lock_timeout: %w", err)
 	}
@@ -61,7 +64,8 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site string, fn func() e
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if _, err := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, site); err != nil {
-			slog.Error("site lock: unlock failed; released on session close", "site", site, "err", err)
+			slog.Error("site lock: unlock failed; released on session close", "site", site, "err", err,
+				"reqID", telemetry.FromContext(ctx).ReqID)
 		}
 	}()
 	return fn()
@@ -71,6 +75,7 @@ func (s *lockSession) Close(ctx context.Context) {
 	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.conn.Close(closeCtx); err != nil {
-		slog.Error("lock session: close failed; server reaps the session locks", "err", err)
+		slog.Error("lock session: close failed; server reaps the session locks", "err", err,
+			"reqID", telemetry.FromContext(ctx).ReqID)
 	}
 }

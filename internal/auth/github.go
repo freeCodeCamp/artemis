@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 type TeamCache interface {
@@ -84,7 +86,10 @@ func NewGitHubClient(cfg GitHubClientConfig) *GitHubClient {
 		cfg.CacheTTL = 5 * time.Minute
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+		cfg.HTTPClient = &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: telemetry.NewRoundTripper(nil),
+		}
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
