@@ -139,25 +139,22 @@ The deploy row is the dominant term at scale. At **326.5 bytes/row** including t
 | `too many clients` on PG | `pool_max_conns x replicas + hatchet` > `max_connections`     | size `max_connections` >= 200 (section 4); cap `pool_max_conns`                                                                          |
 | outbox unbounded growth  | relay stalled (PG/engine down) -> rows never marked published | published rows are prunable; relay is at-least-once and resumes (R5); `/readyz` degraded surfaces the stall                              |
 | relay batch starvation   | sustained enqueue rate > drain-per-tick                       | drain rate (~40k rows/s) is ~10,000x the realistic enqueue rate; raise `Batch` (currently 100) or shorten `relayInterval` if ever needed |
-| hot-site queue backlog   | one site mutated faster than its single workflow drains       | by design (MaxRuns=1); GroupRoundRobin keeps other sites moving; surfaced via `artemis_worker_queue_depth{workflow}`                     |
+| hot-site queue backlog   | one site mutated faster than its single workflow drains       | by design (MaxRuns=1); GroupRoundRobin keeps other sites moving; queue-depth gauge deferred (§9)                                         |
 | Valkey eviction          | `maxmemory` set below registry envelope                       | envelope is < 3 MB / 10k sites; keep `maxmemory` >= 64 MB (80x headroom)                                                                 |
 | backfill window          | 3M-row cold backfill                                          | ~5-9 min one-shot (section 3); acceptable, runs before serving                                                                           |
 
 ## 9. Observability hooks for capacity
 
-The control-plane counters are exposed at `GET /metrics` (no auth). Capacity signals to watch:
+o11y is **Sentry-only** as of v1.4.0 (the Prometheus `/metrics` leg was removed — see `docs/README.md` §Observability). Capacity signals map to Sentry as:
 
-| metric                                                 | what it tells you                                   |
-| ------------------------------------------------------ | --------------------------------------------------- |
-| `artemis_worker_workflow_runs_total{workflow,outcome}` | per-workflow run volume + failure ratio             |
-| `artemis_worker_queue_depth{workflow}`                 | per-workflow backlog (hot-site / engine saturation) |
-| `artemis_worker_dlq_depth`                             | dead-lettered runs awaiting operator                |
-| `artemis_relay_published_total`                        | outbox drain volume (relay liveness)                |
-| `artemis_relay_failures_total`                         | relay passes that errored before draining           |
-| `artemis_gc_runs_total{workflow,outcome}`              | GC pass volume + aborts (blast-cap trips)           |
-| `artemis_gc_deploys_tombstoned_total`                  | reclaim progress                                    |
+| capacity signal            | Sentry home                                                                |
+| -------------------------- | -------------------------------------------------------------------------- |
+| per-workflow failure ratio | `workflow.failed` logs + per-op Issues (`gc.site.run`, `reconcile.run`, …) |
+| relay liveness / failures  | `relay.run` Error log + Issue on a failed pass                             |
+| GC pass volume + blast-cap | `gc.site.done` / `gc.site.capped` logs (numeric attrs queryable)           |
+| reclaim progress           | `gc.tombstone-purge.done` log (`bytes`, `purged`)                          |
 
-The `artemis_worker_*` and `artemis_relay_*` counters were wired into the boot path as part of R14 (worker-run + relay observation deferred from the readyz work, `d075130`).
+Deferred (no live signal today): per-workflow **queue backlog** and **dead-letter depth** as gauges — Hatchet v0.88.6 exposes queue depth only via a deprecated API. Dead-letter _events_ are covered by the per-failure Issues above; a depth gauge is a future effort gated on the Hatchet SDK migration.
 
 ## 10. Reproducing
 

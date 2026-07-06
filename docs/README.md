@@ -9,7 +9,6 @@ Full route table, cross-checked against `internal/server/server.go` (`chi` wirin
 ```
 GET    /healthz                                               → { ok: true }
 GET    /readyz                                                → readiness (probes Valkey + R2)
-GET    /metrics                                                → prometheus exposition
 
 GET    /api/whoami                                             → { login, authorizedSites }
 POST   /api/deploy/init                   { site, sha, files? } → { deployId, jwt, expiresAt }
@@ -39,7 +38,7 @@ POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
 
 `/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
 
-Auth headers (`/api/*` except `/healthz`, `/readyz`, `/metrics`):
+Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
 | Endpoint                                                                                    | Bearer                                                                       |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -127,45 +126,30 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 ## Observability
 
-Three signals, all optional and independently degradable:
+Observability is **Sentry-only** and independent. artemis is platform infra, so it does NOT route its own telemetry through the platform o11y stack (GlitchTip / VictoriaMetrics / ClickHouse) it deploys — that would be circular. `SENTRY_DSN` MUST point at an **external** Sentry project (`ingest.sentry.io`), never the self-hosted GlitchTip. Everything is off unless `SENTRY_DSN` is set, so dev/test runs send nothing.
 
-- **Structured logs** — JSON to stdout via `log/slog` (`LOG_LEVEL`). Source of truth; scraped by Loki. Probe paths (`/healthz`, `/readyz`, `/metrics`) are silenced.
-- **Prometheus** — `/metrics` exposes the standard Go + process collectors plus 15 artemis-specific metrics (full inventory below).
-- **Sentry** — errors, panics, performance traces, and a slog→Sentry Logs tee. **Off unless `SENTRY_DSN` is set**, so dev/test runs send nothing.
+- **Issues** — errors, panics, and background-job failures via explicit `CaptureException` / `CaptureBackground` (op-tagged, fingerprinted). `slog.Error` does NOT create issues; the slog tee emits logs only.
+- **Performance (traces)** — inbound HTTP transactions `<METHOD> <route>` + outbound spans (GitHub/R2). Probes sampled at 0; destructive routes at 100%; base `SENTRY_TRACES_SAMPLE_RATE` otherwise.
+- **Logs** — a `slog`→Sentry Logs tee (`EnableLogs`), scrubbed via `BeforeSendLog`, trace-correlated; numeric attributes preserved as typed values.
+- **Crons** — check-ins on `tombstone-purge` (`0 3 * * *`) and `reconcile-scheduler` (`0 4 * * *`).
+- **Stdout logs** — JSON via `log/slog` (`LOG_LEVEL`, default `info`) for `kubectl logs`; probe paths (`/healthz`, `/readyz`) silenced. Keep `LOG_LEVEL=info` in prod — several Sentry-Logs-covered signals are Info-level.
 
-### Metric inventory
+There is **no Prometheus `/metrics` endpoint** (removed in v1.4.0). Signals that were counters are covered by the mechanisms above; [ADR-016](../../fCC-U/Architecture/decisions/016-deploy-proxy.md) holds the design rationale + the full signal→Sentry map.
 
-Registered in `internal/handler/metrics.go`, `internal/gc/metrics.go`, `internal/worker/metrics.go`; wired onto one `prometheus.Registry` in `cmd/artemis/main.go`.
+### Sentry Monitors + Alerts (operator setup)
 
-**Handler** (`handler.NewMetrics`)
+Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to notify) — both must exist to page. Create a Monitor (dataset → query → threshold) plus an Alert route (Slack / PagerDuty) for each:
 
-| Metric                                    | Type       | Meaning                                                                                     |
-| ----------------------------------------- | ---------- | ------------------------------------------------------------------------------------------- |
-| `artemis_registry_refresh_failures_total` | Counter    | Full-snapshot registry/valkey refresh that errored; stale snapshot stays served             |
-| `artemis_alias_drift_total`               | Counter    | 409 `alias_drift` responses from `SitePromote` / `SiteRollback` (CAS body-pin mismatch)     |
-| `artemis_promote_legacy_bare_total`       | Counter    | Empty-body `POST /api/site/{site}/promote` (no `expectedCurrent` CAS pin)                   |
-| `artemis_upstream_error_total{op}`        | CounterVec | `writeUpstreamError` invocations, labelled by `op` (e.g. `r2.put.alias`, `valkey.register`) |
+| Signal                    | Monitor dataset | Condition                                                                                |
+| ------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
+| upstream faults           | Issues          | new issue where `op` in (`r2.*`, `valkey.*`, `github.*`)                                 |
+| workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `reconcile.run`, `tombstone.purge`, `relay.run`) |
+| audit write failure       | Issues          | new issue `op=audit.record`                                                              |
+| reconcile dangerous drift | Issues          | new issue `op=reconcile.aliased_missing`                                                 |
+| cron missed / failed      | Crons           | `tombstone-purge` / `reconcile-scheduler` missed or errored                              |
+| HTTP error rate / latency | Spans           | 5xx rate or p99 on `POST /api/*` transactions                                            |
 
-**GC** (`gc.NewMetrics`)
-
-| Metric                                    | Type       | Meaning                                                                                                                       |
-| ----------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `artemis_gc_deploys_tombstoned_total`     | Counter    | Deploys soft-deleted (moved to `_trash`) by retention GC, manual delete, or site purge                                        |
-| `artemis_gc_bytes_reclaimed_total`        | Counter    | Bytes hard-reclaimed from `_trash` by the tombstone-purge pass past the recovery window                                       |
-| `artemis_gc_runs_total{workflow,outcome}` | CounterVec | GC workflow runs, labelled by workflow (`gc-site`, `manual-delete`, `site-purge`, `tombstone-purge`, `reconcile`) and outcome |
-| `artemis_gc_drift_total{kind}`            | CounterVec | Reconcile drift events, labelled by kind (`reindexed`, `orphan`, `pruned`, `aliased_missing`)                                 |
-
-**Worker / Hatchet** (`worker.NewMetrics`)
-
-| Metric                                                 | Type       | Meaning                                                                      |
-| ------------------------------------------------------ | ---------- | ---------------------------------------------------------------------------- |
-| `artemis_worker_queue_depth{workflow}`                 | GaugeVec   | Pending tasks per workflow queue (sampled from the engine)                   |
-| `artemis_worker_dlq_depth`                             | Gauge      | Dead-lettered workflow runs awaiting operator attention                      |
-| `artemis_worker_workflow_runs_total{workflow,outcome}` | CounterVec | Workflow runs, labelled by workflow and outcome                              |
-| `artemis_worker_workflow_failures_total{workflow}`     | CounterVec | Workflow run failures, labelled by workflow                                  |
-| `artemis_worker_dead_lettered_total{workflow}`         | CounterVec | Workflow runs that exhausted retries and dead-lettered, labelled by workflow |
-| `artemis_relay_published_total`                        | Counter    | Outbox rows published to the engine by the relay loop (at-least-once)        |
-| `artemis_relay_failures_total`                         | Counter    | Relay `RunOnce` passes that errored before draining the batch                |
+Deferred: a DLQ-depth gauge — Hatchet v0.88.6 exposes queue depth only via a deprecated API; dead-letter events are already covered by the per-failure Issues above.
 
 When enabled, Sentry captures:
 
