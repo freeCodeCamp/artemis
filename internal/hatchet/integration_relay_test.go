@@ -27,29 +27,31 @@ func newMemOutbox(events []pg.OutboxEvent) *memOutbox {
 	return &memOutbox{events: events, published: map[int64]bool{}}
 }
 
-func (m *memOutbox) FetchUnpublished(_ context.Context, limit int) ([]pg.OutboxEvent, error) {
+func (m *memOutbox) RelayBatch(_ context.Context, limit int, publish func(pg.OutboxEvent) error, _ time.Time) (int, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	var out []pg.OutboxEvent
+	var batch []pg.OutboxEvent
 	for _, e := range m.events {
 		if m.published[e.ID] {
 			continue
 		}
-		if len(out) >= limit {
+		if len(batch) >= limit {
 			break
 		}
-		out = append(out, e)
+		batch = append(batch, e)
 	}
-	return out, nil
-}
+	m.mu.Unlock()
 
-func (m *memOutbox) MarkPublished(_ context.Context, ids []int64, _ time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, id := range ids {
-		m.published[id] = true
+	done := 0
+	for _, e := range batch {
+		if err := publish(e); err != nil {
+			return done, err
+		}
+		m.mu.Lock()
+		m.published[e.ID] = true
+		m.mu.Unlock()
+		done++
 	}
-	return nil
+	return done, nil
 }
 
 func (m *memOutbox) outstanding() int {
