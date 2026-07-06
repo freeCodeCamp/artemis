@@ -52,6 +52,26 @@ func TestWriteUpstreamError_IncrementsUpstreamErrorsCounter(t *testing.T) {
 	assert.Equal(t, float64(1), got)
 }
 
+func TestUploadBuckets_And_BuildInfo(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	obs := m.HTTPRequestDuration.WithLabelValues("/api/deploy/{deployId}/upload", http.MethodPut, "2xx")
+	obs.Observe(42)
+	var mt dto.Metric
+	require.NoError(t, obs.(prometheus.Metric).Write(&mt))
+	var maxBucket float64
+	for _, b := range mt.Histogram.Bucket {
+		if ub := b.GetUpperBound(); ub > maxBucket {
+			maxBucket = ub
+		}
+	}
+	assert.Greater(t, maxBucket, 10.0, "upload long tail needs a bucket beyond DefBuckets' 10s ceiling")
+
+	m.SetBuildInfo("v1.4.0", "abc1234")
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.BuildInfo.WithLabelValues("v1.4.0", "abc1234")))
+}
+
 func TestHTTPDuration_Exemplar(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)

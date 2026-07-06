@@ -44,7 +44,11 @@ type Metrics struct {
 	AuditEventsTotal *prometheus.CounterVec
 
 	DeploysTombstoned *prometheus.CounterVec
+
+	BuildInfo *prometheus.GaugeVec
 }
+
+var httpDurationBuckets = append(append([]float64(nil), prometheus.DefBuckets...), 15, 30, 60, 120, 300)
 
 func statusClass(code int) string {
 	switch {
@@ -117,7 +121,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		HTTPRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "artemis_http_request_duration_seconds",
 			Help:    "HTTP request duration in seconds, labelled by chi route pattern, method, and status class.",
-			Buckets: prometheus.DefBuckets,
+			Buckets: httpDurationBuckets,
 		}, []string{"route", "method", "status_class"}),
 		HTTPInFlight: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "artemis_http_in_flight_requests",
@@ -131,10 +135,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_audit_events_total",
 			Help: "Count of durable audit-log writes, labelled by action and outcome (incl audit_error on write failure).",
 		}, []string{"action", "outcome"}),
+		BuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "artemis_build_info",
+			Help: "Build identity of the running binary; value is always 1.",
+		}, []string{"version", "commit"}),
 	}
 	reg.MustRegister(m.RegistryRefreshFailures, m.AliasDrift, m.PromoteLegacyBare, m.UpstreamErrors,
-		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight, m.ActionTotal, m.AuditEventsTotal)
+		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight, m.ActionTotal, m.AuditEventsTotal, m.BuildInfo)
 	return m
+}
+
+func (m *Metrics) SetBuildInfo(version, commit string) {
+	if m == nil {
+		return
+	}
+	m.BuildInfo.WithLabelValues(version, commit).Set(1)
 }
 
 // MetricsHandler returns the /metrics http.Handler over the supplied

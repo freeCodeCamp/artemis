@@ -203,6 +203,7 @@ func run() error {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	metrics := handler.NewMetrics(metricsReg)
+	metrics.SetBuildInfo(version, commit)
 	handler.SetMetrics(metrics)
 	workerMetrics := worker.NewMetrics(metricsReg)
 	registryReader.SetOnRefreshError(func(err error) {
