@@ -155,12 +155,13 @@ func (r *Repo) PruneDeploy(ctx context.Context, site, id string) error {
 	return nil
 }
 
-func (r *Repo) ClearTombstone(ctx context.Context, site, id string) error {
-	if _, err := r.pool.Exec(ctx,
-		`DELETE FROM tombstones WHERE site = $1 AND id = $2`, site, id); err != nil {
-		return fmt.Errorf("pg clear tombstone %s/%s: %w", site, id, err)
+func (r *Repo) ClearTombstone(ctx context.Context, site, id string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM tombstones WHERE site = $1 AND id = $2`, site, id)
+	if err != nil {
+		return false, fmt.Errorf("pg clear tombstone %s/%s: %w", site, id, err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 func (r *Repo) TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error) {

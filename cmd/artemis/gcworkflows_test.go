@@ -26,7 +26,7 @@ type fakeReaper struct{}
 func (fakeReaper) ExpiredTombstones(context.Context, time.Time) ([]gc.Tombstone, error) {
 	return nil, nil
 }
-func (fakeReaper) ClearTombstone(context.Context, string, string) error { return nil }
+func (fakeReaper) ClearTombstone(context.Context, string, string) (bool, error) { return true, nil }
 
 func TestCronCheckIn_ReconcileAndPurge(t *testing.T) {
 	type ci struct {

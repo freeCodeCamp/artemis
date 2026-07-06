@@ -157,7 +157,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	before, _ := h.Registry.GetSite(r.Context(), slug)
+	before, beforeErr := h.Registry.GetSite(r.Context(), slug)
 	site, err := h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
 	if err != nil {
 		switch {
@@ -168,10 +168,14 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	beforeTeams := any(before.Teams)
+	if beforeErr != nil {
+		beforeTeams = "unknown"
+	}
 	telemetry.FromContext(r.Context()).SetResource(slug, "")
 	h.logAction(r.Context(), "site.update", "success",
-		slog.Any("before", before.Teams), slog.Any("after", site.Teams))
-	h.auditFromScope(r.Context(), "site.update", "success", map[string]any{"before": before.Teams, "after": site.Teams})
+		slog.Any("before", beforeTeams), slog.Any("after", site.Teams))
+	h.auditFromScope(r.Context(), "site.update", "success", map[string]any{"before": beforeTeams, "after": site.Teams})
 	writeJSON(w, http.StatusOK, toSiteRow(site))
 }
 

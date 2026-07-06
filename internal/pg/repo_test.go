@@ -132,7 +132,9 @@ func TestRepo_TombstoneLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, none, "tombstone trashed_at in the future of the cutoff is not yet expired")
 
-	require.NoError(t, repo.ClearTombstone(ctx, "www", "d-old"))
+	cleared, clearErr := repo.ClearTombstone(ctx, "www", "d-old")
+	require.NoError(t, clearErr)
+	require.True(t, cleared, "an existing tombstone row is reported cleared")
 	expired, err = repo.ExpiredTombstones(ctx, now.Add(time.Hour))
 	require.NoError(t, err)
 	assert.Empty(t, expired, "cleared tombstone gone")

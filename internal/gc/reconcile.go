@@ -149,7 +149,7 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 	rc.Metrics.drift("orphan", len(report.OrphanTombstoned))
 	rc.Metrics.drift("pruned", len(report.PGPruned))
 	rc.Metrics.drift("aliased_missing", len(report.AliasedMissing))
-	slog.Info("reconcile.site.done", "site", site,
+	slog.InfoContext(ctx, "reconcile.site.done", "site", site,
 		"reindexed", len(report.Reindexed),
 		"orphanTombstoned", len(report.OrphanTombstoned),
 		"pgPruned", len(report.PGPruned),

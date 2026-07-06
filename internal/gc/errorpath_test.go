@@ -39,9 +39,9 @@ type errClearReaper struct {
 	clearErr error
 }
 
-func (r *errClearReaper) ClearTombstone(ctx context.Context, site, id string) error {
+func (r *errClearReaper) ClearTombstone(ctx context.Context, site, id string) (bool, error) {
 	if r.clearErr != nil {
-		return r.clearErr
+		return false, r.clearErr
 	}
 	return r.fakeReaper.ClearTombstone(ctx, site, id)
 }

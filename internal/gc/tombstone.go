@@ -16,7 +16,7 @@ type Tombstone struct {
 
 type TombstoneReaper interface {
 	ExpiredTombstones(ctx context.Context, before time.Time) ([]Tombstone, error)
-	ClearTombstone(ctx context.Context, site, id string) error
+	ClearTombstone(ctx context.Context, site, id string) (bool, error)
 }
 
 type Deleter interface {
@@ -79,23 +79,29 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 			res.Purged = append(res.Purged, label)
 			continue
 		}
+		var cleared bool
 		lockErr := p.withLock(ctx, t.Site, func() error {
 			if _, err := p.Deleter.DeletePrefix(ctx, p.trashPrefix(t)); err != nil {
 				return fmt.Errorf("tombstone-purge: delete %s: %w", label, err)
 			}
-			if err := p.Store.ClearTombstone(ctx, t.Site, t.ID); err != nil {
+			c, err := p.Store.ClearTombstone(ctx, t.Site, t.ID)
+			if err != nil {
 				return fmt.Errorf("tombstone-purge: clear %s: %w", label, err)
 			}
+			cleared = c
 			return nil
 		})
 		if lockErr != nil {
 			return res, lockErr
 		}
+		if !cleared {
+			continue
+		}
 		res.Purged = append(res.Purged, label)
 		res.BytesReclaimed += t.Bytes
 		if p.Audit != nil {
 			if err := p.Audit.RecordPurge(ctx, t.Site, t.ID); err != nil {
-				slog.Error("gc.tombstone-purge.audit_failed", "site", t.Site, "deployId", t.ID, "err", err)
+				slog.ErrorContext(ctx, "gc.tombstone-purge.audit_failed", "site", t.Site, "deploy_id", t.ID, "err", err)
 			}
 		}
 	}
@@ -104,6 +110,6 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 		p.Metrics.reclaimed(res.BytesReclaimed)
 		p.Metrics.run(WorkflowTombstonePurgeLabel, "ok")
 	}
-	slog.Info("gc.tombstone-purge.done", "purged", len(res.Purged), "bytes", res.BytesReclaimed, "dryRun", dryRun)
+	slog.InfoContext(ctx, "gc.tombstone-purge.done", "purged", len(res.Purged), "bytes", res.BytesReclaimed, "dryRun", dryRun)
 	return res, nil
 }

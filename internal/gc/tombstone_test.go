@@ -24,15 +24,42 @@ func (f *fakeReaper) ExpiredTombstones(_ context.Context, before time.Time) ([]T
 	return out, nil
 }
 
-func (f *fakeReaper) ClearTombstone(_ context.Context, site, id string) error {
+func (f *fakeReaper) ClearTombstone(_ context.Context, site, id string) (bool, error) {
 	f.cleared = append(f.cleared, site+"/"+id)
 	for i, t := range f.tombstones {
 		if t.Site == site && t.ID == id {
 			f.tombstones = append(f.tombstones[:i], f.tombstones[i+1:]...)
-			break
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
+}
+
+type staleReaper struct{ tomb Tombstone }
+
+func (r staleReaper) ExpiredTombstones(context.Context, time.Time) ([]Tombstone, error) {
+	return []Tombstone{r.tomb}, nil
+}
+func (staleReaper) ClearTombstone(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func TestTombstonePurge_SkipsAccountingWhenAlreadyCleared(t *testing.T) {
+	aud := &fakePurgeAuditor{}
+	p := &TombstonePurge{
+		Store:     staleReaper{tomb: Tombstone{Site: "www", ID: "d1", Bytes: 500}},
+		Deleter:   &fakeDeleter{},
+		Recovery:  7 * 24 * time.Hour,
+		TrashBase: "_trash/",
+		Now:       func() time.Time { return testNow },
+		Audit:     aud,
+	}
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+	assert.Empty(t, res.Purged, "a tombstone already cleared by a concurrent purge is not double-counted")
+	assert.Zero(t, res.BytesReclaimed, "reclaimed bytes not double-counted")
+	assert.Empty(t, aud.recorded, "no duplicate gc.purge audit row")
 }
 
 type fakeDeleter struct {
