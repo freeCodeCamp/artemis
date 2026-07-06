@@ -21,7 +21,7 @@ func TestMetrics(t *testing.T) {
 	_, err := g.Run(context.Background(), "www", false)
 	require.NoError(t, err)
 
-	assert.EqualValues(t, 3, testutil.ToFloat64(m.DeploysTombstoned), "3 deploys tombstoned by gc-site")
+	assert.EqualValues(t, 3, testutil.ToFloat64(m.DeploysTombstoned.WithLabelValues("scheduled")), "3 deploys tombstoned by scheduled gc-site")
 	assert.EqualValues(t, 1, testutil.ToFloat64(m.Runs.WithLabelValues("gc-site", "ok")))
 
 	reaper := &fakeReaper{tombstones: []Tombstone{

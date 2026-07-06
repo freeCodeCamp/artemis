@@ -211,7 +211,9 @@ func run() error {
 
 	var gcw *gcWiring
 	if pgDB != nil {
-		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client, gc.NewMetrics(metricsReg))
+		gcMetrics := gc.NewMetrics(metricsReg)
+		metrics.DeploysTombstoned = gcMetrics.DeploysTombstoned
+		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client, gcMetrics)
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
 		}

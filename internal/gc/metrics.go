@@ -8,7 +8,7 @@ const (
 )
 
 type Metrics struct {
-	DeploysTombstoned prometheus.Counter
+	DeploysTombstoned *prometheus.CounterVec
 	BytesReclaimed    prometheus.Counter
 	Runs              *prometheus.CounterVec
 	Drift             *prometheus.CounterVec
@@ -16,10 +16,10 @@ type Metrics struct {
 
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		DeploysTombstoned: prometheus.NewCounter(prometheus.CounterOpts{
+		DeploysTombstoned: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "artemis_gc_deploys_tombstoned_total",
-			Help: "Count of deploys soft-deleted (moved to _trash) by retention GC, manual delete, and site purge.",
-		}),
+			Help: "Count of deploys soft-deleted (moved to _trash), labelled by trigger (scheduled retention GC vs manual handler delete/purge).",
+		}, []string{"trigger"}),
 		BytesReclaimed: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "artemis_gc_bytes_reclaimed_total",
 			Help: "Bytes hard-reclaimed from _trash by the tombstone-purge pass past the recovery window.",
@@ -44,11 +44,11 @@ func (m *Metrics) drift(kind string, n int) {
 	m.Drift.WithLabelValues(kind).Add(float64(n))
 }
 
-func (m *Metrics) tombstoned(n int) {
+func (m *Metrics) tombstoned(trigger string, n int) {
 	if m == nil {
 		return
 	}
-	m.DeploysTombstoned.Add(float64(n))
+	m.DeploysTombstoned.WithLabelValues(trigger).Add(float64(n))
 }
 
 func (m *Metrics) reclaimed(bytes int64) {

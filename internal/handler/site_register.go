@@ -234,6 +234,9 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		telemetry.FromContext(r.Context()).SetResource(slug, "")
 		h.logAction(r.Context(), "site.purge", "success", slog.String("slug", slug), slog.Int("moved", moved))
+		if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
+			pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
 		return nil
 	})

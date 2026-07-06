@@ -41,6 +41,8 @@ type Metrics struct {
 	HTTPInFlight        prometheus.Gauge
 
 	ActionTotal *prometheus.CounterVec
+
+	DeploysTombstoned *prometheus.CounterVec
 }
 
 func statusClass(code int) string {

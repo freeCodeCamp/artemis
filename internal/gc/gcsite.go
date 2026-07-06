@@ -126,7 +126,7 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 		}
 	}
 
-	g.Metrics.tombstoned(len(res.Tombstoned))
+	g.Metrics.tombstoned("scheduled", len(res.Tombstoned))
 	outcome := "ok"
 	if plan.Aborted {
 		outcome = "capped"
