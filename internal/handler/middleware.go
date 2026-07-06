@@ -23,14 +23,12 @@ type (
 	loginCtxKey     struct{}
 	jwtClaimsCtxKey struct{}
 	ghTokenCtxKey   struct{}
-	reqIDCtxKey     struct{}
 )
 
 var (
 	ctxKeyLogin = loginCtxKey{}
 	ctxKeyJWT   = jwtClaimsCtxKey{}
 	ctxKeyToken = ghTokenCtxKey{}
-	ctxKeyReqID = reqIDCtxKey{}
 )
 
 // LoginFromContext returns the GitHub login resolved by the GitHub-bearer
@@ -53,13 +51,6 @@ func GitHubTokenFromContext(ctx context.Context) string {
 func JWTClaimsFromContext(ctx context.Context) (auth.DeploySessionClaims, bool) {
 	v, ok := ctx.Value(ctxKeyJWT).(auth.DeploySessionClaims)
 	return v, ok
-}
-
-// RequestIDFromContext returns the per-request id assigned by RequestID
-// middleware.
-func RequestIDFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(ctxKeyReqID).(string)
-	return v
 }
 
 // extractBearer returns the token portion of an "Authorization: Bearer X"
@@ -176,8 +167,7 @@ func RequestID(next http.Handler) http.Handler {
 			id = hex.EncodeToString(b[:])
 		}
 		w.Header().Set("X-Request-ID", id)
-		ctx := context.WithValue(r.Context(), ctxKeyReqID, id)
-		ctx = telemetry.NewContext(ctx, telemetry.New(id))
+		ctx := telemetry.NewContext(r.Context(), telemetry.New(id))
 		// Tag the per-request Sentry hub so every event/transaction is
 		// filterable by request id — the join key across Sentry, the
 		// stdout logs, and the X-Request-ID response header.
@@ -253,17 +243,13 @@ func AccessLog(next http.Handler) http.Handler {
 		args := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
-			"route", sc.Route(),
 			"status", sw.code,
 			"durMS", time.Since(start).Milliseconds(),
-			"reqID", sc.ReqID,
-			"login", sc.Actor(),
-			"actor", sc.Actor(),
 		}
 		if sw.code >= 400 && sw.errCode != "" {
 			args = append(args, "errCode", sw.errCode)
 		}
-		slog.Info("http", args...)
+		slog.InfoContext(r.Context(), "http", args...)
 	})
 }
 

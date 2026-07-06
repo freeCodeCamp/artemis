@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -138,7 +139,7 @@ func TestRequestID_AddsHeader(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NotEmpty(t, RequestIDFromContext(r.Context()))
+		require.NotEmpty(t, telemetry.FromContext(r.Context()).ReqID)
 		w.WriteHeader(http.StatusOK)
 	})).ServeHTTP(w, r)
 
@@ -151,7 +152,7 @@ func TestRequestID_RespectsIncoming(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "req-abc", RequestIDFromContext(r.Context()))
+		assert.Equal(t, "req-abc", telemetry.FromContext(r.Context()).ReqID)
 		w.WriteHeader(http.StatusOK)
 	})).ServeHTTP(w, r)
 
