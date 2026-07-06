@@ -157,6 +157,9 @@ func (h *Handlers) RequireDeployJWT(next http.Handler) http.Handler {
 			return
 		}
 		telemetry.FromContext(r.Context()).SetActor(claims.Subject)
+		if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+			hub.Scope().SetUser(sentry.User{Username: claims.Subject})
+		}
 		ctx := context.WithValue(r.Context(), ctxKeyJWT, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
