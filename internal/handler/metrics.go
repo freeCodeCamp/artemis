@@ -35,6 +35,25 @@ type Metrics struct {
 	// Provides a single dashboard surface for upstream-dependency
 	// reliability.
 	UpstreamErrors *prometheus.CounterVec
+
+	HTTPRequestsTotal   *prometheus.CounterVec
+	HTTPRequestDuration *prometheus.HistogramVec
+	HTTPInFlight        prometheus.Gauge
+}
+
+func statusClass(code int) string {
+	switch {
+	case code >= 500:
+		return "5xx"
+	case code >= 400:
+		return "4xx"
+	case code >= 300:
+		return "3xx"
+	case code >= 200:
+		return "2xx"
+	default:
+		return "1xx"
+	}
 }
 
 // pkgMetrics holds the package-level metrics handle so package-private
@@ -86,8 +105,22 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_upstream_error_total",
 			Help: "Count of writeUpstreamError invocations, labelled by op (r2.put.alias, valkey.register, etc).",
 		}, []string{"op"}),
+		HTTPRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "artemis_http_requests_total",
+			Help: "Count of HTTP requests, labelled by chi route pattern, method, and status class.",
+		}, []string{"route", "method", "status_class"}),
+		HTTPRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "artemis_http_request_duration_seconds",
+			Help:    "HTTP request duration in seconds, labelled by chi route pattern, method, and status class.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"route", "method", "status_class"}),
+		HTTPInFlight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "artemis_http_in_flight_requests",
+			Help: "Number of HTTP requests currently being served.",
+		}),
 	}
-	reg.MustRegister(m.RegistryRefreshFailures, m.AliasDrift, m.PromoteLegacyBare, m.UpstreamErrors)
+	reg.MustRegister(m.RegistryRefreshFailures, m.AliasDrift, m.PromoteLegacyBare, m.UpstreamErrors,
+		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight)
 	return m
 }
 

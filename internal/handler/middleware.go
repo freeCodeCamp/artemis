@@ -225,6 +225,10 @@ var accessLogSkipPaths = map[string]struct{}{
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		if pkgMetrics != nil && pkgMetrics.HTTPInFlight != nil {
+			pkgMetrics.HTTPInFlight.Inc()
+			defer pkgMetrics.HTTPInFlight.Dec()
+		}
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		next.ServeHTTP(sw, r)
 		if _, skip := accessLogSkipPaths[r.URL.Path]; skip {
@@ -233,6 +237,19 @@ func AccessLog(next http.Handler) http.Handler {
 		sc := telemetry.FromContext(r.Context())
 		if rc := chi.RouteContext(r.Context()); rc != nil {
 			sc.SetRoute(rc.RoutePattern())
+		}
+		if pkgMetrics != nil {
+			route := sc.Route()
+			if route == "" {
+				route = "unmatched"
+			}
+			class := statusClass(sw.code)
+			if pkgMetrics.HTTPRequestsTotal != nil {
+				pkgMetrics.HTTPRequestsTotal.WithLabelValues(route, r.Method, class).Inc()
+			}
+			if pkgMetrics.HTTPRequestDuration != nil {
+				pkgMetrics.HTTPRequestDuration.WithLabelValues(route, r.Method, class).Observe(time.Since(start).Seconds())
+			}
 		}
 		args := []any{
 			"method", r.Method,
