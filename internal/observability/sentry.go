@@ -104,7 +104,7 @@ func Init(cfg Config) (flush func(), enabled bool, err error) {
 			if sc.Span != nil {
 				name = sc.Span.Name
 			}
-			return probeSampleRate(name, rate)
+			return sampleRate(name, rate)
 		}),
 	}); err != nil {
 		return noop, false, err
@@ -125,6 +125,40 @@ func probeSampleRate(spanName string, base float64) float64 {
 		return 0
 	}
 	return base
+}
+
+var destructiveMatchers = []struct {
+	method string
+	re     *regexp.Regexp
+}{
+	{"POST", regexp.MustCompile(`^/api/site/[^/]+/promote$`)},
+	{"POST", regexp.MustCompile(`^/api/site/[^/]+/rollback$`)},
+	{"DELETE", regexp.MustCompile(`^/api/site/[^/]+$`)},
+	{"DELETE", regexp.MustCompile(`^/api/site/[^/]+/deploys/[^/]+$`)},
+	{"POST", regexp.MustCompile(`^/api/site/[^/]+/deploys/[^/]+/restore$`)},
+	{"POST", regexp.MustCompile(`^/api/deploy/[^/]+/finalize$`)},
+	{"DELETE", regexp.MustCompile(`^/api/repo/[^/]+$`)},
+}
+
+func isDestructive(spanName string) bool {
+	i := strings.IndexByte(spanName, ' ')
+	if i < 0 {
+		return false
+	}
+	method, path := spanName[:i], spanName[i+1:]
+	for _, m := range destructiveMatchers {
+		if m.method == method && m.re.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func sampleRate(spanName string, base float64) float64 {
+	if isDestructive(spanName) {
+		return 1.0
+	}
+	return probeSampleRate(spanName, base)
 }
 
 // ScrubText replaces secret-shaped substrings with a marker. Safe on
