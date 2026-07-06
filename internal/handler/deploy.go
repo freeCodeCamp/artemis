@@ -64,7 +64,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	ok, err := h.GH.AuthorizeForSite(r.Context(), token, login, teams)
 	if err != nil {
 		h.logAction(r.Context(), "deploy.init", "error", slog.String("reason", "authz_probe_failed"))
-		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		writeGitHubProbeError(w, err)
 		return
 	}
 	if !ok {

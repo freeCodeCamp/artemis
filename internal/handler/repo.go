@@ -464,7 +464,7 @@ func (h *Handlers) requireRepoTeam(w http.ResponseWriter, r *http.Request, team 
 	token := GitHubTokenFromContext(r.Context())
 	ok, err := h.RepoGH.AuthorizeForSite(r.Context(), token, login, []string{team})
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		writeGitHubProbeError(w, err)
 		return err
 	}
 	if !ok {

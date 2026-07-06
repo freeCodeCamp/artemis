@@ -149,9 +149,10 @@ func (e *erroringRegistry) GetSite(_ context.Context, _ string) (registry.Site, 
 // and the site's authorized teams is non-empty. This mirrors the real
 // client's "any-team grants" semantics.
 type fakeGH struct {
-	tokenLogins map[string]string
-	userTeams   map[string]map[string]bool
-	upstreamErr error
+	tokenLogins  map[string]string
+	userTeams    map[string]map[string]bool
+	upstreamErr  error
+	authorizeErr error
 
 	// userTeamsCalls counts batched /user/teams probes. WhoAmI must
 	// hit this at most once per cold cache, never N×.
@@ -174,6 +175,9 @@ func (f *fakeGH) ValidateToken(_ context.Context, token string) (string, error) 
 
 func (f *fakeGH) AuthorizeForSite(_ context.Context, _ string, login string, teams []string) (bool, error) {
 	f.authorizeCalls++
+	if f.authorizeErr != nil {
+		return false, f.authorizeErr
+	}
 	if f.upstreamErr != nil {
 		return false, f.upstreamErr
 	}

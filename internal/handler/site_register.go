@@ -289,7 +289,7 @@ func (h *Handlers) requireRegistryAuthz(w http.ResponseWriter, r *http.Request) 
 	token := GitHubTokenFromContext(r.Context())
 	ok, err := h.GH.AuthorizeForSite(r.Context(), token, login, []string{h.RegistryAuthzTeam})
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		writeGitHubProbeError(w, err)
 		return err
 	}
 	if !ok {

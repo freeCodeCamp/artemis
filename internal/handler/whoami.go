@@ -23,7 +23,7 @@ func (h *Handlers) WhoAmI(w http.ResponseWriter, r *http.Request) {
 
 	teams, err := h.GH.UserTeams(r.Context(), token)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		writeGitHubProbeError(w, err)
 		return
 	}
 	userTeams := make(map[string]struct{}, len(teams))

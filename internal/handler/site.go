@@ -317,7 +317,7 @@ func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site
 	token := GitHubTokenFromContext(r.Context())
 	ok, err := h.GH.AuthorizeForSite(r.Context(), token, login, teams)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
+		writeGitHubProbeError(w, err)
 		return err
 	}
 	if !ok {
