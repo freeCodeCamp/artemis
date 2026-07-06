@@ -51,6 +51,25 @@ func (h *capturingHandler) httpAttr(t *testing.T, key string) string {
 	return ""
 }
 
+func (h *capturingHandler) findAction(action, outcome string) (map[string]string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, rec := range h.records {
+		if rec.Message != action {
+			continue
+		}
+		m := map[string]string{}
+		rec.Attrs(func(a slog.Attr) bool {
+			m[a.Key] = a.Value.String()
+			return true
+		})
+		if outcome == "" || m["outcome"] == outcome {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
 func captureAccessLog(t *testing.T) *capturingHandler {
 	t.Helper()
 	cap := &capturingHandler{}

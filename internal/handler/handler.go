@@ -18,6 +18,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -174,6 +175,13 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 			sentry.CaptureException(err)
 		})
 	}
+}
+
+func (h *Handlers) logAction(ctx context.Context, action, outcome string, attrs ...slog.Attr) {
+	sc := telemetry.FromContext(ctx)
+	sc.SetAction(action)
+	sc.SetOutcome(outcome)
+	slog.LogAttrs(ctx, slog.LevelInfo, action, append(sc.LogAttrs(), attrs...)...)
 }
 
 // writeJSON marshals v as JSON and writes it with the given status code.

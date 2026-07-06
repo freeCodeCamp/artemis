@@ -14,6 +14,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -50,18 +51,24 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	telemetry.FromContext(r.Context()).SetResource(req.Site, "")
+	h.logAction(r.Context(), "deploy.init", "start", slog.String("sha", req.SHA))
+
 	teams := h.Sites.Snapshot().TeamsForSite(req.Site)
 	if len(teams) == 0 {
+		h.logAction(r.Context(), "deploy.init", "denied", slog.String("reason", "site_unauthorized"))
 		writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
 		return
 	}
 
 	ok, err := h.GH.AuthorizeForSite(r.Context(), token, login, teams)
 	if err != nil {
+		h.logAction(r.Context(), "deploy.init", "error", slog.String("reason", "authz_probe_failed"))
 		writeError(w, http.StatusServiceUnavailable, "upstream_unavailable", "could not probe team membership")
 		return
 	}
 	if !ok {
+		h.logAction(r.Context(), "deploy.init", "denied", slog.String("reason", "user_unauthorized"))
 		writeError(w, http.StatusForbidden, "user_unauthorized", "user is not on any authorized team for this site")
 		return
 	}
@@ -69,9 +76,13 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	deployID := h.NewDeployID(req.SHA)
 	tok, exp, err := h.JWT.Sign(login, req.Site, deployID)
 	if err != nil {
+		h.logAction(r.Context(), "deploy.init", "error", slog.String("reason", "jwt_sign_failed"))
 		writeError(w, http.StatusInternalServerError, "jwt_sign_failed", "could not sign deploy-session jwt")
 		return
 	}
+
+	telemetry.FromContext(r.Context()).SetResource(req.Site, deployID)
+	h.logAction(r.Context(), "deploy.init", "success")
 
 	writeJSON(w, http.StatusOK, DeployInitResponse{
 		DeployID:  deployID,
