@@ -299,13 +299,7 @@ func run() error {
 		h.GitHubApp = appClient
 	}
 
-	if pgRepo != nil {
-		h.Outbox = pgRepo
-		h.Tombstones = pgRepo
-		h.Trash = pgRepo
-		h.Index = pgRepo
-		h.Locker = pgRepo
-	}
+	wirePGRepo(h, pgRepo)
 	if pgDB != nil {
 		h.PGHealth = pgDB
 	}

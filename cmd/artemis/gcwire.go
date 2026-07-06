@@ -21,11 +21,24 @@ var (
 	_ handler.TrashStore        = (*pg.Repo)(nil)
 	_ handler.DeployIndexWriter = (*pg.Repo)(nil)
 	_ handler.SiteLocker        = (*pg.Repo)(nil)
+	_ handler.AuditStore        = (*pg.Repo)(nil)
 	_ handler.RepoStore         = (*pg.RepoQueue)(nil)
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)
 	_ pg.SitesSource            = (*valkey.Store)(nil)
 )
+
+func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
+	if repo == nil {
+		return
+	}
+	h.Outbox = repo
+	h.Tombstones = repo
+	h.Trash = repo
+	h.Index = repo
+	h.Locker = repo
+	h.Audit = repo
+}
 
 type gcPurgeAuditor struct{ repo *pg.Repo }
 
