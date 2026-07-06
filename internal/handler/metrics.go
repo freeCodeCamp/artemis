@@ -40,7 +40,8 @@ type Metrics struct {
 	HTTPRequestDuration *prometheus.HistogramVec
 	HTTPInFlight        prometheus.Gauge
 
-	ActionTotal *prometheus.CounterVec
+	ActionTotal      *prometheus.CounterVec
+	AuditEventsTotal *prometheus.CounterVec
 
 	DeploysTombstoned *prometheus.CounterVec
 }
@@ -126,9 +127,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_action_total",
 			Help: "Count of mutating actions emitted via logAction, labelled by action and outcome.",
 		}, []string{"action", "outcome"}),
+		AuditEventsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "artemis_audit_events_total",
+			Help: "Count of durable audit-log writes, labelled by action and outcome (incl audit_error on write failure).",
+		}, []string{"action", "outcome"}),
 	}
 	reg.MustRegister(m.RegistryRefreshFailures, m.AliasDrift, m.PromoteLegacyBare, m.UpstreamErrors,
-		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight, m.ActionTotal)
+		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight, m.ActionTotal, m.AuditEventsTotal)
 	return m
 }
 
