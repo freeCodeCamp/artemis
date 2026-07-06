@@ -166,12 +166,12 @@ func (r *Reader) run(ctx context.Context, events <-chan string, ttl time.Duratio
 				return
 			}
 			if err := r.Refresh(ctx); err != nil {
-				slog.Warn("valkey registry refresh failed (event-driven)", "err", err)
+				slog.Warn("registry.refresh.failed", "trigger", "event", "err", err)
 				r.invokeOnRefreshError(err)
 			}
 		case <-ticker.C:
 			if err := r.Refresh(ctx); err != nil {
-				slog.Warn("valkey registry refresh failed (ttl fallback)", "err", err)
+				slog.Warn("registry.refresh.failed", "trigger", "ttl", "err", err)
 				r.invokeOnRefreshError(err)
 			}
 		}
@@ -191,7 +191,7 @@ func (r *Reader) invokeOnRefreshError(err error) {
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			slog.Error("valkey registry OnRefreshError callback panicked",
+			slog.Error("registry.refresh.callback_panic",
 				"panic", p,
 				"err", err,
 			)

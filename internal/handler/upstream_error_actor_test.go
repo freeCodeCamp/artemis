@@ -25,7 +25,7 @@ func TestWriteUpstreamError_LogsActorSiteDeploy(t *testing.T) {
 
 	writeUpstreamError(sw, r, http.StatusBadGateway, "r2_put_failed", "r2.put.test", errors.New("boom"))
 
-	m, ok := cap.findAction("upstream error", "")
+	m, ok := cap.findAction("upstream.error", "")
 	require.True(t, ok, "upstream error log line captured")
 	assert.Equal(t, "alice", m["actor"])
 	assert.Equal(t, "www", m["site"])

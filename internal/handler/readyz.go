@@ -71,7 +71,7 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 	case pgErr != nil:
 		h.readyzValkey.observe(false, false)
 		h.readyzR2.observe(false, false)
-		slog.Error("readyz: postgres degraded", "err", pgErr)
+		slog.ErrorContext(r.Context(), "readyz.postgres.degraded", "err", pgErr)
 		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
 	default:
 		h.readyzValkey.observe(false, false)
@@ -103,10 +103,9 @@ func (p *probeState) observe(failed, report bool) bool {
 }
 
 func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error, page bool) {
-	slog.Warn("readiness probe upstream unavailable",
+	slog.WarnContext(r.Context(), "readyz.probe.unavailable",
 		"op", op,
 		"err", err,
-		"reqID", RequestIDFromContext(r.Context()),
 	)
 	if pkgMetrics != nil {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()

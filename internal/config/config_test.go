@@ -412,7 +412,7 @@ func TestLoad_GHAPIBaseOverrideWarn(t *testing.T) {
 	assert.Equal(t, override, cfg.GitHub.APIBase)
 
 	out := logs.String()
-	assert.True(t, strings.Contains(out, "GH_API_BASE overridden"),
+	assert.True(t, strings.Contains(out, "github.api_base.overridden"),
 		"warn missing from slog output: %q", out)
 	assert.Contains(t, out, "level=WARN")
 	assert.Contains(t, out, override)

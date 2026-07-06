@@ -319,11 +319,11 @@ func (c *Client) disableActions(ctx context.Context, token, name string) {
 	body, _ := json.Marshal(map[string]any{"enabled": false})
 	resp, respBody, err := c.do(ctx, http.MethodPut, url, token, body)
 	if err != nil {
-		slog.Warn("githubapp: disable actions request failed", "repo", name, "err", err)
+		slog.WarnContext(ctx, "githubapp.disable_actions.failed", "repo", name, "err", err)
 		return
 	}
 	if resp.StatusCode >= 300 {
-		slog.Warn("githubapp: disable actions non-2xx", "repo", name, "status", resp.StatusCode, "ghMessage", parseGitHubMessage(respBody))
+		slog.WarnContext(ctx, "githubapp.disable_actions.non_2xx", "repo", name, "status", resp.StatusCode, "ghMessage", parseGitHubMessage(respBody))
 	}
 }
 

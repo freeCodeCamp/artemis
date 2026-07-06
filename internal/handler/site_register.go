@@ -107,7 +107,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("site.register", "site", req.Slug, "teams", teams, "actor", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "site.register", "site", req.Slug, "teams", teams, "actor", login)
 	telemetry.FromContext(r.Context()).SetResource(req.Slug, "")
 	h.auditFromScope(r.Context(), "site.register", "success", map[string]any{"teams": teams, "createdBy": login})
 	writeJSON(w, http.StatusCreated, toSiteRow(site))

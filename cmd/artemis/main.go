@@ -51,11 +51,11 @@ const bootPhaseTimeout = 20 * time.Second
 func main() {
 	if err := run(); err != nil {
 		if errors.Is(err, context.Canceled) {
-			slog.Info("artemis: boot aborted by shutdown signal", "err", err)
+			slog.Info("boot.aborted", "err", err)
 			return
 		}
 		observability.CaptureFatal(err) // no-op unless Sentry was initialised
-		slog.Error("artemis: fatal", "err", err)
+		slog.Error("boot.fatal", "err", err)
 		os.Exit(1)
 	}
 }
@@ -64,7 +64,7 @@ func run() error {
 	// Log version BEFORE config.Load() so a misconfigured deploy still leaves
 	// a version breadcrumb in container logs (default slog handler is fine
 	// for this single line; configureLogger swaps it in below).
-	slog.Info("artemis: starting", "version", version, "commit", commit)
+	slog.Info("boot.starting", "version", version, "commit", commit)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -94,7 +94,7 @@ func run() error {
 	}
 	configureLogger(logLevel, sentryLog)
 	if sentryEnabled {
-		slog.Info("sentry enabled",
+		slog.Info("sentry.enabled",
 			"environment", cfg.Sentry.Environment,
 			"release", release,
 			"tracesSampleRate", cfg.Sentry.TracesSampleRate,
@@ -110,9 +110,9 @@ func run() error {
 	}
 	defer pgCleanup()
 	if pgDB != nil {
-		slog.Info("postgres: connected, migrations applied")
+		slog.Info("postgres.connected")
 	} else {
-		slog.Info("postgres disabled (DATABASE_URL unset); deploy-only mode, GC off")
+		slog.Info("postgres.disabled")
 	}
 
 	registryWriter, registryReader, registryHealth, registryCleanup, err := openRegistry(rootCtx, cfg, pgDB)
@@ -185,7 +185,7 @@ func run() error {
 			Org:      cfg.Repo.Org,
 			CacheTTL: cfg.GitHub.MembershipCacheTTL,
 		})
-		slog.Info("repo-creation feature enabled",
+		slog.Info("repo.feature.enabled",
 			"org", cfg.Repo.Org,
 			"createTeam", cfg.Repo.CreateAuthzTeam,
 			"approveTeam", cfg.Repo.ApproveAuthzTeam,
@@ -218,7 +218,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
 		}
-		slog.Info("gc: wired",
+		slog.Info("gc.wired",
 			"siteGCReady", gcw.SiteGC != nil,
 			"blastCap", cfg.Cleanup.BlastCap,
 			"retentionDays", cfg.Cleanup.RetentionDays,
@@ -239,7 +239,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("backfill: %w", err)
 		}
-		slog.Info("backfill complete (one-shot)",
+		slog.Info("backfill.complete",
 			"sites", res.Sites, "deploys", res.Deploys, "aliases", res.Aliases)
 		return nil
 	}
@@ -258,13 +258,13 @@ func run() error {
 			return fmt.Errorf("register gc workflows: %w", err)
 		}
 		go func() {
-			slog.Info("worker: starting", "addr", cfg.Hatchet.Addr)
+			slog.Info("worker.starting", "addr", cfg.Hatchet.Addr)
 			workerErrCh <- workerRuntime.Start(rootCtx)
 		}()
 
 		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
 		go runRelayLoop(rootCtx, relay, relayInterval, workerMetrics)
-		slog.Info("outbox relay: started", "interval", relayInterval)
+		slog.Info("outbox.relay.started", "interval", relayInterval)
 	}
 
 	h := &handler.Handlers{
@@ -321,7 +321,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("artemis: listening", "addr", addr)
+		slog.Info("server.listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -329,7 +329,7 @@ func run() error {
 
 	select {
 	case <-rootCtx.Done():
-		slog.Info("artemis: shutdown signal received")
+		slog.Info("server.shutdown.signal")
 	case err := <-errCh:
 		return fmt.Errorf("listen: %w", err)
 	case err := <-workerErrCh:
@@ -343,7 +343,7 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
-	slog.Info("artemis: shutdown complete")
+	slog.Info("server.shutdown.complete")
 	return nil
 }
 
@@ -392,7 +392,7 @@ func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registr
 			return nil, nil, nil, nil, fmt.Errorf("registry import: %w", err)
 		}
 		if imported > 0 {
-			slog.Info("registry import complete (one-shot)", "sites", imported)
+			slog.Info("registry.import.complete", "sites", imported)
 		}
 		writer = pgReg
 		source = pgReg

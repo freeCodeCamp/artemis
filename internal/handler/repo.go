@@ -171,7 +171,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.create", err)
 		return
 	}
-	slog.Info("repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "actor", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis), "actor", login)
 	writeJSON(w, http.StatusCreated, toRepoRow(created))
 }
 
@@ -188,7 +188,7 @@ func (h *Handlers) reconcileStaleClaim(r *http.Request, name string) bool {
 		case reporequest.StatusActive:
 			exists, _, gErr := h.GitHubApp.RepoExists(r.Context(), req.Name)
 			if gErr != nil {
-				slog.Warn("repo.create.reconcile_probe_failed", "id", req.ID, "name", req.Name, "err", gErr, "reqID", RequestIDFromContext(r.Context()))
+				slog.WarnContext(r.Context(), "repo.create.reconcile_probe_failed", "id", req.ID, "name", req.Name, "err", gErr)
 				return false
 			}
 			if exists {
@@ -197,7 +197,7 @@ func (h *Handlers) reconcileStaleClaim(r *http.Request, name string) bool {
 			if _, mErr := h.Repos.MarkStale(r.Context(), req.ID, "repository no longer exists on GitHub; name claim reconciled"); mErr != nil {
 				return false
 			}
-			slog.Warn("repo.create.reconciled_stale_claim", "id", req.ID, "name", req.Name, "reqID", RequestIDFromContext(r.Context()))
+			slog.WarnContext(r.Context(), "repo.create.reconciled_stale_claim", "id", req.ID, "name", req.Name)
 			return true
 		case reporequest.StatusPending, reporequest.StatusApproved:
 			return false
@@ -281,7 +281,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	login := LoginFromContext(r.Context())
-	slog.Info("repo.approve.start", "id", id, "actor", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "repo.approve.start", "id", id, "actor", login)
 
 	approved, err := h.Repos.Approve(r.Context(), id, login)
 	resume := false
@@ -307,7 +307,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		approved, resume = cur, true
-		slog.Warn("repo.approve.resume_stranded_approved", "id", id, "reqID", RequestIDFromContext(r.Context()))
+		slog.WarnContext(r.Context(), "repo.approve.resume_stranded_approved", "id", id)
 	default:
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.approve", err)
 		return
@@ -339,15 +339,14 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.As(ghErr, &existsErr):
 			msg = existsErr.Error()
-			slog.Warn("repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", "repo_exists", "reqID", RequestIDFromContext(r.Context()))
+			slog.WarnContext(r.Context(), "repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", "repo_exists")
 		case errors.As(ghErr, &uf):
 			msg = uf.Error()
-			slog.Warn("repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", uf.Error(), "reqID", RequestIDFromContext(r.Context()))
+			slog.WarnContext(r.Context(), "repo.approve.github_rejected", "outcome", "approved_failed", "id", id, "name", approved.Name, "reason", uf.Error())
 		default:
-			slog.Error("repo create upstream error",
+			slog.ErrorContext(r.Context(), "repo.create.upstream_error",
 				"op", "githubapp.createrepo",
 				"err", ghErr,
-				"reqID", RequestIDFromContext(r.Context()),
 				"id", id,
 			)
 			if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
@@ -372,7 +371,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markactive", mErr)
 		return
 	}
-	slog.Info("repo.approve.created", "id", id, "name", active.Name, "url", created.URL, "actor", login, "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "repo.approve.created", "id", id, "name", active.Name, "url", created.URL, "actor", login)
 	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: toRepoRow(active)})
 }
 
@@ -412,7 +411,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("repo.reject.recorded", "id", id, "actor", login, "reason", body.Reason, "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "repo.reject.recorded", "id", id, "actor", login, "reason", body.Reason)
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
 }
 
@@ -429,7 +428,7 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.delete", err)
 		return
 	}
-	slog.Info("repo.delete.removed", "id", id, "actor", LoginFromContext(r.Context()), "reqID", RequestIDFromContext(r.Context()))
+	slog.InfoContext(r.Context(), "repo.delete.removed", "id", id, "actor", LoginFromContext(r.Context()))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -440,8 +439,8 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) RepoTemplates(w http.ResponseWriter, r *http.Request) {
 	names, err := h.GitHubApp.ListTemplates(r.Context())
 	if err != nil {
-		slog.Warn("repo templates list failed; serving empty",
-			"err", err, "reqID", RequestIDFromContext(r.Context()))
+		slog.WarnContext(r.Context(), "repo.templates.failed",
+			"err", err)
 		writeJSON(w, http.StatusOK, RepoTemplatesResponse{Templates: []string{}})
 		return
 	}

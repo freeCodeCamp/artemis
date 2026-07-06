@@ -154,9 +154,8 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, context.Canceled) {
-			slog.Warn("deploy upload canceled by client",
+			slog.WarnContext(r.Context(), "deploy.upload.canceled",
 				"op", "r2.put.upload",
-				"reqID", RequestIDFromContext(r.Context()),
 				"path", r.URL.Path,
 			)
 			return
@@ -251,8 +250,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		return e
 	})
 	if err != nil {
-		slog.Warn("deploy.finalize.bytes_unavailable", "site", claims.Site, "deployId", deployID,
-			"err", err, "reqID", RequestIDFromContext(r.Context()))
+		slog.WarnContext(r.Context(), "deploy.finalize.bytes_unavailable", "err", err)
 		reportUpstream(r, "bytes_unavailable", "r2.list.bytes.finalize", err)
 		deployBytes = 0
 	}

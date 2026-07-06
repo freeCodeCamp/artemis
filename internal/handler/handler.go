@@ -172,7 +172,7 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {
-		slog.Error("outbox enqueue site.changed failed", "site", site, "err", err)
+		slog.ErrorContext(ctx, "outbox.enqueue.failed", "site", site, "err", err)
 		sentry.WithScope(func(scope *sentry.Scope) {
 			scope.SetTag("op", "outbox.enqueue")
 			scope.SetTag("site", site)
@@ -201,7 +201,7 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := h.Audit.RecordAudit(auditCtx, e); err != nil {
-		slog.Error("audit write failed", "action", e.Action, "actor", e.Actor, "err", err)
+		slog.ErrorContext(ctx, "audit.write.failed", "action", e.Action, "actor", e.Actor, "err", err)
 		if pkgMetrics != nil && pkgMetrics.AuditEventsTotal != nil {
 			pkgMetrics.AuditEventsTotal.WithLabelValues(e.Action, "audit_error").Inc()
 		}
@@ -264,7 +264,7 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // a short filterable label for the failing operation (e.g.,
 // "r2.put.alias", "valkey.register").
 func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code, op string, err error) {
-	slog.ErrorContext(r.Context(), "upstream error",
+	slog.ErrorContext(r.Context(), "upstream.error",
 		"op", op,
 		"err", err,
 		"path", r.URL.Path,
@@ -296,7 +296,7 @@ func reportUpstream(r *http.Request, code, op string, err error) {
 
 func writeLockError(w http.ResponseWriter, r *http.Request, err error) {
 	if pg.IsLockTimeout(err) {
-		slog.WarnContext(r.Context(), "site lock contended",
+		slog.WarnContext(r.Context(), "site.lock.contended",
 			"op", "pg.lock.site",
 			"path", r.URL.Path,
 		)

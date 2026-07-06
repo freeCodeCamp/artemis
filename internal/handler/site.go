@@ -73,10 +73,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	// release per RELEASING.md; the warn surfaces remaining callers
 	// before the next sprint flips this branch to 400 Bad Request.
 	if req.DeployID == "" && req.ExpectedCurrent == "" {
-		slog.Warn("promote.legacy_bare",
+		slog.WarnContext(r.Context(), "promote.legacy_bare",
 			"site", site,
-			"remote", r.RemoteAddr,
-			"reqID", RequestIDFromContext(r.Context()))
+			"remote", r.RemoteAddr)
 		if h.Metrics != nil {
 			h.Metrics.PromoteLegacyBare.Inc()
 		}

@@ -376,7 +376,7 @@ func (c *GitHubClient) userTeamsThroughDurableCache(ctx context.Context, cacheKe
 		return nil, err
 	}
 	if err := c.teamCacheDurable.Set(ctx, login, teams); err != nil {
-		slog.Warn("durable team cache write failed", "login", login, "err", err)
+		slog.WarnContext(ctx, "teamcache.write.failed", "login", login, "err", err)
 	}
 	return teams, nil
 }

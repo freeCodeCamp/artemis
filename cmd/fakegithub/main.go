@@ -63,10 +63,10 @@ func main() {
 	r.Put("/repos/{org}/{name}/actions/permissions", srv.handlePermissions)
 	r.Get("/repos/{org}/{name}/contents/*", srv.handleContents)
 
-	slog.Info("fakegithub listening", "addr", cfg.addr, "org", cfg.org, "user", cfg.user,
+	slog.Info("fakegithub.listening", "addr", cfg.addr, "org", cfg.org, "user", cfg.user,
 		"teams", cfg.teamList, "appID", cfg.appID, "jwtVerify", cfg.pubKey != nil)
 	if err := http.ListenAndServe(cfg.addr, r); err != nil {
-		slog.Error("fakegithub exited", "err", err)
+		slog.Error("fakegithub.exited", "err", err)
 		os.Exit(1)
 	}
 }
@@ -87,7 +87,7 @@ func loadConfig() config {
 	if pem := os.Getenv("FAKE_GH_APP_PUBLIC_KEY"); pem != "" {
 		key, err := jwt.ParseRSAPublicKeyFromPEM([]byte(pem))
 		if err != nil {
-			slog.Error("FAKE_GH_APP_PUBLIC_KEY parse failed", "err", err)
+			slog.Error("fakegithub.pubkey.parse_failed", "err", err)
 			os.Exit(2)
 		}
 		cfg.pubKey = key

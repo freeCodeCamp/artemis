@@ -343,7 +343,7 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 // fingerprint so the failures group on their own. No-op when disabled.
 func CaptureBackground(op string, err error) {
 	if IsTransient(err) {
-		slog.Warn("background op transient error (not reported to sentry)", "op", op, "err", err)
+		slog.Warn("background.transient", "op", op, "err", err)
 		return
 	}
 	sentry.WithScope(func(scope *sentry.Scope) {

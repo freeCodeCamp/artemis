@@ -51,8 +51,8 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 
 		liveBytes, bytesErr := h.R2.PrefixBytes(opCtx, dst)
 		if bytesErr != nil {
-			slog.Warn("deploy.restore.bytes_unavailable", "site", site, "deployId", deployID,
-				"err", bytesErr, "reqID", RequestIDFromContext(r.Context()))
+			slog.WarnContext(r.Context(), "deploy.restore.bytes_unavailable", "site", site, "deploy_id", deployID,
+				"err", bytesErr)
 			reportUpstream(r, "bytes_unavailable", "r2.list.bytes.restore", bytesErr)
 			liveBytes = 0
 		}

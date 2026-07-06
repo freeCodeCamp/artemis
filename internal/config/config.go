@@ -366,7 +366,7 @@ func Load() (*Config, error) {
 	// instance; suspicious if it appears in a production pod env.
 	// Warn loudly so operators see the override in startup logs.
 	if cfg.GitHub.APIBase != defaultGitHubAPIBase {
-		slog.Warn("GH_API_BASE overridden from default; ensure the override is trusted",
+		slog.Warn("github.api_base.overridden",
 			"configured", cfg.GitHub.APIBase,
 			"default", defaultGitHubAPIBase,
 		)

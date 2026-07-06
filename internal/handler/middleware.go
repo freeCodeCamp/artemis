@@ -198,9 +198,8 @@ func Recoverer(next http.Handler) http.Handler {
 				if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 					hub.RecoverWithContext(r.Context(), rec)
 				}
-				slog.Error("panic in handler",
+				slog.ErrorContext(r.Context(), "handler.panic",
 					"path", r.URL.Path,
-					"reqID", RequestIDFromContext(r.Context()),
 					"panic", rec,
 					"stack", string(debug.Stack()))
 				writeError(w, http.StatusInternalServerError, "internal_error", "internal server error")

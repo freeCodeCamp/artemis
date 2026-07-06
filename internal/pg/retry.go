@@ -41,7 +41,7 @@ func retryConnect(ctx context.Context, window, base, max time.Duration, connect 
 		if remaining := time.Until(deadline); remaining <= backoff {
 			return nil, err
 		}
-		slog.Warn("pg: connect failed, retrying",
+		slog.Warn("pg.connect.retrying",
 			"attempt", attempt,
 			"backoff", backoff,
 			"err", err,
