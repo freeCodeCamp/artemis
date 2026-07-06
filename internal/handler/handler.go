@@ -68,6 +68,10 @@ type TombstoneStore interface {
 	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
 }
 
+type AuditStore interface {
+	RecordAudit(ctx context.Context, e pg.AuditEvent) error
+}
+
 type TrashStore interface {
 	TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error)
 	RestoreDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64) error
@@ -115,6 +119,7 @@ type Handlers struct {
 	Outbox             SiteChangeEmitter
 	Index              DeployIndexWriter
 	Locker             SiteLocker
+	Audit              AuditStore
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or
@@ -174,6 +179,31 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 			scope.SetFingerprint([]string{"outbox.enqueue"})
 			sentry.CaptureException(err)
 		})
+	}
+}
+
+func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
+	if h.Audit == nil {
+		return
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := h.Audit.RecordAudit(auditCtx, e); err != nil {
+		slog.Error("audit write failed", "action", e.Action, "actor", e.Actor, "err", err)
+		if pkgMetrics != nil && pkgMetrics.AuditEventsTotal != nil {
+			pkgMetrics.AuditEventsTotal.WithLabelValues(e.Action, "audit_error").Inc()
+		}
+		if hub := sentry.GetHubFromContext(ctx); hub != nil {
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("op", "audit.record")
+				scope.SetFingerprint([]string{"audit.record"})
+				hub.CaptureException(err)
+			})
+		}
+		return
+	}
+	if pkgMetrics != nil && pkgMetrics.AuditEventsTotal != nil {
+		pkgMetrics.AuditEventsTotal.WithLabelValues(e.Action, e.Outcome).Inc()
 	}
 }
 
