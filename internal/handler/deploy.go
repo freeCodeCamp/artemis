@@ -83,6 +83,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 
 	telemetry.FromContext(r.Context()).SetResource(req.Site, deployID)
 	h.logAction(r.Context(), "deploy.init", "success")
+	h.auditFromScope(r.Context(), "deploy.init", "success", map[string]any{"sha": req.SHA})
 
 	writeJSON(w, http.StatusOK, DeployInitResponse{
 		DeployID:  deployID,
@@ -167,6 +168,7 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
 	h.logAction(r.Context(), "deploy.upload", "success",
 		slog.String("path", relPath), slog.Int64("bytes", contentLength))
+	h.auditFromScope(r.Context(), "deploy.upload", "success", map[string]any{"path": relPath, "bytes": contentLength})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"received": relPath,
 		"key":      key,
@@ -293,6 +295,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
 	h.logAction(r.Context(), "deploy.finalize", "success",
 		slog.String("mode", mode), slog.Int64("bytes", deployBytes))
+	h.auditFromScope(r.Context(), "deploy.finalize", "success", map[string]any{"mode": mode, "bytes": deployBytes})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(claims.Site, mode),
 		"deployId": deployID,

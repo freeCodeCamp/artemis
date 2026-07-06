@@ -156,6 +156,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	}
 	telemetry.FromContext(r.Context()).SetResource(site, deployID)
 	h.logAction(r.Context(), "site.promote", "success")
+	h.auditFromScope(r.Context(), "site.promote", "success", nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
 		"deployId": deployID,
@@ -262,6 +263,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	telemetry.FromContext(r.Context()).SetResource(site, req.To)
 	h.logAction(r.Context(), "site.rollback", "success", slog.String("to", req.To))
+	h.auditFromScope(r.Context(), "site.rollback", "success", map[string]any{"to": req.To})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
 		"deployId": req.To,

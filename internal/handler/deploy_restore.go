@@ -74,6 +74,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			}
 			telemetry.FromContext(r.Context()).SetResource(site, deployID)
 			h.logAction(r.Context(), "site.deploy.restore", "idempotent", slog.Int("moved", moved))
+			h.auditFromScope(r.Context(), "site.deploy.restore", "idempotent", map[string]any{"moved": moved})
 			writeJSON(w, http.StatusOK, map[string]any{
 				"site":     site,
 				"deployId": deployID,
@@ -86,6 +87,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 
 		telemetry.FromContext(r.Context()).SetResource(site, deployID)
 		h.logAction(r.Context(), "site.deploy.restore", "success", slog.Int("moved", moved), slog.Int64("bytes", liveBytes))
+		h.auditFromScope(r.Context(), "site.deploy.restore", "success", map[string]any{"moved": moved, "bytes": liveBytes})
 		writeJSON(w, http.StatusOK, map[string]any{
 			"site":     site,
 			"deployId": deployID,
