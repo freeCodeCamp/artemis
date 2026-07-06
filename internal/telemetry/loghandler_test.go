@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
+	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -50,6 +51,22 @@ func TestLogHandler_OmitsEmptyScope(t *testing.T) {
 	assert.False(t, hasReq, "no request_id when scope absent")
 	_, hasActor := m["actor"]
 	assert.False(t, hasActor)
+	_, hasTrace := m["trace_id"]
+	assert.False(t, hasTrace, "no trace_id when no active span")
+}
+
+func TestLogHandler_InjectsTraceIDs(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(telemetry.NewLogHandler(slog.NewJSONHandler(&buf, nil)))
+
+	span := sentry.StartSpan(context.Background(), "test.op")
+
+	log.InfoContext(span.Context(), "some.event")
+
+	m := decodeLine(t, &buf)
+	assert.Equal(t, span.TraceID.String(), m["trace_id"])
+	assert.Equal(t, span.SpanID.String(), m["span_id"])
 }
 
 func TestLogHandler_PreservesCallerAttrs(t *testing.T) {

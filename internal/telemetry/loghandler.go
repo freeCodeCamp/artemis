@@ -3,6 +3,8 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+
+	"github.com/getsentry/sentry-go"
 )
 
 func NewLogHandler(inner slog.Handler) slog.Handler {
@@ -17,6 +19,14 @@ func (h logHandler) Enabled(ctx context.Context, l slog.Level) bool {
 
 func (h logHandler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := FromContext(ctx).LogAttrs()
+	if span := sentry.SpanFromContext(ctx); span != nil {
+		if span.TraceID != (sentry.TraceID{}) {
+			attrs = append(attrs, slog.String("trace_id", span.TraceID.String()))
+		}
+		if span.SpanID != (sentry.SpanID{}) {
+			attrs = append(attrs, slog.String("span_id", span.SpanID.String()))
+		}
+	}
 	if len(attrs) == 0 {
 		return h.inner.Handle(ctx, r)
 	}
