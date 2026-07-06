@@ -89,7 +89,7 @@ func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
 	repo := &pg.Repo{}
 	r2c := &r2.Client{}
 
-	w, err := newGCWiring(cfg, repo, r2c, nil)
+	w, err := newGCWiring(cfg, repo, r2c)
 	require.NoError(t, err)
 	require.NotNil(t, w)
 
@@ -115,7 +115,7 @@ func TestNewGCWiring_RejectsBadFormat(t *testing.T) {
 		DeployPrefixFormat: "<site>/deploys/",
 		Cleanup:            config.CleanupConfig{BlastCap: 5, TrashPrefix: "_trash/"},
 	}
-	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, nil)
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
 	require.Error(t, err, "a format missing the deploy-id token must fail boot wiring, not produce a degenerate prefix fn")
 	require.Nil(t, w)
 }

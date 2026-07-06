@@ -37,7 +37,6 @@ type TombstonePurge struct {
 	Recovery  time.Duration
 	TrashBase string
 	Now       func() time.Time
-	Metrics   *Metrics
 	Locker    SiteLocker
 	Audit     PurgeAuditor
 }
@@ -106,10 +105,6 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 		}
 	}
 
-	if !dryRun {
-		p.Metrics.reclaimed(res.BytesReclaimed)
-		p.Metrics.run(WorkflowTombstonePurgeLabel, "ok")
-	}
 	slog.InfoContext(ctx, "gc.tombstone-purge.done", "purged", len(res.Purged), "bytes", res.BytesReclaimed, "dryRun", dryRun)
 	return res, nil
 }

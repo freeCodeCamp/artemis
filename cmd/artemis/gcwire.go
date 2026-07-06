@@ -138,7 +138,7 @@ type gcWiring struct {
 	Purge      *gc.TombstonePurge
 }
 
-func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.Metrics) (*gcWiring, error) {
+func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, error) {
 	layout, err := newGCLayout(cfg.DeployPrefixFormat, cfg.Cleanup.TrashPrefix)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,6 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
-			Metrics:      metrics,
 		},
 		Reconciler: &gc.Reconciler{
 			Lister:       r2c,
@@ -170,7 +169,6 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
-			Metrics:      metrics,
 		},
 		Purge: &gc.TombstonePurge{
 			Store:     repo,
@@ -178,7 +176,6 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, metrics *gc.
 			Recovery:  time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 			Now:       time.Now,
-			Metrics:   metrics,
 			Locker:    repo,
 			Audit:     gcPurgeAuditor{repo: repo},
 		},

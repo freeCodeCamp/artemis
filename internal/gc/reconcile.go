@@ -29,7 +29,6 @@ type Reconciler struct {
 	DeployPrefix func(site, id string) string
 	TrashPrefix  func(site, id string) string
 	Now          func() time.Time
-	Metrics      *Metrics
 }
 
 type DriftReport struct {
@@ -145,10 +144,6 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 		report.PGPruned = append(report.PGPruned, id)
 	}
 
-	rc.Metrics.drift("reindexed", len(report.Reindexed))
-	rc.Metrics.drift("orphan", len(report.OrphanTombstoned))
-	rc.Metrics.drift("pruned", len(report.PGPruned))
-	rc.Metrics.drift("aliased_missing", len(report.AliasedMissing))
 	slog.InfoContext(ctx, "reconcile.site.done", "site", site,
 		"reindexed", len(report.Reindexed),
 		"orphanTombstoned", len(report.OrphanTombstoned),

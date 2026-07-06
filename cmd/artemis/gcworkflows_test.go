@@ -14,9 +14,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/getsentry/sentry-go"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +46,7 @@ func TestCronCheckIn_ReconcileAndPurge(t *testing.T) {
 	t.Cleanup(func() { captureCheckIn = orig })
 
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{Store: fakeReaper{}, Now: time.Now}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
 		byName[d.Name] = d
@@ -126,7 +123,7 @@ func TestWorkflowScope_RunID(t *testing.T) {
 	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 
-	wrapped := observeWorkflow(nil, worker.WorkflowGCSite, func(context.Context, map[string]any) error { return nil })
+	wrapped := observeWorkflow(worker.WorkflowGCSite, func(context.Context, map[string]any) error { return nil })
 	require.NoError(t, wrapped(context.Background(), nil))
 
 	runID := rec.attr("workflow.start", "run_id")
@@ -147,23 +144,9 @@ func (f *capturingPublisher) Publish(_ context.Context, topic string, payload []
 
 func noSites() []string { return nil }
 
-func TestBackgroundDurationHistograms(t *testing.T) {
-	m := worker.NewMetrics(prometheus.NewRegistry())
-
-	wrapped := observeWorkflow(m, worker.WorkflowGCSite, func(context.Context, map[string]any) error { return nil })
-	require.NoError(t, wrapped(context.Background(), nil))
-	assert.Equal(t, 1, testutil.CollectAndCount(m.WorkflowDuration),
-		"a workflow run observes a duration sample")
-
-	m.ObserveRelayDuration(0.05)
-	var mt dto.Metric
-	require.NoError(t, m.RelayDuration.Write(&mt))
-	assert.Equal(t, uint64(1), mt.Histogram.GetSampleCount(), "relay RunOnce observes a duration sample")
-}
-
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
 	require.Len(t, defs, 4)
 
 	byName := map[string]worker.WorkflowDef{}
@@ -193,7 +176,7 @@ func TestReconcileScheduler_PublishesPerSite(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	pub := &capturingPublisher{}
 	sites := func() []string { return []string{"www", "learn"} }
-	defs := gcWorkflowDefs(gcw, true, nil, pub, sites)
+	defs := gcWorkflowDefs(gcw, true, pub, sites)
 
 	var sched worker.WorkflowDef
 	for _, d := range defs {
@@ -221,22 +204,18 @@ func TestSiteFromInput(t *testing.T) {
 	require.Error(t, err, "empty site rejected")
 }
 
-func TestObserveWorkflow_RecordsOutcome(t *testing.T) {
+func TestObserveWorkflow_PropagatesError(t *testing.T) {
 	cases := []struct {
-		name         string
-		inner        error
-		wantErr      bool
-		wantRuns     float64
-		wantFailures float64
-		outcome      string
+		name    string
+		inner   error
+		wantErr bool
 	}{
-		{name: "failed-run-bumps-failures", inner: errors.New("boom"), wantErr: true, wantRuns: 1, wantFailures: 1, outcome: "failed"},
-		{name: "ok-run-leaves-failures-zero", inner: nil, wantErr: false, wantRuns: 1, wantFailures: 0, outcome: "ok"},
+		{name: "failed-run-propagates", inner: errors.New("boom"), wantErr: true},
+		{name: "ok-run-returns-nil", inner: nil, wantErr: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := worker.NewMetrics(prometheus.NewRegistry())
-			wrapped := observeWorkflow(m, worker.WorkflowGCSite, func(context.Context, map[string]any) error {
+			wrapped := observeWorkflow(worker.WorkflowGCSite, func(context.Context, map[string]any) error {
 				return tc.inner
 			})
 
@@ -246,20 +225,13 @@ func TestObserveWorkflow_RecordsOutcome(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-
-			assert.Equal(t, tc.wantRuns,
-				testutil.ToFloat64(m.WorkflowRuns.WithLabelValues(worker.WorkflowGCSite, tc.outcome)),
-				"runs{outcome=%s} must be recorded", tc.outcome)
-			assert.Equal(t, tc.wantFailures,
-				testutil.ToFloat64(m.WorkflowFailures.WithLabelValues(worker.WorkflowGCSite)),
-				"WorkflowFailures is the alerting signal; failed runs must bump it, ok runs must not")
 		})
 	}
 }
 
 func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Reconciler: &gc.Reconciler{}, Purge: &gc.TombstonePurge{}}
-	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
 		byName[d.Name] = d
@@ -293,6 +265,6 @@ func (c *captureEngine) Stop(context.Context) error          { return nil }
 func TestRegisterGCWorkflows(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	rt := worker.NewRuntime(&captureEngine{})
-	require.NoError(t, registerGCWorkflows(rt, gcw, false, nil, &capturingPublisher{}, noSites))
+	require.NoError(t, registerGCWorkflows(rt, gcw, false, &capturingPublisher{}, noSites))
 	assert.Len(t, rt.Registered(), 4)
 }

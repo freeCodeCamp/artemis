@@ -59,7 +59,7 @@ const (
 	relayInterval              = 5 * time.Second
 )
 
-func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration, metrics *worker.Metrics) {
+func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -68,11 +68,7 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 			return
 		case <-ticker.C:
 			rctx := telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
-			start := time.Now()
-			n, err := relay.RunOnce(rctx)
-			metrics.ObserveRelay(n, err)
-			metrics.ObserveRelayDuration(time.Since(start).Seconds())
-			if err != nil {
+			if _, err := relay.RunOnce(rctx); err != nil {
 				slog.ErrorContext(rctx, "relay.run", "err", err)
 				observability.CaptureBackground("relay.run", err)
 			}
@@ -80,31 +76,26 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 	}
 }
 
-func observeWorkflow(metrics *worker.Metrics, name string, fn worker.Handler) worker.Handler {
+func observeWorkflow(name string, fn worker.Handler) worker.Handler {
 	return func(ctx context.Context, input map[string]any) error {
 		ctx = telemetry.NewContext(ctx, telemetry.NewRun(newRunID()))
 		slog.InfoContext(ctx, "workflow.start", "workflow", name)
-		start := time.Now()
 		err := fn(ctx, input)
-		metrics.ObserveDuration(name, time.Since(start).Seconds())
-		outcome := "ok"
 		if err != nil {
-			outcome = "failed"
 			slog.ErrorContext(ctx, "workflow.failed", "workflow", name, "err", err)
 		} else {
 			slog.InfoContext(ctx, "workflow.done", "workflow", name)
 		}
-		metrics.ObserveRun(name, outcome)
 		return err
 	}
 }
 
-func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publisher worker.Publisher, reconcileSites func() []string) []worker.WorkflowDef {
+func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reconcileSites func() []string) []worker.WorkflowDef {
 	return []worker.WorkflowDef{
 		{
 			Name: workflowReconcileScheduler,
 			Cron: []string{cronReconcile},
-			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(metrics, workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
+			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
 				var firstErr error
 				for _, site := range reconcileSites() {
 					payload, err := json.Marshal(map[string]string{"site": site})
@@ -128,7 +119,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 			Name:           worker.WorkflowGCSite,
 			ConcurrencyKey: worker.ConcurrencyKeySite,
 			EventTriggers:  []string{pg.TopicSiteChanged},
-			Handler: observeWorkflow(metrics, worker.WorkflowGCSite, func(ctx context.Context, input map[string]any) error {
+			Handler: observeWorkflow(worker.WorkflowGCSite, func(ctx context.Context, input map[string]any) error {
 				site, err := siteFromInput(input)
 				if err != nil {
 					return err
@@ -143,7 +134,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 		{
 			Name: worker.WorkflowTombstonePurge,
 			Cron: []string{cronTombstonePurge},
-			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(metrics, worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
+			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
 				if _, err := gcw.Purge.Run(ctx, dryRun); err != nil {
 					observability.CaptureBackground("tombstone.purge", err)
 					return err
@@ -155,7 +146,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publish
 			Name:           worker.WorkflowReconcile,
 			ConcurrencyKey: worker.ConcurrencyKeySite,
 			EventTriggers:  []string{topicSiteReconcile},
-			Handler: observeWorkflow(metrics, worker.WorkflowReconcile, func(ctx context.Context, input map[string]any) error {
+			Handler: observeWorkflow(worker.WorkflowReconcile, func(ctx context.Context, input map[string]any) error {
 				site, err := siteFromInput(input)
 				if err != nil {
 					return err
@@ -178,8 +169,8 @@ func siteFromInput(input map[string]any) (string, error) {
 	return s, nil
 }
 
-func registerGCWorkflows(rt *worker.Runtime, gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publisher worker.Publisher, reconcileSites func() []string) error {
-	for _, def := range gcWorkflowDefs(gcw, dryRun, metrics, publisher, reconcileSites) {
+func registerGCWorkflows(rt *worker.Runtime, gcw *gcWiring, dryRun bool, publisher worker.Publisher, reconcileSites func() []string) error {
+	for _, def := range gcWorkflowDefs(gcw, dryRun, publisher, reconcileSites) {
 		if err := rt.Register(def); err != nil {
 			return err
 		}

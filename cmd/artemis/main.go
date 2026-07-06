@@ -21,7 +21,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/backfill"
 	"github.com/freeCodeCamp/artemis/internal/config"
-	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/hatchet"
@@ -34,8 +33,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/teamcache"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -197,20 +194,13 @@ func run() error {
 		return fmt.Errorf("parse deploy prefix template: %w", err)
 	}
 
-	metricsReg := prometheus.NewRegistry()
-	metricsReg.MustRegister(
-		collectors.NewGoCollector(),
-		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-	)
-	workerMetrics := worker.NewMetrics(metricsReg)
 	registryReader.SetOnRefreshError(func(err error) {
 		observability.CaptureBackground("registry.refresh", err)
 	})
 
 	var gcw *gcWiring
 	if pgDB != nil {
-		gcMetrics := gc.NewMetrics(metricsReg)
-		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client, gcMetrics)
+		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client)
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
 		}
@@ -250,7 +240,7 @@ func run() error {
 		})
 		workerRuntime := worker.NewRuntime(hatchetAdapter)
 		reconcileSites := func() []string { return registryReader.Snapshot().Sites() }
-		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, workerMetrics, hatchetAdapter, reconcileSites); err != nil {
+		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, hatchetAdapter, reconcileSites); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)
 		}
 		go func() {
@@ -259,7 +249,7 @@ func run() error {
 		}()
 
 		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
-		go runRelayLoop(rootCtx, relay, relayInterval, workerMetrics)
+		go runRelayLoop(rootCtx, relay, relayInterval)
 		slog.Info("outbox.relay.started", "interval", relayInterval)
 	}
 

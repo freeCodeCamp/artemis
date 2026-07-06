@@ -9,8 +9,6 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/worker"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,16 +67,13 @@ func TestRelayLoop(t *testing.T) {
 	}}
 	pub := &fakePublisher{}
 	relay := &worker.Relay{Source: src, Publisher: pub, Batch: 10, Now: time.Now}
-	metrics := worker.NewMetrics(prometheus.NewRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { runRelayLoop(ctx, relay, time.Millisecond, metrics); close(done) }()
+	go func() { runRelayLoop(ctx, relay, time.Millisecond); close(done) }()
 
 	require.Eventually(t, func() bool { return pub.count() >= 1 }, 2*time.Second, time.Millisecond,
 		"relay loop must drain the outbox on tick")
-	require.Eventually(t, func() bool { return testutil.ToFloat64(metrics.RelayPublished) >= 1 }, 2*time.Second, time.Millisecond,
-		"relay loop must record published rows on /metrics")
 
 	cancel()
 	select {
@@ -88,22 +83,34 @@ func TestRelayLoop(t *testing.T) {
 	}
 }
 
-type erroringOutbox struct{}
+type erroringOutbox struct {
+	mu sync.Mutex
+	n  int
+}
 
-func (erroringOutbox) RelayBatch(context.Context, int, func(pg.OutboxEvent) error, time.Time) (int, error) {
+func (e *erroringOutbox) RelayBatch(context.Context, int, func(pg.OutboxEvent) error, time.Time) (int, error) {
+	e.mu.Lock()
+	e.n++
+	e.mu.Unlock()
 	return 0, errors.New("db down")
 }
 
-func TestRelayLoop_FailedTickBumpsFailures(t *testing.T) {
-	relay := &worker.Relay{Source: erroringOutbox{}, Publisher: &fakePublisher{}, Batch: 10, Now: time.Now}
-	metrics := worker.NewMetrics(prometheus.NewRegistry())
+func (e *erroringOutbox) calls() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.n
+}
+
+func TestRelayLoop_SurvivesFailedTicks(t *testing.T) {
+	src := &erroringOutbox{}
+	relay := &worker.Relay{Source: src, Publisher: &fakePublisher{}, Batch: 10, Now: time.Now}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { runRelayLoop(ctx, relay, time.Millisecond, metrics); close(done) }()
+	go func() { runRelayLoop(ctx, relay, time.Millisecond); close(done) }()
 
-	require.Eventually(t, func() bool { return testutil.ToFloat64(metrics.RelayFailures) >= 1 }, 2*time.Second, time.Millisecond,
-		"a relay RunOnce error must bump RelayFailures so a stalled outbox alerts")
+	require.Eventually(t, func() bool { return src.calls() >= 2 }, 2*time.Second, time.Millisecond,
+		"a failed RunOnce must not kill the loop; it keeps ticking")
 
 	cancel()
 	select {

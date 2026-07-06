@@ -28,5 +28,3 @@ func BenchmarkLogHandler_WithScope(b *testing.B) {
 		log.InfoContext(ctx, "bench.op")
 	}
 }
-
-

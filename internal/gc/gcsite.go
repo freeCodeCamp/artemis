@@ -38,7 +38,6 @@ type SiteGC struct {
 	TrashPrefix  func(site, id string) string
 	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
 	Now          func() time.Time
-	Metrics      *Metrics
 }
 
 type GCResult struct {
@@ -78,7 +77,6 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	res.AbortReason = plan.Reason
 
 	if dryRun {
-		g.Metrics.run(WorkflowGCSiteLabel, "dry-run")
 		slog.InfoContext(ctx, "gc.site.dry-run", "site", site, "planned", len(res.Planned), "capped", plan.Aborted)
 		return res, nil
 	}
@@ -126,14 +124,10 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 		}
 	}
 
-	g.Metrics.tombstoned("scheduled", len(res.Tombstoned))
-	outcome := "ok"
 	if plan.Aborted {
-		outcome = "capped"
 		slog.WarnContext(ctx, "gc.site.capped", "site", site,
 			"tombstoned", len(res.Tombstoned), "reason", plan.Reason)
 	}
-	g.Metrics.run(WorkflowGCSiteLabel, outcome)
 	slog.InfoContext(ctx, "gc.site.done", "site", site,
 		"planned", len(res.Planned),
 		"tombstoned", len(res.Tombstoned),

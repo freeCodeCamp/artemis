@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -200,16 +198,12 @@ func TestGC_BlastCapPartial(t *testing.T) {
 	mover := &fakeMover{}
 	g := newSiteGC(store, mover)
 	g.BlastCap = 5
-	reg := prometheus.NewRegistry()
-	g.Metrics = NewMetrics(reg)
 	res, err := g.Run(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.True(t, res.Aborted, "over-cap plan flagged capped")
 	assert.Len(t, res.Tombstoned, 5, "capped run makes partial progress: reaps exactly blast-cap, not zero")
 	assert.Len(t, mover.moves, 5)
-	assert.InDelta(t, 1, testutil.ToFloat64(g.Metrics.Runs.WithLabelValues(WorkflowGCSiteLabel, "capped")), 0.0001,
-		"capped outcome metric fires for alerting")
 }
 
 func TestGC_LockPerMove(t *testing.T) {
