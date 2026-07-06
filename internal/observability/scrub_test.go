@@ -10,6 +10,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,7 +73,7 @@ func TestIsSensitiveKey(t *testing.T) {
 	}
 }
 
-func TestScrubEvent_ClearsQueryStringAndBreadcrumbs(t *testing.T) {
+func TestScrubEvent_ClearsQueryStringAndScrubsBreadcrumbs(t *testing.T) {
 	event := &sentry.Event{
 		Breadcrumbs: []*sentry.Breadcrumb{{Message: "GET https://host/x?token=ghp_secret"}},
 		Request:     &sentry.Request{QueryString: "token=ghp_secret"},
@@ -81,7 +82,9 @@ func TestScrubEvent_ClearsQueryStringAndBreadcrumbs(t *testing.T) {
 	got := scrubEvent(event, nil)
 
 	require.Empty(t, got.Request.QueryString, "query string cleared")
-	require.Nil(t, got.Breadcrumbs, "breadcrumbs dropped wholesale")
+	require.Len(t, got.Breadcrumbs, 1, "breadcrumbs retained but scrubbed, not dropped")
+	require.Contains(t, got.Breadcrumbs[0].Message, "[REDACTED]")
+	require.NotContains(t, got.Breadcrumbs[0].Message, "ghp_secret")
 }
 
 func TestScrubEvent_RedactsExceptionAndMessage(t *testing.T) {
@@ -99,7 +102,35 @@ func TestScrubEvent_RedactsExceptionAndMessage(t *testing.T) {
 	require.NotContains(t, got.Message, "ghp_abc123")
 	require.Contains(t, got.Exception[0].Value, "[REDACTED]")
 	require.NotContains(t, got.Exception[0].Value, "hunter2")
-	require.Nil(t, got.Breadcrumbs, "request-less event still gets breadcrumbs scrubbed")
+	require.Len(t, got.Breadcrumbs, 1, "request-less event retains scrubbed breadcrumbs")
+	require.Equal(t, "x", got.Breadcrumbs[0].Message, "benign breadcrumb message untouched")
+}
+
+func TestScrubEvent_ScrubsNestedBreadcrumbData(t *testing.T) {
+	event := &sentry.Event{
+		Breadcrumbs: []*sentry.Breadcrumb{{
+			Message: "op done",
+			Data: map[string]any{
+				"url":           "https://h/x?token=ghp_leak",
+				"authorization": "Bearer ghp_x",
+				"nested":        map[string]any{"inner": "password=hunter2"},
+				"list":          []any{"gh_ok", "token=ghp_deep"},
+			},
+		}},
+	}
+
+	got := scrubEvent(event, nil)
+
+	require.Len(t, got.Breadcrumbs, 1)
+	bc := got.Breadcrumbs[0]
+	assert.NotContains(t, bc.Data, "authorization", "sensitive-keyed breadcrumb data dropped")
+	assert.Contains(t, bc.Data["url"].(string), "[REDACTED]")
+	assert.NotContains(t, bc.Data["url"].(string), "ghp_leak")
+	inner := bc.Data["nested"].(map[string]any)
+	assert.Contains(t, inner["inner"].(string), "[REDACTED]")
+	list := bc.Data["list"].([]any)
+	assert.Contains(t, list[1].(string), "[REDACTED]")
+	assert.NotContains(t, list[1].(string), "ghp_deep")
 }
 
 func TestScrubLog_RedactsBodyAndAttrs(t *testing.T) {

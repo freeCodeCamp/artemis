@@ -168,7 +168,13 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	for i := range event.Exception {
 		event.Exception[i].Value = ScrubText(event.Exception[i].Value)
 	}
-	event.Breadcrumbs = nil
+	for _, bc := range event.Breadcrumbs {
+		if bc == nil {
+			continue
+		}
+		bc.Message = ScrubText(bc.Message)
+		bc.Data = scrubBreadcrumbData(bc.Data)
+	}
 	if event.Request == nil {
 		return event
 	}
@@ -182,6 +188,36 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	event.Request.Data = ""
 	event.Request.QueryString = ""
 	return event
+}
+
+func scrubBreadcrumbData(data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		return nil
+	}
+	for k, v := range data {
+		if isSensitiveKey(k) {
+			delete(data, k)
+			continue
+		}
+		data[k] = scrubValue(v)
+	}
+	return data
+}
+
+func scrubValue(v interface{}) interface{} {
+	switch t := v.(type) {
+	case string:
+		return ScrubText(t)
+	case map[string]interface{}:
+		return scrubBreadcrumbData(t)
+	case []interface{}:
+		for i, val := range t {
+			t[i] = scrubValue(val)
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // scrubLog is the BeforeSendLog hook: the logs path bypasses BeforeSend
