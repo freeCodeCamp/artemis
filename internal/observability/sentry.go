@@ -333,6 +333,15 @@ func IsTransient(err error) bool {
 	return errors.Is(err, context.Canceled) || pg.IsInRecovery(err)
 }
 
+func CaptureWorkflowPanic(recovered any) {
+	sentry.WithScope(func(scope *sentry.Scope) {
+		scope.SetTag("op", "hatchet.task")
+		scope.SetLevel(sentry.LevelFatal)
+		scope.SetFingerprint([]string{"hatchet.panic"})
+		sentry.CurrentHub().Recover(recovered)
+	})
+}
+
 // CaptureFatal reports a boot/fatal error at level fatal and flushes
 // synchronously, since the process is about to exit. No-op when disabled.
 func CaptureFatal(err error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/hatchet-dev/hatchet/pkg/client/types"
 	hsdk "github.com/hatchet-dev/hatchet/sdks/go"
 
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
 
@@ -64,7 +65,12 @@ func (a *Adapter) Start(ctx context.Context) error {
 		workflows = append(workflows, a.buildWorkflow(client, def))
 	}
 
-	w, err := client.NewWorker(a.workerName(), hsdk.WithWorkflows(workflows...))
+	w, err := client.NewWorker(a.workerName(),
+		hsdk.WithWorkflows(workflows...),
+		hsdk.WithPanicHandler(func(_ hsdk.Context, recovered any) {
+			observability.CaptureWorkflowPanic(recovered)
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("hatchet: new worker: %w", err)
 	}

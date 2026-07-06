@@ -112,3 +112,15 @@ func TestCaptureBackground_CapturesRealError(t *testing.T) {
 	require.Len(t, rt.events, 1, "a non-transient error must still page Sentry")
 	require.Equal(t, "gc.site.run", rt.events[0].Tags["op"])
 }
+
+func TestCaptureWorkflowPanic_CapturesFatalWithTag(t *testing.T) {
+	rt := bindRecordingHub(t)
+
+	CaptureWorkflowPanic("boom in task")
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "a workflow-task panic pages Sentry")
+	require.Equal(t, sentry.LevelFatal, rt.events[0].Level)
+	require.Equal(t, "hatchet.task", rt.events[0].Tags["op"])
+	require.Equal(t, []string{"hatchet.panic"}, rt.events[0].Fingerprint)
+}
