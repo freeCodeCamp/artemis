@@ -145,11 +145,6 @@ type Handlers struct {
 	NewDeployID          func(sha string) string
 	Now                  func() time.Time
 	PublicURLForSite     func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
-	// Metrics, if non-nil, drives the per-endpoint counters surfaced
-	// at /metrics. SitePromote / SiteRollback use h.Metrics directly;
-	// writeUpstreamError reaches for the package-level handle installed
-	// via SetMetrics.
-	Metrics *Metrics
 
 	readyzValkey probeState
 	readyzR2     probeState
@@ -202,9 +197,6 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 	defer cancel()
 	if err := h.Audit.RecordAudit(auditCtx, e); err != nil {
 		slog.ErrorContext(ctx, "audit.write.failed", "action", e.Action, "actor", e.Actor, "err", err)
-		if pkgMetrics != nil && pkgMetrics.AuditEventsTotal != nil {
-			pkgMetrics.AuditEventsTotal.WithLabelValues(e.Action, "audit_error").Inc()
-		}
 		if hub := sentry.GetHubFromContext(ctx); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", "audit.record")
@@ -214,18 +206,12 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 		}
 		return
 	}
-	if pkgMetrics != nil && pkgMetrics.AuditEventsTotal != nil {
-		pkgMetrics.AuditEventsTotal.WithLabelValues(e.Action, e.Outcome).Inc()
-	}
 }
 
 func (h *Handlers) logAction(ctx context.Context, action, outcome string, attrs ...slog.Attr) {
 	sc := telemetry.FromContext(ctx)
 	sc.SetAction(action)
 	sc.SetOutcome(outcome)
-	if pkgMetrics != nil && pkgMetrics.ActionTotal != nil {
-		pkgMetrics.ActionTotal.WithLabelValues(action, outcome).Inc()
-	}
 	slog.LogAttrs(ctx, slog.LevelInfo, action, attrs...)
 }
 
@@ -274,9 +260,6 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 }
 
 func reportUpstream(r *http.Request, code, op string, err error) {
-	if pkgMetrics != nil {
-		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
-	}
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 		sc := telemetry.FromContext(r.Context())
 		hub.WithScope(func(scope *sentry.Scope) {
@@ -300,9 +283,6 @@ func writeLockError(w http.ResponseWriter, r *http.Request, err error) {
 			"op", "pg.lock.site",
 			"path", r.URL.Path,
 		)
-		if pkgMetrics != nil {
-			pkgMetrics.UpstreamErrors.WithLabelValues("pg.lock.site.contended").Inc()
-		}
 		writeError(w, http.StatusConflict, "site_locked", "another operation on this site is in progress; retry shortly")
 		return
 	}

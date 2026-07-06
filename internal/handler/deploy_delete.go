@@ -82,9 +82,6 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 	telemetry.FromContext(r.Context()).SetResource(site, deployID)
 	h.logAction(r.Context(), "site.deploy.delete", "success", slog.Int("moved", moved))
 	h.auditFromScope(r.Context(), "site.deploy.delete", "success", map[string]any{"moved": moved})
-	if pkgMetrics != nil && pkgMetrics.DeploysTombstoned != nil {
-		pkgMetrics.DeploysTombstoned.WithLabelValues("manual").Inc()
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"site":     site,
 		"deployId": deployID,

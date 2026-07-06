@@ -107,9 +107,6 @@ func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op stri
 		"op", op,
 		"err", err,
 	)
-	if pkgMetrics != nil {
-		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
-	}
 	if page {
 		if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {

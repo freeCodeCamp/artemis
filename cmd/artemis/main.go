@@ -202,19 +202,14 @@ func run() error {
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	metrics := handler.NewMetrics(metricsReg)
-	metrics.SetBuildInfo(version, commit)
-	handler.SetMetrics(metrics)
 	workerMetrics := worker.NewMetrics(metricsReg)
 	registryReader.SetOnRefreshError(func(err error) {
-		metrics.RegistryRefreshFailures.Inc()
 		observability.CaptureBackground("registry.refresh", err)
 	})
 
 	var gcw *gcWiring
 	if pgDB != nil {
 		gcMetrics := gc.NewMetrics(metricsReg)
-		metrics.DeploysTombstoned = gcMetrics.DeploysTombstoned
 		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client, gcMetrics)
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
@@ -287,7 +282,6 @@ func run() error {
 		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
 		NewDeployID:          r2.NewDeployID,
 		Now:                  time.Now,
-		Metrics:              metrics,
 	}
 
 	// Assign the repo interface deps only when enabled — assigning a

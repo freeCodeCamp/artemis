@@ -14,7 +14,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Per-key unexported struct{} types are the idiomatic Go pattern for
@@ -207,7 +206,6 @@ func Recoverer(next http.Handler) http.Handler {
 var accessLogSkipPaths = map[string]struct{}{
 	"/healthz": {},
 	"/readyz":  {},
-	"/metrics": {},
 }
 
 // AccessLog emits one structured log line per request after the handler
@@ -215,10 +213,6 @@ var accessLogSkipPaths = map[string]struct{}{
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		if pkgMetrics != nil && pkgMetrics.HTTPInFlight != nil {
-			pkgMetrics.HTTPInFlight.Inc()
-			defer pkgMetrics.HTTPInFlight.Dec()
-		}
 		sw := &statusWriter{ResponseWriter: w, code: 200}
 		next.ServeHTTP(sw, r)
 		if _, skip := accessLogSkipPaths[r.URL.Path]; skip {
@@ -227,19 +221,6 @@ func AccessLog(next http.Handler) http.Handler {
 		sc := telemetry.FromContext(r.Context())
 		if rc := chi.RouteContext(r.Context()); rc != nil {
 			sc.SetRoute(rc.RoutePattern())
-		}
-		if pkgMetrics != nil {
-			route := sc.Route()
-			if route == "" {
-				route = "unmatched"
-			}
-			class := statusClass(sw.code)
-			if pkgMetrics.HTTPRequestsTotal != nil {
-				pkgMetrics.HTTPRequestsTotal.WithLabelValues(route, r.Method, class).Inc()
-			}
-			if pkgMetrics.HTTPRequestDuration != nil {
-				observeWithTrace(pkgMetrics.HTTPRequestDuration.WithLabelValues(route, r.Method, class), time.Since(start).Seconds(), r.Context())
-			}
 		}
 		args := []any{
 			"method", r.Method,
@@ -252,23 +233,6 @@ func AccessLog(next http.Handler) http.Handler {
 		}
 		slog.InfoContext(r.Context(), "http", args...)
 	})
-}
-
-func traceID(ctx context.Context) string {
-	if span := sentry.SpanFromContext(ctx); span != nil && span.TraceID != (sentry.TraceID{}) {
-		return span.TraceID.String()
-	}
-	return ""
-}
-
-func observeWithTrace(obs prometheus.Observer, seconds float64, ctx context.Context) {
-	if ex, ok := obs.(prometheus.ExemplarObserver); ok {
-		if tid := traceID(ctx); tid != "" {
-			ex.ObserveWithExemplar(seconds, prometheus.Labels{"trace_id": tid})
-			return
-		}
-	}
-	obs.Observe(seconds)
 }
 
 type statusWriter struct {
