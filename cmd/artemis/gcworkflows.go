@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -12,9 +13,11 @@ import (
 )
 
 const (
-	topicSiteReconcile = "site.reconcile"
-	cronTombstonePurge = "0 3 * * *"
-	relayInterval      = 5 * time.Second
+	topicSiteReconcile         = "site.reconcile"
+	workflowReconcileScheduler = "reconcile-scheduler"
+	cronTombstonePurge         = "0 3 * * *"
+	cronReconcile              = "0 4 * * *"
+	relayInterval              = 5 * time.Second
 )
 
 func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration, metrics *worker.Metrics) {
@@ -47,8 +50,31 @@ func observeWorkflow(metrics *worker.Metrics, name string, fn worker.Handler) wo
 	}
 }
 
-func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics) []worker.WorkflowDef {
+func gcWorkflowDefs(gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publisher worker.Publisher, reconcileSites func() []string) []worker.WorkflowDef {
 	return []worker.WorkflowDef{
+		{
+			Name: workflowReconcileScheduler,
+			Cron: []string{cronReconcile},
+			Handler: observeWorkflow(metrics, workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
+				var firstErr error
+				for _, site := range reconcileSites() {
+					payload, err := json.Marshal(map[string]string{"site": site})
+					if err != nil {
+						if firstErr == nil {
+							firstErr = err
+						}
+						continue
+					}
+					if err := publisher.Publish(ctx, topicSiteReconcile, payload); err != nil {
+						observability.CaptureBackground("reconcile.schedule", err)
+						if firstErr == nil {
+							firstErr = err
+						}
+					}
+				}
+				return firstErr
+			}),
+		},
 		{
 			Name:           worker.WorkflowGCSite,
 			ConcurrencyKey: worker.ConcurrencyKeySite,
@@ -103,8 +129,8 @@ func siteFromInput(input map[string]any) (string, error) {
 	return s, nil
 }
 
-func registerGCWorkflows(rt *worker.Runtime, gcw *gcWiring, dryRun bool, metrics *worker.Metrics) error {
-	for _, def := range gcWorkflowDefs(gcw, dryRun, metrics) {
+func registerGCWorkflows(rt *worker.Runtime, gcw *gcWiring, dryRun bool, metrics *worker.Metrics, publisher worker.Publisher, reconcileSites func() []string) error {
+	for _, def := range gcWorkflowDefs(gcw, dryRun, metrics, publisher, reconcileSites) {
 		if err := rt.Register(def); err != nil {
 			return err
 		}

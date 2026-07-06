@@ -14,10 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type capturingPublisher struct {
+	topics   []string
+	payloads [][]byte
+}
+
+func (f *capturingPublisher) Publish(_ context.Context, topic string, payload []byte) error {
+	f.topics = append(f.topics, topic)
+	f.payloads = append(f.payloads, payload)
+	return nil
+}
+
+func noSites() []string { return nil }
+
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true, nil)
-	require.Len(t, defs, 3)
+	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
+	require.Len(t, defs, 4)
 
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
@@ -35,6 +48,32 @@ func TestGCWorkflowDefs(t *testing.T) {
 
 	rec := byName[worker.WorkflowReconcile]
 	assert.Equal(t, worker.ConcurrencyKeySite, rec.ConcurrencyKey, "reconcile serialized per site")
+	assert.Equal(t, []string{topicSiteReconcile}, rec.EventTriggers, "reconcile consumes site.reconcile events")
+
+	sched := byName[workflowReconcileScheduler]
+	assert.NotEmpty(t, sched.Cron, "reconcile scheduler is cron-triggered — the missing producer for site.reconcile")
+	assert.Empty(t, sched.EventTriggers, "scheduler is not itself event-driven")
+}
+
+func TestReconcileScheduler_PublishesPerSite(t *testing.T) {
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	pub := &capturingPublisher{}
+	sites := func() []string { return []string{"www", "learn"} }
+	defs := gcWorkflowDefs(gcw, true, nil, pub, sites)
+
+	var sched worker.WorkflowDef
+	for _, d := range defs {
+		if d.Name == workflowReconcileScheduler {
+			sched = d
+		}
+	}
+	require.NotNil(t, sched.Handler)
+	require.NoError(t, sched.Handler(context.Background(), nil))
+
+	require.Len(t, pub.topics, 2, "one site.reconcile event published per registered site")
+	assert.Equal(t, []string{topicSiteReconcile, topicSiteReconcile}, pub.topics)
+	assert.Contains(t, string(pub.payloads[0]), `"site":"www"`)
+	assert.Contains(t, string(pub.payloads[1]), `"site":"learn"`)
 }
 
 func TestSiteFromInput(t *testing.T) {
@@ -86,7 +125,7 @@ func TestObserveWorkflow_RecordsOutcome(t *testing.T) {
 
 func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Reconciler: &gc.Reconciler{}, Purge: &gc.TombstonePurge{}}
-	defs := gcWorkflowDefs(gcw, true, nil)
+	defs := gcWorkflowDefs(gcw, true, nil, &capturingPublisher{}, noSites)
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
 		byName[d.Name] = d
@@ -120,6 +159,6 @@ func (c *captureEngine) Stop(context.Context) error          { return nil }
 func TestRegisterGCWorkflows(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	rt := worker.NewRuntime(&captureEngine{})
-	require.NoError(t, registerGCWorkflows(rt, gcw, false, nil))
-	assert.Len(t, rt.Registered(), 3)
+	require.NoError(t, registerGCWorkflows(rt, gcw, false, nil, &capturingPublisher{}, noSites))
+	assert.Len(t, rt.Registered(), 4)
 }

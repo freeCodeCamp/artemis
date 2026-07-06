@@ -252,7 +252,8 @@ func run() error {
 			WorkerName: "artemis",
 		})
 		workerRuntime := worker.NewRuntime(hatchetAdapter)
-		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, workerMetrics); err != nil {
+		reconcileSites := func() []string { return registryReader.Snapshot().Sites() }
+		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, workerMetrics, hatchetAdapter, reconcileSites); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)
 		}
 		go func() {
