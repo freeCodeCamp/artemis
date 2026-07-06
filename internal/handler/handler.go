@@ -211,11 +211,15 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // a short filterable label for the failing operation (e.g.,
 // "r2.put.alias", "valkey.register").
 func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code, op string, err error) {
+	sc := telemetry.FromContext(r.Context())
 	slog.Error("upstream error",
 		"op", op,
 		"err", err,
-		"reqID", RequestIDFromContext(r.Context()),
+		"reqID", sc.ReqID,
 		"path", r.URL.Path,
+		"actor", sc.Actor(),
+		"site", sc.Site(),
+		"deployId", sc.DeployID(),
 	)
 	reportUpstream(r, code, op, err)
 	writeError(w, status, code, "upstream call failed")
@@ -226,9 +230,16 @@ func reportUpstream(r *http.Request, code, op string, err error) {
 		pkgMetrics.UpstreamErrors.WithLabelValues(op).Inc()
 	}
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
+		sc := telemetry.FromContext(r.Context())
 		hub.WithScope(func(scope *sentry.Scope) {
 			scope.SetTag("op", op)
 			scope.SetTag("error_code", code)
+			if site := sc.Site(); site != "" {
+				scope.SetTag("site", site)
+			}
+			if deployID := sc.DeployID(); deployID != "" {
+				scope.SetTag("deployId", deployID)
+			}
 			scope.SetFingerprint([]string{"upstream", op})
 			hub.CaptureException(err)
 		})
