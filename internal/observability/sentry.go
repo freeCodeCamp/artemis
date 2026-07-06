@@ -184,16 +184,6 @@ func isSensitiveKey(k string) bool {
 	return false
 }
 
-// scrubEvent is the BeforeSend / BeforeSendTransaction hook: it strips
-// secrets from issue and transaction events before delivery. The
-// Authorization / Cookie / Proxy-Authorization headers carry GitHub
-// bearer tokens and deploy-session JWTs; the body can be raw artifact
-// bytes; the query string is cleared as defense in depth. Breadcrumbs
-// are dropped wholesale — they ride along on every event (including the
-// Request-less CaptureBackground / CaptureFatal events, which is why
-// this runs before the nil-Request return) and artemis adds no
-// breadcrumbs worth the secret-exposure risk. Exception values and the
-// message are redacted because BeforeSend does not otherwise touch them.
 func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	if event == nil {
 		return event
