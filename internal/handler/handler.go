@@ -181,6 +181,9 @@ func (h *Handlers) logAction(ctx context.Context, action, outcome string, attrs 
 	sc := telemetry.FromContext(ctx)
 	sc.SetAction(action)
 	sc.SetOutcome(outcome)
+	if pkgMetrics != nil && pkgMetrics.ActionTotal != nil {
+		pkgMetrics.ActionTotal.WithLabelValues(action, outcome).Inc()
+	}
 	slog.LogAttrs(ctx, slog.LevelInfo, action, append(sc.LogAttrs(), attrs...)...)
 }
 

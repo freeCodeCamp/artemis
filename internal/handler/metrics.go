@@ -39,6 +39,8 @@ type Metrics struct {
 	HTTPRequestsTotal   *prometheus.CounterVec
 	HTTPRequestDuration *prometheus.HistogramVec
 	HTTPInFlight        prometheus.Gauge
+
+	ActionTotal *prometheus.CounterVec
 }
 
 func statusClass(code int) string {
@@ -118,9 +120,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "artemis_http_in_flight_requests",
 			Help: "Number of HTTP requests currently being served.",
 		}),
+		ActionTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "artemis_action_total",
+			Help: "Count of mutating actions emitted via logAction, labelled by action and outcome.",
+		}, []string{"action", "outcome"}),
 	}
 	reg.MustRegister(m.RegistryRefreshFailures, m.AliasDrift, m.PromoteLegacyBare, m.UpstreamErrors,
-		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight)
+		m.HTTPRequestsTotal, m.HTTPRequestDuration, m.HTTPInFlight, m.ActionTotal)
 	return m
 }
 
