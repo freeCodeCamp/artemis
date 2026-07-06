@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -151,7 +152,8 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("site.promote", "site", site, "deployId", deployID, "reqID", RequestIDFromContext(r.Context()))
+	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	h.logAction(r.Context(), "site.promote", "success")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
 		"deployId": deployID,
@@ -256,7 +258,8 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.Info("site.rollback", "site", site, "to", req.To, "reqID", RequestIDFromContext(r.Context()))
+	telemetry.FromContext(r.Context()).SetResource(site, req.To)
+	h.logAction(r.Context(), "site.rollback", "success", slog.String("to", req.To))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":      h.publicURL(site, "production"),
 		"deployId": req.To,

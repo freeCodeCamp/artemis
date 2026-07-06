@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 // SiteRow is the canonical JSON shape for a registry row across
@@ -196,7 +197,8 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			writeRegistryDeleteError(w, r, err)
 			return
 		}
-		slog.Info("site.delete", "slug", slug, "reqID", RequestIDFromContext(r.Context()))
+		telemetry.FromContext(r.Context()).SetResource(slug, "")
+		h.logAction(r.Context(), "site.delete", "success", slog.String("slug", slug))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -226,7 +228,8 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			writeRegistryDeleteError(w, r, err)
 			return nil
 		}
-		slog.Info("site.purge", "slug", slug, "moved", moved, "reqID", RequestIDFromContext(r.Context()))
+		telemetry.FromContext(r.Context()).SetResource(slug, "")
+		h.logAction(r.Context(), "site.purge", "success", slog.String("slug", slug), slog.Int("moved", moved))
 		writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
 		return nil
 	})

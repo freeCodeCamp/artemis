@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -62,8 +63,8 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		slog.Info("site.deploy.tombstoned", "site", site, "deployId", deployID, "moved", moved,
-			"reqID", RequestIDFromContext(r.Context()))
+		telemetry.FromContext(r.Context()).SetResource(site, deployID)
+		h.logAction(r.Context(), "site.deploy.delete", "success", slog.Int("moved", moved))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"site":     site,
 			"deployId": deployID,

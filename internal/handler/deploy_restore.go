@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -71,8 +72,8 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusGone, "already_purged", "tombstone is gone; deploy was already hard-purged")
 				return nil
 			}
-			slog.Info("site.deploy.restored.idempotent", "site", site, "deployId", deployID, "moved", moved,
-				"reqID", RequestIDFromContext(r.Context()))
+			telemetry.FromContext(r.Context()).SetResource(site, deployID)
+			h.logAction(r.Context(), "site.deploy.restore", "idempotent", slog.Int("moved", moved))
 			writeJSON(w, http.StatusOK, map[string]any{
 				"site":     site,
 				"deployId": deployID,
@@ -83,8 +84,8 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		slog.Info("site.deploy.restored", "site", site, "deployId", deployID, "moved", moved, "bytes", liveBytes,
-			"reqID", RequestIDFromContext(r.Context()))
+		telemetry.FromContext(r.Context()).SetResource(site, deployID)
+		h.logAction(r.Context(), "site.deploy.restore", "success", slog.Int("moved", moved), slog.Int64("bytes", liveBytes))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"site":     site,
 			"deployId": deployID,
