@@ -25,6 +25,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -358,6 +359,7 @@ func IsTransient(err error) bool {
 }
 
 func CaptureWorkflowPanic(recovered any) {
+	slog.Error("workflow.panic", "panic", recovered, "stack", string(debug.Stack()))
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("op", "hatchet.task")
 		scope.SetLevel(sentry.LevelFatal)

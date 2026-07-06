@@ -1,14 +1,17 @@
 package observability
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -111,6 +114,26 @@ func TestCaptureBackground_CapturesRealError(t *testing.T) {
 
 	require.Len(t, rt.events, 1, "a non-transient error must still page Sentry")
 	require.Equal(t, "gc.site.run", rt.events[0].Tags["op"])
+}
+
+func TestWorkflowPanic_SlogAndSentry(t *testing.T) {
+	rt := bindRecordingHub(t)
+
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	CaptureWorkflowPanic("boom in task")
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "panic still pages Sentry")
+	assert.Equal(t, sentry.LevelFatal, rt.events[0].Level)
+
+	out := buf.String()
+	assert.Contains(t, out, `"msg":"workflow.panic"`, "panic also emitted to stdout slog")
+	assert.Contains(t, out, `"level":"ERROR"`)
+	assert.Contains(t, out, "boom in task")
 }
 
 func TestCaptureWorkflowPanic_CapturesFatalWithTag(t *testing.T) {
