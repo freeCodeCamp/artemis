@@ -56,6 +56,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return // already wrote response
 	}
+	telemetry.Breadcrumb(r.Context(), "authz", "site authz resolved")
 
 	var req SitePromoteRequest
 	if !decodeJSONOptional(w, r, &req, maxJSONBodyBytes) {
@@ -85,6 +86,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 
 	var deployID string
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+		telemetry.Breadcrumb(r.Context(), "lock", "site lock acquired")
 		// CAS guard: read current production alias and bail on mismatch.
 		// Treat missing-alias as the empty string so callers can use CAS
 		// to assert "no prod yet" by passing ExpectedCurrent="".

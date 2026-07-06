@@ -230,6 +230,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.verify", err)
 		return
 	}
+	telemetry.Breadcrumb(r.Context(), "deploy", "deploy manifest verified")
 
 	markerKey := prefix + gc.MarkerObjectName
 	meta := fmt.Sprintf(`{"site":%q,"deployId":%q,"mode":%q,"finalizedAt":%q}`,
@@ -256,6 +257,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 
 	aliasKey := h.aliasKey(claims.Site, mode)
 	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), func() error {
+		telemetry.Breadcrumb(r.Context(), "lock", "site lock acquired")
 		if _, err := h.Registry.GetSite(r.Context(), claims.Site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
 				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be finalized")
