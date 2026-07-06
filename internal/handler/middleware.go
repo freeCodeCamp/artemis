@@ -199,10 +199,6 @@ func Recoverer(next http.Handler) http.Handler {
 	})
 }
 
-// accessLogSkipPaths are request URIs that bypass AccessLog. Health
-// + readiness + metrics probes from k8s arrive every few seconds
-// and flood the log without operator value; status codes feed the
-// regular probe-result counters instead.
 var accessLogSkipPaths = map[string]struct{}{
 	"/healthz": {},
 	"/readyz":  {},

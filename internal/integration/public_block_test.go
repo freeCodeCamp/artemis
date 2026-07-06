@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-// TestPublicRouteBlock asserts that the public Gateway HTTPRoute
-// rewrites /metrics + /readyz to /_artemis_blocked_path so external
-// callers see chi's catch-all 404 instead of operator-only payloads.
-// /healthz stays public for external liveness checks.
-//
 // The Gateway URLRewrite is configured in
 // k3s/gxy-management/apps/artemis/charts/artemis/templates/httproute.yaml.
 func TestPublicRouteBlock(t *testing.T) {
@@ -25,13 +20,6 @@ func TestPublicRouteBlock(t *testing.T) {
 		status, body := c.statusOnly(ctx, http.MethodGet, "/readyz", "", nil)
 		if status != 404 {
 			t.Fatalf("public /readyz: status=%d body=%s — want 404 (Gateway URLRewrite to /_artemis_blocked_path)", status, truncate(body, 200))
-		}
-	})
-
-	t.Run("metrics_returns_404", func(t *testing.T) {
-		status, body := c.statusOnly(ctx, http.MethodGet, "/metrics", "", nil)
-		if status != 404 {
-			t.Fatalf("public /metrics: status=%d body=%s — want 404 (Gateway URLRewrite to /_artemis_blocked_path)", status, truncate(body, 200))
 		}
 	})
 

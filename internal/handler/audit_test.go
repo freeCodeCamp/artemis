@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
@@ -36,10 +37,13 @@ func TestAudit_RecordsEvent(t *testing.T) {
 }
 
 func TestAudit_FireAndLogOnFailure(t *testing.T) {
+	logs := captureAccessLog(t)
 	h := &Handlers{Audit: &fakeAudit{err: errors.New("db down")}}
 	require.NotPanics(t, func() {
 		h.audit(context.Background(), pg.AuditEvent{Action: "site.delete", Actor: "alice", Outcome: "success"})
 	})
+	assert.Equal(t, slog.LevelError, logs.levelOf(t, "audit.write.failed"),
+		"a failed audit write must surface as an error log (never fails the response)")
 }
 
 func TestAudit_DetachedFromRequestCancellation(t *testing.T) {
