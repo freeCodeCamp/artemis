@@ -13,6 +13,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
+	"github.com/go-chi/chi/v5"
 )
 
 // Per-key unexported struct{} types are the idiomatic Go pattern for
@@ -227,9 +228,13 @@ func AccessLog(next http.Handler) http.Handler {
 			return
 		}
 		sc := telemetry.FromContext(r.Context())
+		if rc := chi.RouteContext(r.Context()); rc != nil {
+			sc.SetRoute(rc.RoutePattern())
+		}
 		args := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
+			"route", sc.Route(),
 			"status", sw.code,
 			"durMS", time.Since(start).Milliseconds(),
 			"reqID", sc.ReqID,
