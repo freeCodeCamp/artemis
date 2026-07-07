@@ -246,7 +246,7 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 			"name":                   spec.Name,
 			"description":            spec.Description,
 			"private":                spec.Private,
-			"auto_init":              true,
+			"auto_init":              false,
 			"has_issues":             true,
 			"has_projects":           false,
 			"has_wiki":               false,
