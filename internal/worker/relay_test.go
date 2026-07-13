@@ -66,10 +66,13 @@ func (p *fakePublisher) Publish(_ context.Context, topic string, _ []byte) error
 	return nil
 }
 
-type deadlinePublisher struct{ hadDeadline bool }
+type deadlinePublisher struct {
+	hadDeadline bool
+	deadline    time.Time
+}
 
 func (p *deadlinePublisher) Publish(ctx context.Context, _ string, _ []byte) error {
-	_, p.hadDeadline = ctx.Deadline()
+	p.deadline, p.hadDeadline = ctx.Deadline()
 	return nil
 }
 
@@ -80,8 +83,11 @@ func TestOutboxRelay_BoundsPublishDeadline(t *testing.T) {
 
 	_, err := relay.RunOnce(context.Background())
 	require.NoError(t, err)
-	assert.True(t, pub.hadDeadline,
+	require.True(t, pub.hadDeadline,
 		"publish must run under a bounded deadline so a Hatchet stall can't pin the pool connection + FOR UPDATE row locks")
+
+	assert.InDelta(t, float64(19*time.Second), float64(time.Until(pub.deadline)), float64(2*time.Second),
+		"publish deadline is ~19s (4s floor + 100*150ms) so a full default batch has budget to drain")
 }
 
 func TestOutboxRelay(t *testing.T) {

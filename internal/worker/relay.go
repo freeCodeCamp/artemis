@@ -15,7 +15,14 @@ type Publisher interface {
 	Publish(ctx context.Context, topic string, payload []byte) error
 }
 
-const defaultRelayTimeout = 4 * time.Second
+const (
+	relayTimeoutFloor   = 4 * time.Second
+	relayTimeoutPerItem = 150 * time.Millisecond
+)
+
+func relayTimeout(batch int) time.Duration {
+	return relayTimeoutFloor + time.Duration(batch)*relayTimeoutPerItem
+}
 
 type Relay struct {
 	Source    OutboxSource
@@ -32,7 +39,7 @@ func (r *Relay) RunOnce(ctx context.Context) (int, error) {
 	}
 	timeout := r.Timeout
 	if timeout <= 0 {
-		timeout = defaultRelayTimeout
+		timeout = relayTimeout(batch)
 	}
 	now := time.Now
 	if r.Now != nil {
