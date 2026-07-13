@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -118,5 +119,12 @@ func TestDeployFinalize_LogsSuccessWithActorAndBytes(t *testing.T) {
 	require.True(t, ok, "deploy.finalize success line emitted")
 	assert.Equal(t, "alice", m["actor"])
 	assert.Equal(t, deployID, m["deploy_id"])
-	assert.NotEqual(t, "0", m["bytes"], "deployBytes carried on the success line")
+	var want int64
+	for k, v := range store.objects {
+		if strings.HasPrefix(k, prefix) {
+			want += int64(len(v))
+		}
+	}
+	require.NotZero(t, want, "seeded deploy has non-zero bytes")
+	assert.Equal(t, strconv.FormatInt(want, 10), m["bytes"], "logged bytes equals the R2 prefix size at finalize (files + marker)")
 }
