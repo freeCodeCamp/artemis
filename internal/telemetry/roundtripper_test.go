@@ -50,3 +50,28 @@ func TestRoundTripper_NoScopeNoHeader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+func TestNewRoundTripper_NilBaseUsesDefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	var gotID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotID = r.Header.Get(telemetry.RequestIDHeader)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	rt := telemetry.NewRoundTripper(nil)
+	require.NotNil(t, rt)
+
+	sc := telemetry.New("req-nil-base")
+	req, err := http.NewRequestWithContext(telemetry.NewContext(context.Background(), sc), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := rt.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Equal(t, "req-nil-base", gotID, "nil base falls back to a working transport and still injects the request id")
+}
