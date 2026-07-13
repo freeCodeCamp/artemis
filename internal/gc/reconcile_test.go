@@ -222,3 +222,24 @@ func TestReconcile_ConsistentNoDrift(t *testing.T) {
 	assert.Empty(t, report.OrphanTombstoned)
 	assert.Empty(t, report.PGPruned)
 }
+
+func TestReconcile_AliasedWithMarker_ReindexedNotPaged(t *testing.T) {
+	id := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{
+		"www/deploys/" + id + "/index.html",
+		"www/deploys/" + id + "/" + MarkerObjectName,
+	}}
+	store := &fakeReconcileStore{
+		deploys: map[string][]Deploy{},
+		aliases: map[string]struct{}{id: {}},
+	}
+	mover := &fakeMover{}
+
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+
+	assert.Contains(t, report.Reindexed, id, "aliased + marker + unindexed self-heals via reindex")
+	assert.NotContains(t, report.AliasedMissing, id, "a self-healed deploy must not page as dangerous drift")
+	assert.Equal(t, []string{id}, store.reindexed, "reindex persisted to the store")
+	assert.Empty(t, mover.moves, "self-healed deploy is not tombstoned")
+}

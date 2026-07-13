@@ -90,15 +90,18 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 			continue
 		}
 		if _, aliased := aliases[id]; aliased {
-			report.AliasedMissing = append(report.AliasedMissing, id)
-			slog.WarnContext(ctx, "reconcile.aliased_unindexed", "site", site, "deploy_id", id,
-				"detail", "alias targets a deploy with no PG row; reindex, never tombstone (V1)")
 			if info.hasMarker {
 				if err := rc.Store.UpsertDeploy(ctx, site, id, info.mtime, 0, true, "active"); err != nil {
 					return report, fmt.Errorf("reconcile %s: reindex aliased %s: %w", site, id, err)
 				}
 				report.Reindexed = append(report.Reindexed, id)
+				slog.WarnContext(ctx, "reconcile.aliased_unindexed_reindexed", "site", site, "deploy_id", id,
+					"detail", "alias targeted an unindexed deploy with a marker; self-healed via reindex, no page")
+				continue
 			}
+			report.AliasedMissing = append(report.AliasedMissing, id)
+			slog.WarnContext(ctx, "reconcile.aliased_unindexed", "site", site, "deploy_id", id,
+				"detail", "alias targets a deploy with no PG row and no marker; reindex, never tombstone (V1)")
 			continue
 		}
 		switch {
