@@ -4,11 +4,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/reporequest"
+	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -139,4 +142,54 @@ func TestRouter_RepoRoutesMountedWhenEnabled(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "repo route must be mounted (bearer-guarded) when feature enabled")
+}
+
+type captureTransport struct {
+	mu     sync.Mutex
+	events []*sentry.Event
+}
+
+func (c *captureTransport) Configure(sentry.ClientOptions) {}
+func (c *captureTransport) SendEvent(e *sentry.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, e)
+}
+func (c *captureTransport) Flush(time.Duration) bool              { return true }
+func (c *captureTransport) FlushWithContext(context.Context) bool { return true }
+func (c *captureTransport) Close()                                {}
+
+func TestRouter_SentryMiddlewareMountedWhenClientConfigured(t *testing.T) {
+	tr := &captureTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn:              "https://public@example.test/1",
+		Transport:        tr,
+		EnableTracing:    true,
+		TracesSampleRate: 1.0,
+	})
+	require.NoError(t, err)
+
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	r := New(&handler.Handlers{})
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	client.Flush(2 * time.Second)
+
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	var names []string
+	for _, e := range tr.events {
+		if e.Type == "transaction" {
+			names = append(names, e.Transaction)
+		}
+	}
+	require.NotEmpty(t, names, "sentryhttp middleware mounted so a transaction was emitted; total events=%d", len(tr.events))
+	assert.Contains(t, names, "GET /healthz", "retagTransaction set the tx name to the chi route pattern")
 }
