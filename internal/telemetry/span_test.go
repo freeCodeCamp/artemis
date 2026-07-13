@@ -48,10 +48,16 @@ func TestWithSpan_EmitsChildSpanOnSampledTx(t *testing.T) {
 		ops = append(ops, sp.Op)
 	}
 	assert.Contains(t, ops, "r2.put.test", "child span emitted with the op name")
+
+	for _, sp := range tr.events[0].Spans {
+		if sp.Op == "r2.put.test" {
+			assert.NotEqual(t, sentry.SpanStatusInternalError, sp.Status, "success path does not mark the span errored")
+		}
+	}
 }
 
 func TestWithSpan_PropagatesError(t *testing.T) {
-	hub, _ := newTracingHub(t)
+	hub, tr := newTracingHub(t)
 	ctx := sentry.SetHubOnContext(context.Background(), hub)
 	tx := sentry.StartTransaction(ctx, "test-tx")
 
@@ -60,4 +66,15 @@ func TestWithSpan_PropagatesError(t *testing.T) {
 	tx.Finish()
 
 	assert.ErrorIs(t, got, want, "WithSpan returns the wrapped fn error verbatim")
+
+	require.Len(t, tr.events, 1)
+	var errored *sentry.Span
+	for _, sp := range tr.events[0].Spans {
+		if sp.Op == "r2.put.test" {
+			errored = sp
+			break
+		}
+	}
+	require.NotNil(t, errored, "child span emitted on the error path")
+	assert.Equal(t, sentry.SpanStatusInternalError, errored.Status, "error path marks the span status InternalError")
 }
