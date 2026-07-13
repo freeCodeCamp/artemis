@@ -2,6 +2,7 @@ package telemetry_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -68,21 +69,23 @@ func TestSetters_ConcurrentNoRace(t *testing.T) {
 	t.Parallel()
 
 	sc := telemetry.New("req-3")
+	actors := make([]string, 50)
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
+		actors[i] = fmt.Sprintf("a-%d", i)
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			sc.SetActor("a")
+			sc.SetActor(fmt.Sprintf("a-%d", i))
 			sc.SetAction("x")
 			sc.SetResource("s", "d")
 			sc.SetOutcome("o")
 			sc.SetRoute("/r")
 			_ = sc.LogAttrs()
-		}()
+		}(i)
 	}
 	wg.Wait()
-	assert.Equal(t, "a", sc.Actor())
+	assert.Contains(t, actors, sc.Actor(), "final actor is one of the concurrently-written values")
 }
 
 func TestLogAttrs_OrderAndOmitEmpty(t *testing.T) {
