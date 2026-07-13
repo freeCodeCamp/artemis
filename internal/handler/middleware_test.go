@@ -183,6 +183,19 @@ func TestAccessLog_PassesThroughStatus(t *testing.T) {
 	assert.Equal(t, "brewing", w.Body.String())
 }
 
+func TestAccessLog_SkipsProbePaths(t *testing.T) {
+	cap := captureAccessLog(t)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mw := RequestID(AccessLog(next))
+
+	mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	assert.Equal(t, 0, cap.countMessage("http"), "probe paths are silenced: no access-log line")
+
+	mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/whoami", nil))
+	assert.Equal(t, 1, cap.countMessage("http"), "a non-probe request emits exactly one access-log line")
+}
+
 func TestRequireGitHubBearer_BadToken_Returns401(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{}},

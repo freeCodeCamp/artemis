@@ -126,6 +126,18 @@ func (h *capturingHandler) actionKeyCount(t *testing.T, msg, key string) int {
 	return 0
 }
 
+func (h *capturingHandler) countMessage(msg string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, rec := range h.records {
+		if rec.Message == msg {
+			n++
+		}
+	}
+	return n
+}
+
 func captureAccessLog(t *testing.T) *capturingHandler {
 	t.Helper()
 	cap := &capturingHandler{}
