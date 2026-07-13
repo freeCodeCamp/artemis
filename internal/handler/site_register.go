@@ -157,15 +157,32 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	before, beforeErr := h.Registry.GetSite(r.Context(), slug)
-	site, err := h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
-	if err != nil {
-		switch {
-		case errors.Is(err, registry.ErrNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "site is not registered")
-		default:
-			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.update", err)
+	var (
+		before    registry.Site
+		beforeErr error
+		site      registry.Site
+		wrote     bool
+	)
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(slug), func() error {
+		before, beforeErr = h.Registry.GetSite(r.Context(), slug)
+		var err error
+		site, err = h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
+		if err != nil {
+			switch {
+			case errors.Is(err, registry.ErrNotFound):
+				writeError(w, http.StatusNotFound, "not_found", "site is not registered")
+			default:
+				writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "valkey.update", err)
+			}
+			wrote = true
 		}
+		return nil
+	})
+	if lockErr != nil {
+		writeLockError(w, r, lockErr)
+		return
+	}
+	if wrote {
 		return
 	}
 	beforeTeams := any(before.Teams)

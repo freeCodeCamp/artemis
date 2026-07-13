@@ -130,3 +130,23 @@ func TestSiteUpdate_502OnRegistryWriteError(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "registry_write_failed")
 }
+
+func TestSiteUpdate_SerializedUnderSiteLock(t *testing.T) {
+	log := &eventLog{}
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
+	h.Locker = &fakeLocker{log: log}
+
+	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
+	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
+
+	log.events = nil
+
+	updBody, _ := json.Marshal(SiteUpdateRequest{Teams: []string{"platform"}})
+	w := callUpdate(h, "example", updBody, "alice", "tok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assert.Contains(t, log.events, "lock:example.freecode.camp",
+		"SiteUpdate reads+writes under the per-site lock; events=%v", log.events)
+	assert.Contains(t, log.events, "unlock:example.freecode.camp", "per-site lock released")
+}
