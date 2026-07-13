@@ -82,3 +82,35 @@ func TestLogHandler_PreservesCallerAttrs(t *testing.T) {
 	assert.Equal(t, "req-2", m["request_id"])
 	assert.Equal(t, "boom", m["err"])
 }
+
+func TestLogHandler_WithAttrs_KeepsScopeInjection(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(telemetry.NewLogHandler(slog.NewJSONHandler(&buf, nil))).With("component", "relay")
+
+	sc := telemetry.New("req-w")
+	sc.SetActor("alice")
+	ctx := telemetry.NewContext(context.Background(), sc)
+	log.InfoContext(ctx, "msg")
+
+	m := decodeLine(t, &buf)
+	assert.Equal(t, "relay", m["component"], "WithAttrs attr present")
+	assert.Equal(t, "req-w", m["request_id"], "scope injection survives the WithAttrs rewrap")
+	assert.Equal(t, "alice", m["actor"])
+}
+
+func TestLogHandler_WithGroup_KeepsScopeInjection(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(telemetry.NewLogHandler(slog.NewJSONHandler(&buf, nil))).WithGroup("g")
+
+	sc := telemetry.New("req-g")
+	ctx := telemetry.NewContext(context.Background(), sc)
+	log.InfoContext(ctx, "msg", "k", "v")
+
+	m := decodeLine(t, &buf)
+	g, ok := m["g"].(map[string]any)
+	require.True(t, ok, "group object present; got=%v", m)
+	assert.Equal(t, "v", g["k"], "caller attr under the group")
+	assert.Equal(t, "req-g", g["request_id"], "scope injection survives the WithGroup rewrap")
+}
