@@ -47,4 +47,6 @@ jobs:
             -pkg github.com/freeCodeCamp/artemis/internal/pg \
             -pkg github.com/freeCodeCamp/artemis/internal/observability \
             -pkg github.com/freeCodeCamp/artemis/internal/telemetry \
+            -pkg github.com/freeCodeCamp/artemis/internal/config \
+            -pkg github.com/freeCodeCamp/artemis/internal/server \
             coverage.txt
