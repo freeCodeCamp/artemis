@@ -105,6 +105,27 @@ func (h *capturingHandler) httpKeyCount(t *testing.T, key string) int {
 	return 0
 }
 
+func (h *capturingHandler) actionKeyCount(t *testing.T, msg, key string) int {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, rec := range h.records {
+		if rec.Message != msg {
+			continue
+		}
+		n := 0
+		rec.Attrs(func(a slog.Attr) bool {
+			if a.Key == key {
+				n++
+			}
+			return true
+		})
+		return n
+	}
+	t.Fatalf("no record with message %q", msg)
+	return 0
+}
+
 func captureAccessLog(t *testing.T) *capturingHandler {
 	t.Helper()
 	cap := &capturingHandler{}
@@ -151,6 +172,31 @@ func TestAccessLog_NoDuplicateKeys(t *testing.T) {
 	assert.Equal(t, 0, cap.httpKeyCount(t, "reqID"), "reqID replaced by request_id")
 	assert.Equal(t, 1, cap.httpKeyCount(t, "actor"), "exactly one actor key")
 	assert.Equal(t, 1, cap.httpKeyCount(t, "request_id"), "exactly one request_id key")
+}
+
+func TestActionLog_ScopeSuppliesSingleActor(t *testing.T) {
+	cap := captureAccessLog(t)
+	h, _ := newTestHandlers(t,
+		&fakeGH{tokenLogins: map[string]string{"good": "alice"}},
+		&fakeSites{bySite: map[string][]string{}},
+		newFakeR2())
+
+	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slog.InfoContext(r.Context(), "action.scoped", "id", "x")
+		slog.InfoContext(r.Context(), "action.explicit_actor", "id", "x", "actor", "alice")
+		w.WriteHeader(http.StatusOK)
+	})
+	chain := RequestID(AccessLog(h.RequireGitHubBearer(final)))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
+	r.Header.Set("Authorization", "Bearer good")
+	chain.ServeHTTP(httptest.NewRecorder(), r)
+
+	assert.Equal(t, 1, cap.actionKeyCount(t, "action.scoped", "actor"), "scope supplies exactly one actor on an action log")
+	scoped, ok := cap.findAction("action.scoped", "")
+	require.True(t, ok, "action.scoped record captured")
+	assert.Equal(t, "alice", scoped["actor"], "scope-supplied actor is the bearer login")
+	assert.Equal(t, 2, cap.actionKeyCount(t, "action.explicit_actor", "actor"), "an explicit actor arg duplicates the scope-supplied key")
 }
 
 func TestAccessLog_DeployJWT_ActorPopulated(t *testing.T) {

@@ -196,7 +196,7 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := h.Audit.RecordAudit(auditCtx, e); err != nil {
-		slog.ErrorContext(ctx, "audit.write.failed", "action", e.Action, "actor", e.Actor, "err", err)
+		slog.ErrorContext(ctx, "audit.write.failed", "action", e.Action, "err", err)
 		if hub := sentry.GetHubFromContext(ctx); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", "audit.record")
