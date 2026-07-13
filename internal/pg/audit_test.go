@@ -29,6 +29,10 @@ func TestAuditLog_AppendOnly_DBEnforced(t *testing.T) {
 	require.Error(t, err, "DELETE on audit_log must be rejected by the DB (append-only, V5)")
 	assert.Contains(t, err.Error(), "append-only")
 
+	_, err = repo.pool.Exec(ctx, `TRUNCATE audit_log`)
+	require.Error(t, err, "TRUNCATE on audit_log must be rejected by the DB (a row-level UPDATE/DELETE guard does not fire on TRUNCATE, V5)")
+	assert.Contains(t, err.Error(), "append-only")
+
 	var n int
 	require.NoError(t, repo.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log`).Scan(&n))
 	assert.Equal(t, 1, n, "the row survives the rejected mutations")
