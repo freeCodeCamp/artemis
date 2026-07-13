@@ -85,10 +85,10 @@ func TestRelayBatch_PublishFailureLeavesEventUnpublished(t *testing.T) {
 	remaining, err := repo.FetchUnpublished(ctx, 10)
 	require.NoError(t, err)
 	require.Len(t, remaining, 1, "the failed event stays unpublished for retry (at-least-once)")
-	assert.Equal(t, "b", topicSitePayload(t, remaining[0]))
+	assert.Equal(t, "b", payloadSite(t, remaining[0]))
 }
 
-func topicSitePayload(t *testing.T, e OutboxEvent) string {
+func payloadSite(t *testing.T, e OutboxEvent) string {
 	t.Helper()
 	var m map[string]string
 	require.NoError(t, json.Unmarshal(e.Payload, &m))

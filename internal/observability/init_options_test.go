@@ -13,7 +13,7 @@ func TestInit_ClientOptionsHardening(t *testing.T) {
 	opts := buildClientOptions(Config{DSN: "https://public@example.test/1", Environment: "prod", Release: "r1"})
 
 	assert.Equal(t, "artemis-pod-xyz", opts.ServerName, "ServerName from pod hostname")
-	assert.Equal(t, maxBreadcrumbs, opts.MaxBreadcrumbs, "explicit MaxBreadcrumbs")
+	assert.Equal(t, 50, opts.MaxBreadcrumbs, "explicit MaxBreadcrumbs")
 	require.NotNil(t, opts.BeforeBreadcrumb, "BeforeBreadcrumb hook installed")
 
 	bc := opts.BeforeBreadcrumb(&sentry.Breadcrumb{Message: "auth Bearer abc123def"}, nil)
