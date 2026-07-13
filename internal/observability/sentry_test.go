@@ -28,6 +28,19 @@ func TestInit_DisabledWhenNoDSN(t *testing.T) {
 	flush() // must be safe to call
 }
 
+func TestInit_EnabledWithDSN(t *testing.T) {
+	prev := sentry.CurrentHub().Client()
+	t.Cleanup(func() { sentry.CurrentHub().BindClient(prev) })
+
+	flush, enabled, err := Init(Config{DSN: "https://public@example.test/1"})
+	require.NoError(t, err)
+	require.True(t, enabled, "a non-empty DSN initialises the SDK")
+	require.NotNil(t, flush)
+	require.NotNil(t, sentry.CurrentHub().Client(), "Init binds a client to the current hub")
+
+	flush() // drains an empty queue; must return promptly
+}
+
 func TestProbeSampleRate(t *testing.T) {
 	const base = 0.3
 	for _, name := range []string{"GET /healthz", "GET /readyz"} {
