@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 )
@@ -49,19 +50,30 @@ func (r *Repo) NewLockSession(ctx context.Context) (gc.LockSession, error) {
 	return &lockSession{conn: conn}, nil
 }
 
-type lockSession struct {
-	conn *pgx.Conn
+type sessionConn interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Close(ctx context.Context) error
 }
 
-func (s *lockSession) WithSiteLock(ctx context.Context, site string, fn func() error) error {
-	if _, err := s.conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); err != nil {
-		return fmt.Errorf("site lock %s: %w", site, err)
+type lockSession struct {
+	conn sessionConn
+}
+
+func (s *lockSession) WithSiteLock(ctx context.Context, site string, fn func() error) (err error) {
+	if _, lockErr := s.conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); lockErr != nil {
+		return fmt.Errorf("site lock %s: %w", site, lockErr)
 	}
 	defer func() {
 		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if _, err := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, site); err != nil {
-			slog.WarnContext(ctx, "lock.site.unlock_failed", "site", site, "err", err)
+		if _, unlockErr := s.conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, site); unlockErr != nil {
+			slog.WarnContext(ctx, "lock.site.unlock_failed", "site", site, "err", unlockErr)
+			closeCtx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			_ = s.conn.Close(closeCtx)
+			ccancel()
+			if err == nil {
+				err = fmt.Errorf("site unlock %s: %w", site, unlockErr)
+			}
 		}
 	}()
 	return fn()
