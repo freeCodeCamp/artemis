@@ -406,6 +406,11 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONOptional(w, r, &body, maxJSONBodyBytes) {
 		return
 	}
+	if utf8.RuneCountInString(body.Reason) > maxRepoDescriptionLen {
+		writeError(w, http.StatusBadRequest, "invalid_reason",
+			"reason must be 350 characters or fewer")
+		return
+	}
 
 	login := LoginFromContext(r.Context())
 	rejected, err := h.Repos.Reject(r.Context(), id, login, body.Reason)

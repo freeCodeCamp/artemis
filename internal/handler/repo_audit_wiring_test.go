@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,6 +132,32 @@ func TestRepoReject_AuditCapturesRepoName(t *testing.T) {
 
 	require.Len(t, fa.events, 1)
 	assert.Equal(t, "scope-creep", fa.events[0].Detail["name"], "reject audit must name the repo, not just the queue id")
+}
+
+func TestRepoReject_RejectsOverlongReasonBeforeAudit(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "r", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h, fa := repoAuditHandlers(t, store, &fakeRepoCreator{})
+
+	body, _ := json.Marshal(RepoRejectRequest{Reason: strings.Repeat("x", maxRepoDescriptionLen+1)})
+	w := withChiRoute(http.MethodPost, "/api/repo/{id}/reject", "/api/repo/"+created.ID+"/reject", body, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.RepoReject))).ServeHTTP, context.Background())
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Empty(t, fa.events, "an over-long reason is refused before any durable audit row is written")
+}
+
+func TestRepoApprove_TransientRetryRecordsNoAudit(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "transient", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	_, err := store.Approve(context.Background(), created.ID, "alice")
+	require.NoError(t, err)
+	creator := &fakeRepoCreator{createErr: &githubapp.UserFacingError{Msg: "temporarily unavailable", Retryable: true}}
+	h, fa := repoAuditHandlers(t, store, creator)
+
+	w := withChiRoute(http.MethodPost, "/api/repo/{id}/approve", "/api/repo/"+created.ID+"/approve", nil, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.RepoApprove))).ServeHTTP, context.Background())
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Empty(t, fa.events, "a transient retry writes no audit row (no terminal outcome yet)")
 }
 
 func TestRepoDelete_AuditCapturesRepoName(t *testing.T) {
