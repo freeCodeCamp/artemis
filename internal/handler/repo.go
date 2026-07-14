@@ -421,8 +421,8 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	slog.InfoContext(r.Context(), "repo.reject.recorded", "id", id, "reason", body.Reason)
-	h.auditFromScope(r.Context(), "repo.reject", "success", map[string]any{"id": id, "reason": body.Reason})
+	slog.InfoContext(r.Context(), "repo.reject.recorded", "id", id, "name", rejected.Name, "reason", body.Reason)
+	h.auditFromScope(r.Context(), "repo.reject", "success", map[string]any{"id": id, "name": rejected.Name, "reason": body.Reason})
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
 }
 
@@ -431,6 +431,15 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	row, err := h.Repos.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, reporequest.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
+			return
+		}
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", err)
+		return
+	}
 	if err := h.Repos.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, reporequest.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
@@ -439,8 +448,8 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.delete", err)
 		return
 	}
-	slog.InfoContext(r.Context(), "repo.delete.removed", "id", id)
-	h.auditFromScope(r.Context(), "repo.delete", "success", map[string]any{"id": id})
+	slog.InfoContext(r.Context(), "repo.delete.removed", "id", id, "name", row.Name)
+	h.auditFromScope(r.Context(), "repo.delete", "success", map[string]any{"id": id, "name": row.Name})
 	w.WriteHeader(http.StatusNoContent)
 }
 

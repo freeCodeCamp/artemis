@@ -107,3 +107,30 @@ func TestRepoDelete_RecordsExactlyOneAudit(t *testing.T) {
 	assert.Equal(t, "alice", fa.events[0].Actor)
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }
+
+func TestRepoReject_AuditCapturesRepoName(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "scope-creep", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h, fa := repoAuditHandlers(t, store, &fakeRepoCreator{})
+
+	body, _ := json.Marshal(RepoRejectRequest{Reason: "duplicate"})
+	w := withChiRoute(http.MethodPost, "/api/repo/{id}/reject", "/api/repo/"+created.ID+"/reject", body, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.RepoReject))).ServeHTTP, context.Background())
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "scope-creep", fa.events[0].Detail["name"], "reject audit must name the repo, not just the queue id")
+}
+
+func TestRepoDelete_AuditCapturesRepoName(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "abandoned-app", Owner: "freeCodeCamp-Universe", Visibility: reporequest.VisibilityPrivate, RequestedBy: "alice"})
+	h, fa := repoAuditHandlers(t, store, &fakeRepoCreator{})
+
+	w := withChiRoute(http.MethodDelete, "/api/repo/{id}", "/api/repo/"+created.ID, nil, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.RepoDelete))).ServeHTTP, context.Background())
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "abandoned-app", fa.events[0].Detail["name"], "delete audit must name the repo (fetched before delete)")
+}
