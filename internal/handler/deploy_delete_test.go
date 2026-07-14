@@ -12,15 +12,34 @@ import (
 
 type fakeTombstones struct {
 	recorded []string
+	bytes    []int64
 	err      error
 }
 
-func (f *fakeTombstones) RecordTombstone(_ context.Context, site, id string, _ int64) error {
+func (f *fakeTombstones) RecordTombstone(_ context.Context, site, id string, bytes int64) error {
 	if f.err != nil {
 		return f.err
 	}
 	f.recorded = append(f.recorded, site+"/"+id)
+	f.bytes = append(f.bytes, bytes)
 	return nil
+}
+
+func TestSiteDeployDelete_RecordsTombstoneBytes(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hello world")
+	store.objects["www/deploys/"+deployID+"/app.js"] = []byte("//x")
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	tomb := &fakeTombstones{}
+	h.Tombstones = tomb
+
+	w := callDeployDelete(h, "www", deployID)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	require.Len(t, tomb.bytes, 1)
+	assert.Equal(t, int64(14), tomb.bytes[0],
+		"tombstone records the deploy's real byte size so GET /trash shows non-zero bytes, not 0")
 }
 
 func authedGH() *fakeGH {
