@@ -23,6 +23,10 @@ type Locker interface {
 	NewLockSession(ctx context.Context) (LockSession, error)
 }
 
+type GCAuditor interface {
+	AuditTombstone(ctx context.Context, site, id string) error
+}
+
 type LockSession interface {
 	WithSiteLock(ctx context.Context, site string, fn func() error) error
 	Close(ctx context.Context)
@@ -38,6 +42,7 @@ type SiteGC struct {
 	TrashPrefix  func(site, id string) string
 	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
 	Now          func() time.Time
+	Audit        GCAuditor
 }
 
 type GCResult struct {
@@ -116,6 +121,11 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 			}
 			res.Tombstoned = append(res.Tombstoned, d.ID)
 			res.BytesReclaimed += d.Bytes
+			if g.Audit != nil {
+				if aErr := g.Audit.AuditTombstone(opCtx, site, d.ID); aErr != nil {
+					slog.WarnContext(opCtx, "gc.site.audit_failed", "site", site, "deploy_id", d.ID, "err", aErr)
+				}
+			}
 			return nil
 		})
 		cancel()

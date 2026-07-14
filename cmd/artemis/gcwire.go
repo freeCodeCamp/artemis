@@ -52,6 +52,22 @@ func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site, deployID string) 
 	})
 }
 
+type gcTombstoneAuditor struct {
+	repo   *pg.Repo
+	actor  string
+	action string
+}
+
+func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site, id string) error {
+	return a.repo.RecordAudit(ctx, pg.AuditEvent{
+		Actor:    a.actor,
+		Action:   a.action,
+		Site:     site,
+		DeployID: id,
+		Outcome:  "success",
+	})
+}
+
 func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {
 	if pgDB == nil {
 		return nil, fmt.Errorf("repo-creation feature requires DATABASE_URL")
@@ -162,6 +178,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
+			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone"},
 		},
 		Reconciler: &gc.Reconciler{
 			Lister:       r2c,
@@ -172,6 +189,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
+			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile"},
 		},
 		Purge: &gc.TombstonePurge{
 			Store:     repo,

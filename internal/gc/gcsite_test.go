@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,49 @@ func newSiteGC(store Store, mover Mover) *SiteGC {
 func sixOld() []Deploy {
 	return oldDeploys(6, 100)
 }
+
+type fakeGCAuditor struct {
+	calls [][2]string
+	err   error
+}
+
+func (a *fakeGCAuditor) AuditTombstone(_ context.Context, site, id string) error {
+	a.calls = append(a.calls, [2]string{site, id})
+	return a.err
+}
+
+func TestGC_AuditsEachTombstone(t *testing.T) {
+	ds := sixOld()
+	store := &fakeStore{deploys: map[string][]Deploy{"www": ds}, targetsSeq: []map[string]struct{}{{}}}
+	mover := &fakeMover{}
+	g := newSiteGC(store, mover)
+	aud := &fakeGCAuditor{}
+	g.Audit = aud
+
+	res, err := g.Run(context.Background(), "www", false)
+	require.NoError(t, err)
+	require.Len(t, res.Tombstoned, 3)
+
+	require.Len(t, aud.calls, 3, "one audit row per tombstoned deploy")
+	for _, c := range aud.calls {
+		assert.Equal(t, "www", c[0])
+		assert.Contains(t, res.Tombstoned, c[1])
+	}
+}
+
+func TestGC_AuditFailureDoesNotAbortSweep(t *testing.T) {
+	ds := sixOld()
+	store := &fakeStore{deploys: map[string][]Deploy{"www": ds}, targetsSeq: []map[string]struct{}{{}}}
+	mover := &fakeMover{}
+	g := newSiteGC(store, mover)
+	g.Audit = &fakeGCAuditor{err: errAudit}
+
+	res, err := g.Run(context.Background(), "www", false)
+	require.NoError(t, err, "an audit write failure must not abort the destructive sweep")
+	assert.Len(t, res.Tombstoned, 3)
+}
+
+var errAudit = errors.New("audit down")
 
 func TestGC_AliasPinned(t *testing.T) {
 	ds := sixOld()

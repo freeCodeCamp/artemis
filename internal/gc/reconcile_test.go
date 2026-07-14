@@ -106,6 +106,24 @@ func ts(d time.Duration) string {
 	return testNow.Add(-d).UTC().Format("20060102-150405") + "-sha1234"
 }
 
+func TestReconcile_AuditsOrphanTombstone(t *testing.T) {
+	orphan := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + orphan + "/index.html"}}
+	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
+	mover := &fakeMover{}
+	rc := newReconciler(lister, store, mover)
+	aud := &fakeGCAuditor{}
+	rc.Audit = aud
+
+	report, err := rc.ReconcileSite(context.Background(), "www")
+	require.NoError(t, err)
+	require.Equal(t, []string{orphan}, report.OrphanTombstoned)
+
+	require.Len(t, aud.calls, 1, "each orphan tombstone records one audit row")
+	assert.Equal(t, "www", aud.calls[0][0])
+	assert.Equal(t, orphan, aud.calls[0][1])
+}
+
 func TestReconcile_Orphan(t *testing.T) {
 	orphan := ts(2 * time.Hour)
 	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + orphan + "/index.html"}}

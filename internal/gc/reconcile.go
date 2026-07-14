@@ -29,6 +29,7 @@ type Reconciler struct {
 	DeployPrefix func(site, id string) string
 	TrashPrefix  func(site, id string) string
 	Now          func() time.Time
+	Audit        GCAuditor
 }
 
 type DriftReport struct {
@@ -128,6 +129,11 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string) (DriftRepo
 				return report, fmt.Errorf("reconcile %s: record orphan %s: %w", site, id, err)
 			}
 			report.OrphanTombstoned = append(report.OrphanTombstoned, id)
+			if rc.Audit != nil {
+				if aErr := rc.Audit.AuditTombstone(ctx, site, id); aErr != nil {
+					slog.WarnContext(ctx, "reconcile.audit_failed", "site", site, "deploy_id", id, "err", aErr)
+				}
+			}
 		}
 	}
 
