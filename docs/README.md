@@ -16,7 +16,7 @@ GET    /api/sites                         [?slug=…]             → { count, s
 POST   /api/site/register                 { slug, teams? }      → 201 SiteRow
 PATCH  /api/site/{slug}                   { teams }             → 200 SiteRow
 DELETE /api/site/{slug}                   [?purge=true]         → 204 · or 200 { slug, status: "purged", moved } when purging
-GET    /api/site/{site}/deploys                                 → [{ deployId, ts, sha, size }]
+GET    /api/site/{site}/deploys                                 → [{ deployId, actor, ts, sha, size }]
 DELETE /api/site/{site}/deploys/{deployId}                      → 200 { site, deployId, status: "tombstoned", moved } · 409 deploy_aliased
 POST   /api/site/{site}/deploys/{deployId}/restore              → 200 { site, deployId, status: "restored", moved, bytes } · 410 site_gone/already_purged
 GET    /api/site/{site}/trash                                   → [{ deployId, trashedAt, expiresAt, bytes }]
@@ -32,11 +32,15 @@ POST   /api/repo/{id}/approve                                   → { outcome, r
 POST   /api/repo/{id}/reject              { reason? }           → RepoRow                                 (feature-gated)
 DELETE /api/repo/{id}                                           → 204                                     (feature-gated)
 
+GET    /api/audit                         [?site=&actor=&action=&since=&limit=&offset=] → [AuditRow]  (durable trail, newest-first)
+
 PUT    /api/deploy/{deployId}/upload      multipart stream      → { received }
 POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
 ```
 
 `/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
+
+`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action (deploy, site, repo lifecycle, GC tombstone/reconcile) attributed to an actor. Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
 
 Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
@@ -133,6 +137,7 @@ Observability is **Sentry-only** and independent. artemis is platform infra, so 
 - **Logs** — a `slog`→Sentry Logs tee (`EnableLogs`), scrubbed via `BeforeSendLog`, trace-correlated; numeric attributes preserved as typed values.
 - **Crons** — check-ins on `tombstone-purge` (`0 3 * * *`) and `reconcile-scheduler` (`0 4 * * *`).
 - **Stdout logs** — JSON via `log/slog` (`LOG_LEVEL`, default `info`) for `kubectl logs`; probe paths (`/healthz`, `/readyz`) silenced. Keep `LOG_LEVEL=info` in prod — several Sentry-Logs-covered signals are Info-level.
+- **Durable audit trail** — a Postgres append-only `audit_log` (indefinite retention) records every privileged action attributed to an actor. This is the forensic system-of-record, distinct from Sentry Logs (a ~90-day glance stream): Sentry answers "what is happening / trending now"; `audit_log` answers "who did X, provably, months later". Read via `GET /api/audit` or `universe audit ls` (see API). `request_id` correlates a durable row back to its Sentry trace / stdout access-log line.
 
 There is **no Prometheus `/metrics` endpoint** (removed in v1.4.0). Signals that were counters are covered by the mechanisms above; [ADR-016](../../fCC-U/Architecture/decisions/016-deploy-proxy.md) holds the design rationale + the full signal→Sentry map.
 
