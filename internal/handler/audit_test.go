@@ -12,8 +12,11 @@ import (
 )
 
 type fakeAudit struct {
-	events []pg.AuditEvent
-	err    error
+	events     []pg.AuditEvent
+	err        error
+	listResult []pg.AuditRecord
+	listErr    error
+	lastFilter pg.AuditFilter
 }
 
 func (f *fakeAudit) RecordAudit(ctx context.Context, e pg.AuditEvent) error {
@@ -25,6 +28,11 @@ func (f *fakeAudit) RecordAudit(ctx context.Context, e pg.AuditEvent) error {
 	}
 	f.events = append(f.events, e)
 	return nil
+}
+
+func (f *fakeAudit) ListAudit(_ context.Context, filter pg.AuditFilter) ([]pg.AuditRecord, error) {
+	f.lastFilter = filter
+	return f.listResult, f.listErr
 }
 
 func TestAudit_RecordsEvent(t *testing.T) {

@@ -70,6 +70,7 @@ type TombstoneStore interface {
 
 type AuditStore interface {
 	RecordAudit(ctx context.Context, e pg.AuditEvent) error
+	ListAudit(ctx context.Context, f pg.AuditFilter) ([]pg.AuditRecord, error)
 }
 
 type TrashStore interface {

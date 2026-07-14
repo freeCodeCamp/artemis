@@ -78,6 +78,7 @@ func New(h *handler.Handlers) http.Handler {
 			r.Get("/site/{site}/alias/{mode}", h.AliasGet)
 			r.Post("/site/{site}/promote", h.SitePromote)
 			r.Post("/site/{site}/rollback", h.SiteRollback)
+			r.Get("/audit", h.AuditList)
 
 			// Repo-creation feature — mounted only when the Apollo-11
 			// App credentials + queue store are wired (RepoEnabled).
