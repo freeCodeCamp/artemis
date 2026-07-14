@@ -173,6 +173,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis))
+	h.auditFromScope(r.Context(), "repo.create", "success", map[string]any{"id": created.ID, "name": req.Name})
 	writeJSON(w, http.StatusCreated, toRepoRow(created))
 }
 
@@ -369,6 +370,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markfailed", mErr)
 			return
 		}
+		h.auditFromScope(durCtx, "repo.approve", "approved_failed", map[string]any{"id": id, "name": approved.Name})
 		writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "approved_failed", Request: toRepoRow(failed)})
 		return
 	}
@@ -379,6 +381,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.approve.created", "id", id, "name", active.Name, "url", created.URL)
+	h.auditFromScope(durCtx, "repo.approve", "success", map[string]any{"id": id, "name": active.Name, "url": created.URL})
 	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: toRepoRow(active)})
 }
 
@@ -419,6 +422,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.reject.recorded", "id", id, "reason", body.Reason)
+	h.auditFromScope(r.Context(), "repo.reject", "success", map[string]any{"id": id, "reason": body.Reason})
 	writeJSON(w, http.StatusOK, toRepoRow(rejected))
 }
 
@@ -436,6 +440,7 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.delete.removed", "id", id)
+	h.auditFromScope(r.Context(), "repo.delete", "success", map[string]any{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }
 
