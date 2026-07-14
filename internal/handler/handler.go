@@ -180,12 +180,13 @@ func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
 func (h *Handlers) auditFromScope(ctx context.Context, action, outcome string, detail map[string]any) {
 	sc := telemetry.FromContext(ctx)
 	h.audit(ctx, pg.AuditEvent{
-		Actor:    sc.Actor(),
-		Action:   action,
-		Site:     sc.Site(),
-		DeployID: sc.DeployID(),
-		Outcome:  outcome,
-		Detail:   detail,
+		Actor:     sc.Actor(),
+		Action:    action,
+		Site:      sc.Site(),
+		DeployID:  sc.DeployID(),
+		Outcome:   outcome,
+		RequestID: sc.ReqID,
+		Detail:    detail,
 	})
 }
 

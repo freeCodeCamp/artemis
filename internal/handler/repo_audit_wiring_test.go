@@ -108,6 +108,17 @@ func TestRepoDelete_RecordsExactlyOneAudit(t *testing.T) {
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }
 
+func TestRepoAudit_CarriesRequestID(t *testing.T) {
+	h, fa := repoAuditHandlers(t, newFakeRepoStore(), &fakeRepoCreator{})
+	body, _ := json.Marshal(RepoCreateRequest{Name: "traced-repo"})
+	w := withChiRoute(http.MethodPost, "/api/repo", "/api/repo", body, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.RepoCreate))).ServeHTTP, context.Background())
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	require.Len(t, fa.events, 1)
+	assert.NotEmpty(t, fa.events[0].RequestID, "audit row correlates to the request via request_id")
+}
+
 func TestRepoReject_AuditCapturesRepoName(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "scope-creep", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
