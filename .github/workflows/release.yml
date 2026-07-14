@@ -111,3 +111,15 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Register Sentry release
+        uses: getsentry/action-release@ff07929a6537bac57790c3451cf4d364aca38528 # v3.7.0
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: freecodecamp
+          SENTRY_PROJECT: artemis
+        with:
+          version: artemis@${{ needs.release-please.outputs.version }}+${{ needs.release-please.outputs.sha }}
+          set_commits: skip
+          finalize: true
