@@ -166,7 +166,7 @@ func TestClient_CreateBlankPrivateDisablesActions(t *testing.T) {
 	if atomic.LoadInt32(&disabled) != 1 {
 		t.Error("Actions must be disabled on a private repo")
 	}
-	if createBody["auto_init"] != true || createBody["private"] != true {
+	if createBody["auto_init"] != false || createBody["private"] != true {
 		t.Errorf("blank-repo body wrong: %+v", createBody)
 	}
 }
