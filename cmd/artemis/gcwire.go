@@ -95,19 +95,22 @@ func newGCLayout(format, trashBase string) (gcLayout, error) {
 	}, nil
 }
 
-func newLiveAliasReader(r2c *r2.Client, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
-	tails := make([]string, 0, len(formats))
+type aliasGetter interface {
+	GetAlias(ctx context.Context, aliasKey string) (string, error)
+}
+
+func newLiveAliasReader(getter aliasGetter, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+	fmts := make([]string, 0, len(formats))
 	for _, f := range formats {
-		slash := strings.IndexByte(f, '/')
-		if slash < 0 {
-			return nil, fmt.Errorf("alias key format %q must contain '/' after the site segment", f)
+		if !strings.Contains(f, "<site>") {
+			return nil, fmt.Errorf("alias key format %q must contain <site>", f)
 		}
-		tails = append(tails, f[slash:])
+		fmts = append(fmts, f)
 	}
 	return func(ctx context.Context, site string) (map[string]struct{}, error) {
 		out := map[string]struct{}{}
-		for _, tail := range tails {
-			v, err := r2c.GetAlias(ctx, site+tail)
+		for _, f := range fmts {
+			v, err := getter.GetAlias(ctx, strings.ReplaceAll(f, "<site>", site))
 			if err != nil {
 				if r2.IsNotFound(err) {
 					continue

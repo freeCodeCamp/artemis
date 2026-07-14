@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -10,6 +11,41 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type recordingAliasGetter struct {
+	keys   []string
+	values map[string]string
+}
+
+func (g *recordingAliasGetter) GetAlias(_ context.Context, key string) (string, error) {
+	g.keys = append(g.keys, key)
+	if v, ok := g.values[key]; ok {
+		return v, nil
+	}
+	return "", r2.ErrNotFound
+}
+
+func TestNewLiveAliasReader_KeyMatchesWritePath(t *testing.T) {
+	const prodFmt = "<site>.freecode.camp/production"
+	getter := &recordingAliasGetter{values: map[string]string{
+		"www.freecode.camp/production": "20260101-000000-abc1234",
+	}}
+	read, err := newLiveAliasReader(getter, prodFmt)
+	require.NoError(t, err)
+
+	live, err := read(context.Background(), "www")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"www.freecode.camp/production"}, getter.keys,
+		"GC live re-read must query the write-path key (ReplaceAll <site>), not a slash-derived tail")
+	_, ok := live["20260101-000000-abc1234"]
+	assert.True(t, ok, "the live deploy behind the prod alias must be detected by the pre-delete safety net")
+}
+
+func TestNewLiveAliasReader_RequiresSiteToken(t *testing.T) {
+	_, err := newLiveAliasReader(&recordingAliasGetter{}, "production/only")
+	require.Error(t, err, "an alias format missing <site> must fail boot, not silently mis-derive keys")
+}
 
 func TestOpenRepoQueue_RequiresDatabase(t *testing.T) {
 	q, err := openRepoQueue(nil)
