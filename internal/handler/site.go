@@ -283,6 +283,15 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actors := map[string]string{}
+	if h.Audit != nil {
+		if a, aErr := h.Audit.DeployActors(r.Context(), site); aErr != nil {
+			slog.WarnContext(r.Context(), "site.deploys.actor_join_failed", "site", site, "err", aErr)
+		} else {
+			actors = a
+		}
+	}
+
 	// Group by deploy id (first path segment after the prefix).
 	seen := map[string]struct{}{}
 	deploys := []map[string]any{}
@@ -297,7 +306,11 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		seen[id] = struct{}{}
-		deploys = append(deploys, map[string]any{"deployId": id})
+		row := map[string]any{"deployId": id}
+		if actor := actors[id]; actor != "" {
+			row["actor"] = actor
+		}
+		deploys = append(deploys, row)
 	}
 	writeJSON(w, http.StatusOK, deploys)
 }

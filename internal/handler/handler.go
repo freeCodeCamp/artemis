@@ -71,6 +71,7 @@ type TombstoneStore interface {
 type AuditStore interface {
 	RecordAudit(ctx context.Context, e pg.AuditEvent) error
 	ListAudit(ctx context.Context, f pg.AuditFilter) ([]pg.AuditRecord, error)
+	DeployActors(ctx context.Context, site string) (map[string]string, error)
 }
 
 type TrashStore interface {

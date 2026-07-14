@@ -70,6 +70,26 @@ func TestListAudit_Pagination(t *testing.T) {
 	assert.NotEqual(t, page1[0].ID, page2[0].ID, "pages do not overlap")
 }
 
+func TestDeployActors_MapsFinalizeRowsForSite(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	seedAudit(t, repo,
+		AuditEvent{Actor: "alice", Action: "deploy.finalize", Site: "www", DeployID: "d1", Outcome: "success"},
+		AuditEvent{Actor: "bob", Action: "deploy.finalize", Site: "www", DeployID: "d2", Outcome: "success"},
+		AuditEvent{Actor: "carol", Action: "site.promote", Site: "www", DeployID: "d1", Outcome: "success"},
+		AuditEvent{Actor: "dave", Action: "deploy.finalize", Site: "other", DeployID: "d9", Outcome: "success"},
+	)
+
+	m, err := repo.DeployActors(ctx, "www")
+	require.NoError(t, err)
+	assert.Equal(t, "alice", m["d1"])
+	assert.Equal(t, "bob", m["d2"])
+	assert.NotContains(t, m, "d1-from-promote")
+	assert.NotContains(t, m, "d9", "another site's finalize is excluded")
+	assert.Len(t, m, 2, "only deploy.finalize rows for this site")
+}
+
 func TestListAudit_SinceFilter(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

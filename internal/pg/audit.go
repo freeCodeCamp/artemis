@@ -88,6 +88,31 @@ func (r *Repo) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord, err
 	return out, nil
 }
 
+func (r *Repo) DeployActors(ctx context.Context, site string) (map[string]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT deploy_id, actor FROM audit_log
+		 WHERE site = $1 AND action = 'deploy.finalize' AND outcome = 'success' AND deploy_id <> ''
+		 ORDER BY occurred_at ASC`,
+		site)
+	if err != nil {
+		return nil, fmt.Errorf("pg deploy actors: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var id, actor string
+		if err := rows.Scan(&id, &actor); err != nil {
+			return nil, fmt.Errorf("pg deploy actors scan: %w", err)
+		}
+		out[id] = actor
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pg deploy actors rows: %w", err)
+	}
+	return out, nil
+}
+
 func (r *Repo) RecordAudit(ctx context.Context, e AuditEvent) error {
 	detail := e.Detail
 	if detail == nil {

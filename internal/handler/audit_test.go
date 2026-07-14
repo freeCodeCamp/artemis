@@ -12,11 +12,17 @@ import (
 )
 
 type fakeAudit struct {
-	events     []pg.AuditEvent
-	err        error
-	listResult []pg.AuditRecord
-	listErr    error
-	lastFilter pg.AuditFilter
+	events          []pg.AuditEvent
+	err             error
+	listResult      []pg.AuditRecord
+	listErr         error
+	lastFilter      pg.AuditFilter
+	deployActors    map[string]string
+	deployActorsErr error
+}
+
+func (f *fakeAudit) DeployActors(_ context.Context, _ string) (map[string]string, error) {
+	return f.deployActors, f.deployActorsErr
 }
 
 func (f *fakeAudit) RecordAudit(ctx context.Context, e pg.AuditEvent) error {
