@@ -156,6 +156,20 @@ Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to 
 
 Deferred: a DLQ-depth gauge — Hatchet v0.88.6 exposes queue depth only via a deprecated API; dead-letter events are already covered by the per-failure Issues above.
 
+### Who-did-what dashboard (operator setup)
+
+The at-a-glance "who did what" view is a **Sentry Logs** dashboard — the slog stream carries `actor` on every request-scoped line (auto-injected by the context log handler), so no code change is needed to query it. Add these widgets to the **Artemis** dashboard in the Sentry UI (the MCP has no dashboard-write API). This is the ~90-day glance; the durable/forensic answer is Postgres `audit_log` via `GET /api/audit` / `universe audit ls`.
+
+Three widgets, dataset **Logs** for each:
+
+| Widget                 | Type  | Fields / group-by                                       | Filter                                    |
+| ---------------------- | ----- | ------------------------------------------------------- | ----------------------------------------- |
+| Who did what (24h)     | Table | `actor`, `message`, `count(message)`; sort `-timestamp` | `message:[<privileged set>]`              |
+| Actor leaderboard (7d) | Bar   | `count(message)` grouped by `actor`                     | `message:[<privileged set>]`              |
+| Unattributed actions   | Table | `actor`, `message`                                      | `message:[<privileged set>]` `!has:actor` |
+
+The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression tripwire — it should stay empty; anything in it means an action reached Sentry with no actor. GC tombstone/reconcile are system-driven and land in `audit_log` (`actor=system:gc` / `system:reconcile`) + Issues, not this human-activity view.
+
 When enabled, Sentry captures:
 
 | Signal              | Source                                                             |
