@@ -59,7 +59,14 @@ const (
 	cronTombstonePurge         = "0 3 * * *"
 	cronReconcile              = "0 4 * * *"
 	relayInterval              = 5 * time.Second
+
+	reconcilePublishFloor   = 4 * time.Second
+	reconcilePublishPerSite = 150 * time.Millisecond
 )
+
+func reconcilePublishDeadline(n int) time.Duration {
+	return reconcilePublishFloor + time.Duration(n)*reconcilePublishPerSite
+}
 
 func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -98,8 +105,11 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 			Name: workflowReconcileScheduler,
 			Cron: []string{cronReconcile},
 			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
+				sites := reconcileSites()
+				pctx, cancel := context.WithTimeout(ctx, reconcilePublishDeadline(len(sites)))
+				defer cancel()
 				var firstErr error
-				for _, site := range reconcileSites() {
+				for _, site := range sites {
 					payload, err := json.Marshal(map[string]string{"site": site})
 					if err != nil {
 						if firstErr == nil {
@@ -107,7 +117,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 						}
 						continue
 					}
-					if err := publisher.Publish(ctx, topicSiteReconcile, payload); err != nil {
+					if err := publisher.Publish(pctx, topicSiteReconcile, payload); err != nil {
 						observability.CaptureBackground("reconcile.schedule", err)
 						if firstErr == nil {
 							firstErr = err

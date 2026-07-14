@@ -182,6 +182,37 @@ func (f *capturingPublisher) Publish(_ context.Context, topic string, payload []
 
 func noSites() []string { return nil }
 
+type deadlinePublisher struct {
+	hadDeadline bool
+	deadline    time.Time
+}
+
+func (p *deadlinePublisher) Publish(ctx context.Context, _ string, _ []byte) error {
+	p.deadline, p.hadDeadline = ctx.Deadline()
+	return nil
+}
+
+func TestReconcileScheduler_BoundsPublishDeadline(t *testing.T) {
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	pub := &deadlinePublisher{}
+	defs := gcWorkflowDefs(gcw, true, pub, func() []string { return []string{"www"} })
+
+	var sched worker.WorkflowDef
+	for _, d := range defs {
+		if d.Name == workflowReconcileScheduler {
+			sched = d
+		}
+	}
+	require.NotNil(t, sched.Handler)
+	require.NoError(t, sched.Handler(context.Background(), nil))
+
+	require.True(t, pub.hadDeadline,
+		"reconcile publish must run under a bounded deadline so a stalled Hatchet Publish can't hang the daily cron indefinitely")
+	d := time.Until(pub.deadline)
+	assert.Greater(t, d, time.Duration(0), "deadline must be in the future")
+	assert.LessOrEqual(t, d, 30*time.Second, "publish deadline is bounded, not open-ended")
+}
+
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
