@@ -93,6 +93,7 @@ func buildClientOptions(cfg Config) sentry.ClientOptions {
 		Release:               cfg.Release,
 		ServerName:            os.Getenv("HOSTNAME"),
 		MaxBreadcrumbs:        maxBreadcrumbs,
+		EnableTracing:         true,
 		TracesSampleRate:      rate,
 		EnableLogs:            true,
 		SendDefaultPII:        false, // never auto-attach request headers / client IPs

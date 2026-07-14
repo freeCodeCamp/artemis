@@ -14,6 +14,8 @@ func TestInit_ClientOptionsHardening(t *testing.T) {
 
 	assert.Equal(t, "artemis-pod-xyz", opts.ServerName, "ServerName from pod hostname")
 	assert.Equal(t, 50, opts.MaxBreadcrumbs, "explicit MaxBreadcrumbs")
+	assert.True(t, opts.EnableTracing,
+		"EnableTracing must be true or sentry-go drops every transaction (TracesSampleRate/Sampler alone do nothing) — APM would be dead")
 	require.NotNil(t, opts.BeforeBreadcrumb, "BeforeBreadcrumb hook installed")
 
 	bc := opts.BeforeBreadcrumb(&sentry.Breadcrumb{Message: "auth Bearer abc123def"}, nil)
