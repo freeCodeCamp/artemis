@@ -166,13 +166,14 @@ func TestClient_CreateBlankPrivateDisablesActions(t *testing.T) {
 	if atomic.LoadInt32(&disabled) != 1 {
 		t.Error("Actions must be disabled on a private repo")
 	}
-	if createBody["auto_init"] != false || createBody["private"] != true {
+	if createBody["private"] != true {
 		t.Errorf("blank-repo body wrong: %+v", createBody)
 	}
 }
 
 func TestClient_CreateFromTemplate(t *testing.T) {
 	var disabled int32
+	var createBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
@@ -180,6 +181,7 @@ func TestClient_CreateFromTemplate(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/"+testOrg+"/new-app":
 			w.WriteHeader(http.StatusNotFound)
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/"+testOrg+"/hello-universe/generate":
+			_ = json.NewDecoder(r.Body).Decode(&createBody)
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"full_name":"`+testOrg+`/new-app","html_url":"https://github.com/`+testOrg+`/new-app","private":false}`)
 		case strings.HasSuffix(r.URL.Path, "/actions/permissions"):
@@ -201,6 +203,61 @@ func TestClient_CreateFromTemplate(t *testing.T) {
 	}
 	if atomic.LoadInt32(&disabled) != 0 {
 		t.Error("public repo must not disable Actions")
+	}
+	if _, hasAutoInit := createBody["auto_init"]; hasAutoInit {
+		t.Errorf("/generate body must not carry auto_init (blank-repo-only field); got %+v", createBody)
+	}
+	if createBody["owner"] != testOrg || createBody["name"] != "new-app" || createBody["private"] != false {
+		t.Errorf("/generate body wrong: %+v", createBody)
+	}
+}
+
+func TestClient_CreateBlankRepoOmitsAutoInit(t *testing.T) {
+	tests := []struct {
+		name    string
+		private bool
+		wantVis string
+	}{
+		{name: "private", private: true, wantVis: "private"},
+		{name: "public", private: false, wantVis: "public"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var createBody map[string]any
+			privateJSON := "false"
+			if tt.private {
+				privateJSON = "true"
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/access_tokens"):
+					tokenResponse(w)
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/"+testOrg+"/blank-repo":
+					w.WriteHeader(http.StatusNotFound)
+				case r.Method == http.MethodPost && r.URL.Path == "/orgs/"+testOrg+"/repos":
+					_ = json.NewDecoder(r.Body).Decode(&createBody)
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, `{"full_name":"`+testOrg+`/blank-repo","html_url":"https://github.com/`+testOrg+`/blank-repo","private":`+privateJSON+`}`)
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/actions/permissions"):
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+
+			c := newClient(t, srv.URL)
+			got, err := c.CreateRepo(context.Background(), CreateSpec{Name: "blank-repo", Private: tt.private})
+			if err != nil {
+				t.Fatalf("CreateRepo: %v", err)
+			}
+			if got.Visibility != tt.wantVis {
+				t.Errorf("visibility = %q, want %q", got.Visibility, tt.wantVis)
+			}
+			if createBody["auto_init"] != false {
+				t.Errorf("blank-repo create body auto_init = %v, want false", createBody["auto_init"])
+			}
+		})
 	}
 }
 
