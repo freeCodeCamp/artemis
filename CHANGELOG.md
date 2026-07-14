@@ -2,6 +2,72 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.4.0](https://github.com/freeCodeCamp/artemis/compare/v1.3.0...v1.4.0) (2026-07-14)
+
+
+### Features
+
+* **gc:** audit each purged deploy as system:gc ([3291c36](https://github.com/freeCodeCamp/artemis/commit/3291c36b80bcd2d95b8dc07eab4d4b5210f9e57e))
+* **gc:** page on reconcile aliased_missing drift via Sentry issue ([32793d4](https://github.com/freeCodeCamp/artemis/commit/32793d4ba31f5a5e3d04f3da3db83e855b094723))
+* **handler:** add h.audit helper + AuditStore interface ([92f01de](https://github.com/freeCodeCamp/artemis/commit/92f01dec9a5501aee72ed2c9eab994dc5e7958f8))
+* **handler:** add HTTP request/duration/in-flight metrics ([c5e5c08](https://github.com/freeCodeCamp/artemis/commit/c5e5c08da328fc1139e325047937fa73a242174e))
+* **handler:** add logAction helper; log deploy.init with actor ([0147f81](https://github.com/freeCodeCamp/artemis/commit/0147f81416060298aacd3d978e5e6757d2256da7))
+* **handler:** add Sentry breadcrumbs at promote/finalize checkpoints ([fb43d98](https://github.com/freeCodeCamp/artemis/commit/fb43d9809d54832d0b8d834a1193f80cb929293c))
+* **handler:** audit all 11 destructive actions incl SiteRegister ([f454a7b](https://github.com/freeCodeCamp/artemis/commit/f454a7bb2b2626ae726decab773085b0f29a4576))
+* **handler:** capture chi route pattern into access-log + Scope ([d95c3c8](https://github.com/freeCodeCamp/artemis/commit/d95c3c89f6c84de60ca48facc6aeafcb1a1d2048))
+* **handler:** convert mutating handlers to logAction with actor ([dc75f2f](https://github.com/freeCodeCamp/artemis/commit/dc75f2fbc1227647911dabdfe45302844fb802aa))
+* **handler:** emit action_total metric from logAction ([2f262d4](https://github.com/freeCodeCamp/artemis/commit/2f262d48605f9eaa4163e81155d3d34eaa7cba67))
+* **handler:** enrich upstream-error log + Sentry with actor/site/deployId ([6f3cd6a](https://github.com/freeCodeCamp/artemis/commit/6f3cd6a7e59023adad49b3a82588afc797930642))
+* **handler:** log deploy.upload/finalize success with actor + bytes ([38cf481](https://github.com/freeCodeCamp/artemis/commit/38cf4812f9b559d6e6a7ed12aaf2a1552b4c9a28))
+* **handler:** log site.update with actor + before/after teams ([b10095f](https://github.com/freeCodeCamp/artemis/commit/b10095f95d3fefd974280b3847b9a8196fadbb54))
+* **handler:** set Sentry user on deploy-JWT routes ([71bdbb6](https://github.com/freeCodeCamp/artemis/commit/71bdbb6fd28923d84825c46416195eed7cbb7adc))
+* **handler:** trace spans + breadcrumbs on destructive flows ([e923416](https://github.com/freeCodeCamp/artemis/commit/e9234165088f7c2932675838a35912dc3873df20))
+* **handler:** trace_id exemplar on http duration histogram ([3291608](https://github.com/freeCodeCamp/artemis/commit/32916080fecc38e6dcb97a587024fe0c18a1c5a6))
+* **hatchet:** capture worker task panics to Sentry via WithPanicHandler ([64cbc0d](https://github.com/freeCodeCamp/artemis/commit/64cbc0d14de937846eab2a8c7ee6f65f1caafbcf))
+* **metrics:** add audit_events_total counter surface ([3c261dd](https://github.com/freeCodeCamp/artemis/commit/3c261ddb639781a41d06f1ee41ae9b23579b870a))
+* **metrics:** extend upload buckets past 10s + build_info gauge ([a0ee63f](https://github.com/freeCodeCamp/artemis/commit/a0ee63fcf2a8e7466500ad1be070e56a5d8b87c4))
+* **metrics:** label tombstoned deploys by trigger (manual|scheduled) ([7f8f26e](https://github.com/freeCodeCamp/artemis/commit/7f8f26e52287eb1f5ca4a74d0772501a540eb5e4))
+* **observability:** force-sample destructive actions by raw method+path ([0aca05d](https://github.com/freeCodeCamp/artemis/commit/0aca05dff13c3ae47c6b8901821536f181f8bdba))
+* **observability:** harden Sentry ClientOptions (ServerName, breadcrumbs) ([fb8f193](https://github.com/freeCodeCamp/artemis/commit/fb8f1934349aa6c17f700c4de2e51022b0b59fc5))
+* **observability:** log workflow panics to slog, not just Sentry ([dab5d89](https://github.com/freeCodeCamp/artemis/commit/dab5d897ccb63f601777c329266db733b22bbac6))
+* **observability:** scrub breadcrumb message + nested data instead of dropping ([bb1f12d](https://github.com/freeCodeCamp/artemis/commit/bb1f12ddf4699c7394dd84288f0e967f6a115306))
+* **observability:** scrub stdout logs via shared ScrubText/ScrubAttrs ([5e44aa8](https://github.com/freeCodeCamp/artemis/commit/5e44aa83430ea5341a5dd479e460b32e3c967f8d))
+* **pg:** add append-only audit_log table + RecordAudit ([025cc73](https://github.com/freeCodeCamp/artemis/commit/025cc738966607b252464d482600da210bf7cfb5))
+* **server:** retag Sentry tx name to method + chi route pattern ([e5d81c8](https://github.com/freeCodeCamp/artemis/commit/e5d81c89894f05aa248c8e821b3b18f74211eb41))
+* **telemetry:** add reqID RoundTripper; thread reqID into pg lock/retry logs ([b66d532](https://github.com/freeCodeCamp/artemis/commit/b66d5326fee99501fca03d2a51fd8e1c7215844b))
+* **telemetry:** add request Scope with mutex-guarded setters ([cd8028c](https://github.com/freeCodeCamp/artemis/commit/cd8028cb09a5a7622f8a61dc1974d9f5892da8f6))
+* **telemetry:** add trace_id/span_id to log lines from active span ([560b198](https://github.com/freeCodeCamp/artemis/commit/560b198217df7b2475a3d71eeebd76451d41773a))
+* **telemetry:** add WithSpan; instrument DeployFinalize dep calls ([625af4c](https://github.com/freeCodeCamp/artemis/commit/625af4cce194907fb4b6cb8096620f854852c237))
+* **telemetry:** inject request-scoped attrs into every log line ([35d5234](https://github.com/freeCodeCamp/artemis/commit/35d523450582d3ff556c0900ae013b80f2a81aaf))
+* **telemetry:** propagate sentry-trace on outbound GitHub calls ([b5f921a](https://github.com/freeCodeCamp/artemis/commit/b5f921a4e35756d78fb357af6ccb240efcd4d53e))
+* **worker:** add duration histograms for workflows + relay ([985353d](https://github.com/freeCodeCamp/artemis/commit/985353d1610ad5397041004b516811370f28281f))
+* **worker:** mint run_id scope for cron/relay workflow firings ([2257f01](https://github.com/freeCodeCamp/artemis/commit/2257f01aacf7f2f3b219c5288de41fc1fcba0208))
+* **worker:** Sentry Crons check-ins on reconcile + purge crons ([7e24151](https://github.com/freeCodeCamp/artemis/commit/7e24151273451048e9a0ff4850458b84997667a1))
+
+
+### Bug Fixes
+
+* **backfill:** keep first genuine byte error, ignore trailing cancel ([9828d4a](https://github.com/freeCodeCamp/artemis/commit/9828d4a47b0b05c664a30066d81792d11f0600be))
+* **gc:** bound reconcile-scheduler publish with a deadline ([091887f](https://github.com/freeCodeCamp/artemis/commit/091887fa4cece9f38032e4fa8e5e1ea241144bd6))
+* **gc:** derive live-alias re-read key via &lt;site&gt; substitution ([fc1df86](https://github.com/freeCodeCamp/artemis/commit/fc1df867c507a4b8a86c283ee1c8ca3bd8a79d00))
+* **gc:** downgrade self-healing reconcile/lock logs to Warn ([4441eb1](https://github.com/freeCodeCamp/artemis/commit/4441eb1a44b8db1ec2c83722e5472f34f46b6f54))
+* **gc:** guard purge double-count + thread ctx through gc/handler logs ([64057ff](https://github.com/freeCodeCamp/artemis/commit/64057ff7af631b9921264bdb76a0495057fa8e9d))
+* **gc:** stop paging on self-healed aliased drift ([1df5dbb](https://github.com/freeCodeCamp/artemis/commit/1df5dbb1a7cc62bf93d88ac53fac17efd8041fd2))
+* **handler:** drop duplicate actor log key ([2127362](https://github.com/freeCodeCamp/artemis/commit/2127362acdd4aa636cdd57eca811d9d75b254b24))
+* **handler:** lock SiteUpdate to fix audit race ([f87c3c8](https://github.com/freeCodeCamp/artemis/commit/f87c3c8f9f7ded386c0d4002cb08d1320fde3633))
+* **handler:** map GitHub rate-limit to 429 at re-probe sites ([40ed828](https://github.com/freeCodeCamp/artemis/commit/40ed8280dcd8d85605426d947dcb10bb5469d0c7))
+* **handler:** populate access-log actor via shared request Scope ([9c74c75](https://github.com/freeCodeCamp/artemis/commit/9c74c75d9550b9ec18e31f2aec80b387f7615355))
+* **handler:** record real deploy bytes in delete tombstone ([df37b11](https://github.com/freeCodeCamp/artemis/commit/df37b1150715fef6c23d18967202680de96189dc))
+* **internal:** do not init on non-template ([#20](https://github.com/freeCodeCamp/artemis/issues/20)) ([51def46](https://github.com/freeCodeCamp/artemis/commit/51def462338a370ba376872ff4577a987f21f5ac))
+* **main:** wire h.Audit so audit_log persists for HTTP actions ([f364f1a](https://github.com/freeCodeCamp/artemis/commit/f364f1ac851ea3e0903c10f7bf5449bcc510c53d))
+* **observability:** scrub secrets in error/stringer log attrs ([5808b95](https://github.com/freeCodeCamp/artemis/commit/5808b9591572675c9e700d9418f3201a6733bccb))
+* **pg:** release and surface stranded advisory unlock ([00631fd](https://github.com/freeCodeCamp/artemis/commit/00631fd8930cc7f983453c2e8672025dcf6929dd))
+* **readyz:** swap log levels to match client impact ([31633b5](https://github.com/freeCodeCamp/artemis/commit/31633b5ef7d1efc475ce3fb33e0df345d11b46cd))
+* **worker:** add reconcile-scheduler cron producing site.reconcile events ([fc72a64](https://github.com/freeCodeCamp/artemis/commit/fc72a64e09f4265202df8eb72421e53fcee905f2))
+* **worker:** bound relay pass so a Hatchet stall frees pool + locks ([9473578](https://github.com/freeCodeCamp/artemis/commit/94735788ccfa655c0557b18d7db18a3950dac4e5))
+* **worker:** claim outbox rows FOR UPDATE SKIP LOCKED to stop cross-replica dup ([cf9644a](https://github.com/freeCodeCamp/artemis/commit/cf9644ac7fd363fc471fd24bbdb891234a15e8e7))
+* **worker:** scale relay timeout with batch size ([865a4fb](https://github.com/freeCodeCamp/artemis/commit/865a4fb5000f7650ce73f7bf03f42981dd253a54))
+
 ## [1.3.0](https://github.com/freeCodeCamp/artemis/compare/v1.2.2...v1.3.0) (2026-07-05)
 
 
