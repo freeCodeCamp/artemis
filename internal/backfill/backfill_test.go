@@ -230,6 +230,38 @@ func TestBackfill_ShutdownCancel_NoSentryPage(t *testing.T) {
 		"byte-probe failures from shutdown cancellation must be IsTransient-suppressed (%w chain), not page on every SIGTERM")
 }
 
+func TestBackfill_TrailingCancel_DoesNotMaskGenuineFailures(t *testing.T) {
+	rt := &recordingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "https://public@example.test/1", Transport: rt})
+	require.NoError(t, err)
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	lister := &fakeLister{
+		sites: []string{"www"},
+		byPfx: map[string][]string{"www/deploys/": {
+			"www/deploys/20260101-090000-real0001/index.html",
+			"www/deploys/20260202-100000-cxl00002/index.html",
+		}},
+		bytesErr: map[string]error{
+			"www/deploys/20260101-090000-real0001/": errors.New("r2 list bytes: SlowDown 503 throttled"),
+			"www/deploys/20260202-100000-cxl00002/": fmt.Errorf("r2 has_prefix: %w", context.Canceled),
+		},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{Lister: lister, Indexer: idx, Now: func() time.Time { return time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC) }}
+
+	_, err = b.Run(context.Background())
+	require.NoError(t, err)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1,
+		"a genuine R2 byte-probe failure must still page even when a LATER probe is cancelled by shutdown; a trailing context.Canceled must not IsTransient-suppress the whole aggregate")
+	assert.Equal(t, "backfill.bytes", rt.events[0].Tags["op"])
+}
+
 func TestBackfill_SignalSurvivesHardErrorAfterPartialFailure(t *testing.T) {
 	rt := &recordingTransport{}
 	client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "https://public@example.test/1", Transport: rt})
