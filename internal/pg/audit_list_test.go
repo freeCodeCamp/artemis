@@ -70,6 +70,24 @@ func TestListAudit_Pagination(t *testing.T) {
 	assert.NotEqual(t, page1[0].ID, page2[0].ID, "pages do not overlap")
 }
 
+func TestListAudit_LimitClampBounds(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	const seeded = 501
+	for i := 0; i < seeded; i++ {
+		require.NoError(t, repo.RecordAudit(ctx, AuditEvent{Actor: "alice", Action: "deploy.finalize", Outcome: "success"}))
+	}
+
+	deflt, err := repo.ListAudit(ctx, AuditFilter{Limit: 0})
+	require.NoError(t, err)
+	assert.Len(t, deflt, 100, "Limit<=0 must clamp to the default page size of 100")
+
+	capped, err := repo.ListAudit(ctx, AuditFilter{Limit: 10000})
+	require.NoError(t, err)
+	assert.Len(t, capped, 500, "an oversized limit must clamp to the 500 max so a caller cannot pull an unbounded page")
+}
+
 func TestDeployActors_MapsFinalizeRowsForSite(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
