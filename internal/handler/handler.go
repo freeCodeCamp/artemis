@@ -144,6 +144,7 @@ type Handlers struct {
 	RepoOrg              string
 	RepoCreateAuthzTeam  string
 	RepoApproveAuthzTeam string
+	AuditReadAuthzTeam   string
 	NewDeployID          func(sha string) string
 	Now                  func() time.Time
 	PublicURLForSite     func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"

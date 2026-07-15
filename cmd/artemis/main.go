@@ -270,6 +270,7 @@ func run() error {
 		RepoOrg:              cfg.Repo.Org,
 		RepoCreateAuthzTeam:  cfg.Repo.CreateAuthzTeam,
 		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
+		AuditReadAuthzTeam:   cfg.Repo.AuditReadAuthzTeam,
 		NewDeployID:          r2.NewDeployID,
 		Now:                  time.Now,
 	}

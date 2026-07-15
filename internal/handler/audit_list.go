@@ -39,6 +39,9 @@ func (h *Handlers) AuditList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "audit_unavailable", "audit log is not configured")
 		return
 	}
+	if err := h.requireAuditReadAuthz(w, r); err != nil {
+		return
+	}
 	q := r.URL.Query()
 	f := pg.AuditFilter{
 		Site:   q.Get("site"),
@@ -80,4 +83,27 @@ func (h *Handlers) AuditList(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, toAuditRow(rec))
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+func (h *Handlers) requireAuditReadAuthz(w http.ResponseWriter, r *http.Request) error {
+	if h.AuditReadAuthzTeam == "" {
+		writeError(w, http.StatusInternalServerError, "misconfigured", "audit authz team not set")
+		return errBadRequest
+	}
+	if h.RepoGH == nil {
+		writeError(w, http.StatusInternalServerError, "misconfigured", "universe-org github client not configured")
+		return errBadRequest
+	}
+	login := LoginFromContext(r.Context())
+	token := GitHubTokenFromContext(r.Context())
+	ok, err := h.RepoGH.AuthorizeForSite(r.Context(), token, login, []string{h.AuditReadAuthzTeam})
+	if err != nil {
+		writeGitHubProbeError(w, err)
+		return err
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "user_unauthorized", "caller is not on the required team")
+		return errBadRequest
+	}
+	return nil
 }

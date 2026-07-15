@@ -152,8 +152,9 @@ type RepoConfig struct {
 	// CreateAuthzTeam gates POST /api/repo. Default "staff". List, get,
 	// and templates are open to any GitHub bearer (no team gate).
 	// Both are slugs in Org.
-	CreateAuthzTeam  string
-	ApproveAuthzTeam string
+	CreateAuthzTeam    string
+	ApproveAuthzTeam   string
+	AuditReadAuthzTeam string
 
 	App GitHubAppConfig
 }
@@ -185,6 +186,7 @@ const (
 	defaultRepoOrg                = "freeCodeCamp-Universe"
 	defaultRepoCreateAuthzTeam    = "staff"
 	defaultRepoApproveAuthzTeam   = "none"
+	defaultAuditReadAuthzTeam     = "staff"
 	defaultSentryTracesSampleRate = 0.2
 	defaultPGConnectRetryWindow   = 45 * time.Second
 )
@@ -226,9 +228,10 @@ func Load() (*Config, error) {
 			AuthzTeam: defaultRegistryAuthzTeam,
 		},
 		Repo: RepoConfig{
-			Org:              defaultRepoOrg,
-			CreateAuthzTeam:  defaultRepoCreateAuthzTeam,
-			ApproveAuthzTeam: defaultRepoApproveAuthzTeam,
+			Org:                defaultRepoOrg,
+			CreateAuthzTeam:    defaultRepoCreateAuthzTeam,
+			ApproveAuthzTeam:   defaultRepoApproveAuthzTeam,
+			AuditReadAuthzTeam: defaultAuditReadAuthzTeam,
 		},
 		Sentry: SentryConfig{
 			TracesSampleRate: defaultSentryTracesSampleRate,
@@ -319,6 +322,9 @@ func Load() (*Config, error) {
 	}
 	if v, ok := os.LookupEnv("REPO_APPROVE_AUTHZ_TEAM"); ok && v != "" {
 		cfg.Repo.ApproveAuthzTeam = v
+	}
+	if v, ok := os.LookupEnv("AUDIT_READ_AUTHZ_TEAM"); ok && v != "" {
+		cfg.Repo.AuditReadAuthzTeam = v
 	}
 	cfg.Repo.App.AppID = os.Getenv("GH_APP_ID")
 	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
@@ -421,6 +427,9 @@ func (c *Config) validate() error {
 	}
 	if c.Repo.ApproveAuthzTeam == "" {
 		return fmt.Errorf("REPO_APPROVE_AUTHZ_TEAM must not be empty")
+	}
+	if strings.TrimSpace(c.Repo.AuditReadAuthzTeam) == "" {
+		return fmt.Errorf("AUDIT_READ_AUTHZ_TEAM must not be empty")
 	}
 	// Repo App credentials are optional (feature off when absent), but
 	// partial config is a misconfiguration — fail fast rather than boot

@@ -18,6 +18,8 @@ func auditHandlers(t *testing.T, fa *fakeAudit) *Handlers {
 	t.Helper()
 	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
 	h.Audit = fa
+	h.RepoGH = staffCallerGH()
+	h.AuditReadAuthzTeam = "staff"
 	return h
 }
 
@@ -67,17 +69,54 @@ func TestAuditList_InvalidLimit(t *testing.T) {
 	assert.Equal(t, "invalid_limit", env["error"]["code"])
 }
 
-func TestAuditList_AnyBearerNoTeamGate(t *testing.T) {
+func TestAuditList_NonStaffCallerIs403(t *testing.T) {
 	nobodyGH := &fakeGH{
 		tokenLogins: map[string]string{"tok": "nobody"},
 		userTeams:   map[string]map[string]bool{"nobody": {}},
 	}
 	h, _ := newTestHandlers(t, nobodyGH, standardSites(), newFakeR2())
 	h.Audit = &fakeAudit{}
+	h.RepoGH = nobodyGH
+	h.AuditReadAuthzTeam = "staff"
 
 	w := getAudit(h, "/api/audit")
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String(),
-		"audit read is open to any authenticated GitHub bearer, no team gate")
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String(),
+		"cross-tenant audit read must require Universe staff membership, not any GitHub bearer")
+	var env map[string]map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "user_unauthorized", env["error"]["code"])
+}
+
+func TestAuditList_StaffInBaseOrgButNotUniverseIs403(t *testing.T) {
+	baseOrgStaff := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"staff": true}},
+	}
+	universeNonStaff := &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {}},
+	}
+	h, _ := newTestHandlers(t, baseOrgStaff, standardSites(), newFakeR2())
+	h.Audit = &fakeAudit{}
+	h.RepoGH = universeNonStaff
+	h.AuditReadAuthzTeam = "staff"
+
+	w := getAudit(h, "/api/audit")
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String(),
+		"gate must probe RepoGH (Universe org), not GH (base org): base-org staff who is not Universe staff is denied")
+}
+
+func TestAuditList_MisconfiguredNoRepoGHIs500(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h.Audit = &fakeAudit{}
+	h.AuditReadAuthzTeam = "staff"
+
+	w := getAudit(h, "/api/audit")
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String(),
+		"RepoGH nil: Universe membership probe cannot run, gate must fail closed not fall open")
+	var env map[string]map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "misconfigured", env["error"]["code"])
 }
 
 func TestAuditList_NilStoreIs503(t *testing.T) {

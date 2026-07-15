@@ -40,7 +40,7 @@ POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
 
 `/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
 
-`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action (deploy, site, repo lifecycle, GC tombstone/reconcile) attributed to an actor. Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
+`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action (deploy, site, repo lifecycle, GC tombstone/reconcile) attributed to an actor. Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. Because the trail is cross-tenant, the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`) — not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
 
 Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
@@ -49,7 +49,7 @@ Auth headers (`/api/*` except `/healthz`, `/readyz`):
 | `GET /api/*`, `POST /api/deploy/init`, `POST /api/site/*`, `POST`/`GET`/`DELETE /api/repo*` | GitHub token (PAT / OIDC)                                                    |
 | `PUT /api/deploy/{deployId}/upload`, `POST /api/deploy/{deployId}/finalize`                 | Deploy-session JWT (HS256, ≤15 min, scoped to one `(login, site, deployId)`) |
 
-Team-gated beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`). All other `/api/*` reads are open to any authenticated GitHub bearer.
+Team-gated beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM`, the sole team-gated read — cross-tenant trail). All other `/api/*` reads are open to any authenticated GitHub bearer.
 
 ## Configuration (env-driven)
 
@@ -91,14 +91,15 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 **Repo-creation (Apollo-11, feature-gated)**
 
-| Variable                  | Default                      | Description                                                                     |
-| ------------------------- | ---------------------------- | ------------------------------------------------------------------------------- |
-| `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`) |
-| `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                 |
-| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating approve/reject/delete; placeholder — production must override    |
-| `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                        |
-| `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                            |
-| `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                          |
+| Variable                  | Default                      | Description                                                                            |
+| ------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
+| `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)        |
+| `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                        |
+| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating approve/reject/delete; placeholder — production must override           |
+| `AUDIT_READ_AUTHZ_TEAM`   | `staff`                      | GH team (in `GH_REPO_ORG`) gating `GET /api/audit`; probed via the Universe-org client |
+| `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                               |
+| `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
+| `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                                 |
 
 `GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY` are all-or-none: set all three to enable the `/api/repo*` self-service repo-creation feature, or none. The two ids must be digit-only strings — `validate()` rejects a malformed value at boot (a YAML int sealed in sops renders as scientific notation through Helm `quote`; seal them as strings).
 
