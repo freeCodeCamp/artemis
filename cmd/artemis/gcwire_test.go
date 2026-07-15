@@ -205,6 +205,31 @@ func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
 	assert.Equal(t, "www/deploys/", w.Reconciler.SitePrefix("www"))
 }
 
+func TestNewGCWiring_AuditActorActionSplit(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
+		Aliases: config.AliasConfig{
+			ProductionKeyFormat: "<site>/production",
+			PreviewKeyFormat:    "<site>/preview",
+		},
+		Cleanup: config.CleanupConfig{BlastCap: 5, RetentionDays: 7, RecoveryDays: 3, TrashPrefix: "_trash/"},
+	}
+
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
+	require.NoError(t, err)
+
+	ta, ok := w.SiteGC.Audit.(gcTombstoneAuditor)
+	require.True(t, ok, "SiteGC.Audit must be the gcTombstoneAuditor adapter")
+	assert.Equal(t, "system:gc", ta.actor, "gc-sweep tombstones must be attributed to system:gc in the durable audit_log")
+	assert.Equal(t, "gc.tombstone", ta.action)
+
+	ra, ok := w.Reconciler.Audit.(gcTombstoneAuditor)
+	require.True(t, ok, "Reconciler.Audit must be the gcTombstoneAuditor adapter")
+	assert.Equal(t, "system:reconcile", ra.actor,
+		"reconcile-sourced tombstones must be attributed to system:reconcile, not mislabelled as a gc sweep")
+	assert.Equal(t, "gc.reconcile", ra.action)
+}
+
 func TestNewGCWiring_RejectsBadFormat(t *testing.T) {
 	cfg := &config.Config{
 		DeployPrefixFormat: "<site>/deploys/",
