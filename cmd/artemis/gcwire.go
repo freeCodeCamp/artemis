@@ -10,10 +10,17 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 )
+
+type auditRecorder interface {
+	RecordAudit(ctx context.Context, e pg.AuditEvent) error
+}
+
+var captureAuditFailure = observability.CaptureBackground
 
 var (
 	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
@@ -40,32 +47,40 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	h.Audit = repo
 }
 
-type gcPurgeAuditor struct{ repo *pg.Repo }
+type gcPurgeAuditor struct{ repo auditRecorder }
 
 func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site, deployID string) error {
-	return a.repo.RecordAudit(ctx, pg.AuditEvent{
+	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    "system:gc",
 		Action:   "gc.purge",
 		Site:     site,
 		DeployID: deployID,
 		Outcome:  "success",
 	})
+	if err != nil {
+		captureAuditFailure("audit.record", err)
+	}
+	return err
 }
 
 type gcTombstoneAuditor struct {
-	repo   *pg.Repo
+	repo   auditRecorder
 	actor  string
 	action string
 }
 
 func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site, id string) error {
-	return a.repo.RecordAudit(ctx, pg.AuditEvent{
+	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    a.actor,
 		Action:   a.action,
 		Site:     site,
 		DeployID: id,
 		Outcome:  "success",
 	})
+	if err != nil {
+		captureAuditFailure("audit.record", err)
+	}
+	return err
 }
 
 func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {

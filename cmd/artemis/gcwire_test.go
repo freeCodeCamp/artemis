@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,64 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type stubAuditRecorder struct {
+	err  error
+	n    int
+	last pg.AuditEvent
+}
+
+func (s *stubAuditRecorder) RecordAudit(_ context.Context, e pg.AuditEvent) error {
+	s.n++
+	s.last = e
+	return s.err
+}
+
+func trapAuditCapture(t *testing.T) *struct {
+	op  string
+	err error
+} {
+	t.Helper()
+	got := &struct {
+		op  string
+		err error
+	}{}
+	orig := captureAuditFailure
+	captureAuditFailure = func(op string, err error) { got.op = op; got.err = err }
+	t.Cleanup(func() { captureAuditFailure = orig })
+	return got
+}
+
+func TestGCTombstoneAuditor_CapturesAuditWriteFailure(t *testing.T) {
+	got := trapAuditCapture(t)
+	writeErr := errors.New("pg write failed")
+	a := gcTombstoneAuditor{repo: &stubAuditRecorder{err: writeErr}, actor: "system:gc", action: "gc.tombstone"}
+
+	err := a.AuditTombstone(context.Background(), "www", "id1")
+	require.ErrorIs(t, err, writeErr, "audit failure must still propagate so the sweep logs it fail-soft")
+	assert.Equal(t, "audit.record", got.op,
+		"a background tombstone audit-write failure must raise the documented op=audit.record Sentry issue")
+	assert.ErrorIs(t, got.err, writeErr)
+}
+
+func TestGCPurgeAuditor_CapturesAuditWriteFailure(t *testing.T) {
+	got := trapAuditCapture(t)
+	writeErr := errors.New("pg write failed")
+	a := gcPurgeAuditor{repo: &stubAuditRecorder{err: writeErr}}
+
+	err := a.RecordPurge(context.Background(), "www", "id1")
+	require.ErrorIs(t, err, writeErr)
+	assert.Equal(t, "audit.record", got.op,
+		"a background purge audit-write failure must also raise op=audit.record")
+}
+
+func TestGCTombstoneAuditor_NoCaptureOnSuccess(t *testing.T) {
+	got := trapAuditCapture(t)
+	a := gcTombstoneAuditor{repo: &stubAuditRecorder{}, actor: "system:gc", action: "gc.tombstone"}
+
+	require.NoError(t, a.AuditTombstone(context.Background(), "www", "id1"))
+	assert.Empty(t, got.op, "a successful audit write must not raise a Sentry issue")
+}
 
 type recordingAliasGetter struct {
 	keys   []string
