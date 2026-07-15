@@ -2,6 +2,27 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.5.0](https://github.com/freeCodeCamp/artemis/compare/v1.4.0...v1.5.0) (2026-07-15)
+
+
+### Features
+
+* **gc:** audit each tombstone in sweep and reconcile ([3af2547](https://github.com/freeCodeCamp/artemis/commit/3af2547e7a6ba767fcb15a2102f8e53b085a12f5))
+* **handler:** add GET /api/audit trail endpoint ([4690bf5](https://github.com/freeCodeCamp/artemis/commit/4690bf50b71045fade352f2e68830c455287c059))
+* **handler:** audit repo lifecycle actions to audit_log ([4cdf82e](https://github.com/freeCodeCamp/artemis/commit/4cdf82ef92a8aba4369f3418dbd42ed26ca5602d))
+* **handler:** join finalize actor onto deploy list ([9416712](https://github.com/freeCodeCamp/artemis/commit/9416712e876fd42236e8edf5cd4897851d97b2c2))
+* **pg:** add audit_log request_id column and actor index ([6807e86](https://github.com/freeCodeCamp/artemis/commit/6807e86f44b8eb3b15fb7443f48eced30d06745a))
+* **pg:** add ListAudit query with filters and pagination ([6e9184c](https://github.com/freeCodeCamp/artemis/commit/6e9184c9af4f2e85a416993af2afadec238932bb))
+
+
+### Bug Fixes
+
+* **gc:** raise sentry issue on background audit-write failure ([1b607b2](https://github.com/freeCodeCamp/artemis/commit/1b607b22b15ba2f8b03122e2ae7c44550e893640))
+* **handler:** cap repo reject reason length before audit ([a4bd4d5](https://github.com/freeCodeCamp/artemis/commit/a4bd4d5e66d15ec946d91f08f15b06ae20fef5a9))
+* **handler:** capture repo name in reject and delete audit ([0fed9c5](https://github.com/freeCodeCamp/artemis/commit/0fed9c58db45ad9d024194f5115e37bfbe3d37a4))
+* **handler:** gate /api/audit on Universe staff team ([d79e90a](https://github.com/freeCodeCamp/artemis/commit/d79e90a5617df3a500a6b2c94ee57d6baed52aed))
+* **observability:** enable tracing so transactions are recorded ([822122d](https://github.com/freeCodeCamp/artemis/commit/822122d1535f8603de6a04e611ccc02ac1e38b7b))
+
 ## [1.4.0](https://github.com/freeCodeCamp/artemis/compare/v1.3.0...v1.4.0) (2026-07-14)
 
 
