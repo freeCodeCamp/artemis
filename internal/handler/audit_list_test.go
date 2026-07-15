@@ -80,6 +80,17 @@ func TestAuditList_AnyBearerNoTeamGate(t *testing.T) {
 		"audit read is open to any authenticated GitHub bearer, no team gate")
 }
 
+func TestAuditList_NilStoreIs503(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+
+	w := getAudit(h, "/api/audit")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String(),
+		"PG-less deploy-only mode leaves h.Audit nil; the guard must 503, never nil-deref panic into a 500")
+	var env map[string]map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "audit_unavailable", env["error"]["code"])
+}
+
 func TestAuditList_ReadFailureIs502(t *testing.T) {
 	h := auditHandlers(t, &fakeAudit{listErr: errors.New("pg down")})
 	w := getAudit(h, "/api/audit")
