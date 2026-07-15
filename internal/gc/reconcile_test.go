@@ -124,6 +124,20 @@ func TestReconcile_AuditsOrphanTombstone(t *testing.T) {
 	assert.Equal(t, orphan, aud.calls[0][1])
 }
 
+func TestReconcile_AuditFailureDoesNotAbortSweep(t *testing.T) {
+	orphan := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + orphan + "/index.html"}}
+	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
+	mover := &fakeMover{}
+	rc := newReconciler(lister, store, mover)
+	rc.Audit = &fakeGCAuditor{err: errAudit}
+
+	report, err := rc.ReconcileSite(context.Background(), "www")
+	require.NoError(t, err, "an audit write failure must not abort the destructive reconcile sweep")
+	assert.Equal(t, []string{orphan}, report.OrphanTombstoned,
+		"the orphan is still tombstoned even though its audit row failed to persist")
+}
+
 func TestReconcile_Orphan(t *testing.T) {
 	orphan := ts(2 * time.Hour)
 	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + orphan + "/index.html"}}
