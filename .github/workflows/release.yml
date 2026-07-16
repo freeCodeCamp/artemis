@@ -120,6 +120,6 @@ jobs:
           SENTRY_ORG: freecodecamp
           SENTRY_PROJECT: artemis
         with:
-          version: artemis@${{ needs.release-please.outputs.version }}+${{ needs.release-please.outputs.sha }}
+          release: artemis@${{ needs.release-please.outputs.version }}+${{ needs.release-please.outputs.sha }}
           set_commits: skip
           finalize: true
