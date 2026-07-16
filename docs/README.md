@@ -16,7 +16,7 @@ GET    /api/sites                         [?slug=…]             → { count, s
 POST   /api/site/register                 { slug, teams? }      → 201 SiteRow
 PATCH  /api/site/{slug}                   { teams }             → 200 SiteRow
 DELETE /api/site/{slug}                   [?purge=true]         → 204 · or 200 { slug, status: "purged", moved } when purging
-GET    /api/site/{site}/deploys                                 → [{ deployId, actor, ts, sha, size }]
+GET    /api/site/{site}/deploys                                 → [{ deployId, actor? }]
 DELETE /api/site/{site}/deploys/{deployId}                      → 200 { site, deployId, status: "tombstoned", moved } · 409 deploy_aliased
 POST   /api/site/{site}/deploys/{deployId}/restore              → 200 { site, deployId, status: "restored", moved, bytes } · 410 site_gone/already_purged
 GET    /api/site/{site}/trash                                   → [{ deployId, trashedAt, expiresAt, bytes }]
@@ -40,7 +40,7 @@ POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
 
 `/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
 
-`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action (deploy, site, repo lifecycle, GC tombstone/reconcile) attributed to an actor. Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. Because the trail is cross-tenant, the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`) — not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
+`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action attributed to an actor: staff/CI lifecycle (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`, reconcile under `actor=system:reconcile`). Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500 — `limit=0` clamps to the default 100, it does not return zero rows; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. Because the trail is cross-tenant, the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`) — not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
 
 Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
