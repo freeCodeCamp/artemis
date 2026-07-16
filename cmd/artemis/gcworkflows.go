@@ -19,6 +19,7 @@ import (
 )
 
 var captureCheckIn = sentry.CaptureCheckIn
+var captureBackground = observability.CaptureBackground
 
 func withCheckIn(slug, cron string, fn worker.Handler) worker.Handler {
 	return func(ctx context.Context, input map[string]any) error {
@@ -110,6 +111,12 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 				defer cancel()
 				var firstErr error
 				for _, site := range sites {
+					if pctx.Err() != nil {
+						if firstErr == nil {
+							firstErr = pctx.Err()
+						}
+						break
+					}
 					payload, err := json.Marshal(map[string]string{"site": site})
 					if err != nil {
 						if firstErr == nil {
@@ -118,7 +125,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 						continue
 					}
 					if err := publisher.Publish(pctx, topicSiteReconcile, payload); err != nil {
-						observability.CaptureBackground("reconcile.schedule", err)
+						captureBackground("reconcile.schedule", err)
 						if firstErr == nil {
 							firstErr = err
 						}

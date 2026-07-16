@@ -14,6 +14,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/getsentry/sentry-go"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -262,6 +263,47 @@ func TestReconcileScheduler_PublishesPerSite(t *testing.T) {
 	assert.Contains(t, string(pub.payloads[1]), `"site":"learn"`)
 }
 
+type exhaustingPublisher struct {
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (p *exhaustingPublisher) Publish(ctx context.Context, _ string, _ []byte) error {
+	p.calls++
+	if p.calls == 1 {
+		p.cancel()
+	}
+	return ctx.Err()
+}
+
+func TestReconcileScheduler_BreaksOnExhaustedBudget(t *testing.T) {
+	var captured []string
+	orig := captureBackground
+	captureBackground = func(op string, _ error) { captured = append(captured, op) }
+	t.Cleanup(func() { captureBackground = orig })
+
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pub := &exhaustingPublisher{cancel: cancel}
+	sites := func() []string { return []string{"a", "b", "c", "d", "e"} }
+	defs := gcWorkflowDefs(gcw, true, pub, sites)
+
+	var sched worker.WorkflowDef
+	for _, d := range defs {
+		if d.Name == workflowReconcileScheduler {
+			sched = d
+		}
+	}
+	require.NotNil(t, sched.Handler)
+	_ = sched.Handler(ctx, nil)
+
+	assert.Equal(t, 1, pub.calls,
+		"loop must stop publishing once the shared deadline is exhausted, not hammer every remaining site")
+	assert.Equal(t, []string{"reconcile.schedule"}, captured,
+		"exactly one capture for the exhausted budget, not one per remaining site")
+}
+
 func TestSiteFromInput(t *testing.T) {
 	s, err := siteFromInput(map[string]any{"site": "www.freecode.camp"})
 	require.NoError(t, err)
@@ -323,6 +365,56 @@ func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 				"the siteFromInput guard must short-circuit before SiteGC.Run on a nil/empty site, or a mass-move could target the wrong prefix")
 		})
 	}
+}
+
+type lockTimeoutStore struct{}
+
+func (lockTimeoutStore) DeploysForSite(context.Context, string) ([]gc.Deploy, error) {
+	return nil, &pgconn.PgError{Code: "55P03"}
+}
+
+func (lockTimeoutStore) AliasTargets(context.Context, string) (map[string]struct{}, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
+func (lockTimeoutStore) Tombstone(context.Context, string, gc.Deploy) error { return nil }
+
+type gcRecordingTransport struct{ events []*sentry.Event }
+
+func (t *gcRecordingTransport) Configure(sentry.ClientOptions)        {}
+func (t *gcRecordingTransport) SendEvent(e *sentry.Event)             { t.events = append(t.events, e) }
+func (t *gcRecordingTransport) Flush(time.Duration) bool              { return true }
+func (t *gcRecordingTransport) FlushWithContext(context.Context) bool { return true }
+func (t *gcRecordingTransport) Close()                                {}
+
+func TestGCSiteWorkflow_LockTimeoutDoesNotPage(t *testing.T) {
+	rt := &gcRecordingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn:       "https://public@example.test/1",
+		Transport: rt,
+	})
+	require.NoError(t, err)
+	hub := sentry.CurrentHub()
+	prev := hub.Client()
+	hub.BindClient(client)
+	t.Cleanup(func() { hub.BindClient(prev) })
+
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{Store: lockTimeoutStore{}}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	defs := gcWorkflowDefs(gcw, false, &capturingPublisher{}, noSites)
+	var gcSite worker.WorkflowDef
+	for _, d := range defs {
+		if d.Name == worker.WorkflowGCSite {
+			gcSite = d
+		}
+	}
+	require.NotNil(t, gcSite.Handler)
+
+	runErr := gcSite.Handler(context.Background(), map[string]any{"site": "www"})
+	require.Error(t, runErr, "SiteGC.Run failure still propagates to the workflow engine for retry/backoff")
+
+	sentry.CurrentHub().Flush(time.Second)
+	assert.Empty(t, rt.events,
+		"a pg 55P03 lock-timeout from gc.site.run must not create a Sentry issue (T13 regression)")
 }
 
 type captureEngine struct{ defs []worker.WorkflowDef }
