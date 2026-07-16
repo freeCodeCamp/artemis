@@ -107,3 +107,13 @@ func (h *Handlers) requireAuditReadAuthz(w http.ResponseWriter, r *http.Request)
 	}
 	return nil
 }
+
+func (h *Handlers) callerSeesActors(r *http.Request) bool {
+	if h.AuditReadAuthzTeam == "" || h.RepoGH == nil {
+		return false
+	}
+	login := LoginFromContext(r.Context())
+	token := GitHubTokenFromContext(r.Context())
+	ok, err := h.RepoGH.AuthorizeForSite(r.Context(), token, login, []string{h.AuditReadAuthzTeam})
+	return err == nil && ok
+}

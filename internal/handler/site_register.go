@@ -304,9 +304,13 @@ func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "valkey.list", err)
 		return
 	}
+	seesActors := h.callerSeesActors(r)
 	rows := make([]SiteRow, len(sites))
 	for i, s := range sites {
 		rows[i] = toSiteRow(s)
+		if !seesActors {
+			rows[i].CreatedBy = ""
+		}
 	}
 	writeJSON(w, http.StatusOK, rows)
 }

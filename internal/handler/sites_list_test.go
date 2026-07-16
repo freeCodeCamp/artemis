@@ -40,6 +40,9 @@ func TestSitesList_PopulatedReturnsRowsSorted(t *testing.T) {
 		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	}
 
+	h.RepoGH = staffCallerGH()
+	h.AuditReadAuthzTeam = "staff"
+
 	w := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
@@ -52,6 +55,55 @@ func TestSitesList_PopulatedReturnsRowsSorted(t *testing.T) {
 	assert.Equal(t, []string{"staff"}, got[0].Teams)
 	assert.Equal(t, "alice", got[0].CreatedBy)
 	assert.False(t, got[0].CreatedAt.IsZero())
+}
+
+func nonStaffGH() *fakeGH {
+	return &fakeGH{
+		tokenLogins: map[string]string{"tok": "mallory"},
+		userTeams:   map[string]map[string]bool{"mallory": {"platform": true}},
+	}
+}
+
+func TestSitesList_RedactsCreatedByForNonStaff(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+
+	body := []byte(`{"slug":"alpha","teams":["staff"]}`)
+	require.Equal(t, http.StatusCreated, callRegister(h, body, "alice", "tok").Code)
+
+	h.RepoGH = nonStaffGH()
+	h.AuditReadAuthzTeam = "staff"
+
+	w := callSitesList(h, "mallory", "tok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var got []SiteRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].CreatedBy, "non-staff caller must not see actor identity")
+	assert.Equal(t, "alpha", got[0].Slug, "non-actor fields stay visible")
+	assert.Equal(t, []string{"staff"}, got[0].Teams)
+}
+
+func TestSitesList_RedactsWhenAuthzProbeErrors(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+
+	body := []byte(`{"slug":"alpha","teams":["staff"]}`)
+	require.Equal(t, http.StatusCreated, callRegister(h, body, "alice", "tok").Code)
+
+	h.RepoGH = &fakeGH{
+		tokenLogins:  map[string]string{"tok": "alice"},
+		userTeams:    map[string]map[string]bool{"alice": {"staff": true}},
+		authorizeErr: errors.New("github probe down"),
+	}
+	h.AuditReadAuthzTeam = "staff"
+
+	w := callSitesList(h, "alice", "tok")
+	require.Equal(t, http.StatusOK, w.Code, "an authz-probe error must not 500 the list")
+
+	var got []SiteRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].CreatedBy, "fail closed: probe error must redact, never leak")
 }
 
 func TestSitesList_502OnRegistryReadError(t *testing.T) {

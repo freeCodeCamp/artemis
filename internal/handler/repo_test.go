@@ -213,6 +213,7 @@ func repoHandlers(t *testing.T, repoGH *fakeGH, store RepoStore, creator RepoCre
 	h.RepoOrg = "freeCodeCamp-Universe"
 	h.RepoCreateAuthzTeam = "staff"
 	h.RepoApproveAuthzTeam = "apollo-11-approvers"
+	h.AuditReadAuthzTeam = "staff"
 	return h
 }
 
@@ -343,6 +344,43 @@ func TestReposList_InvalidStatus(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestReposList_StaffSeesActorFields(t *testing.T) {
+	store := newFakeRepoStore()
+	ctx := context.Background()
+	a, _ := store.Create(ctx, reporequest.Request{Name: "a", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	_, _ = store.Reject(ctx, a.ID, "boss", "")
+
+	h := repoHandlers(t, staffRepoGH(), store, &fakeRepoCreator{})
+	h.AuditReadAuthzTeam = "staff"
+
+	w := doReq(h, http.MethodGet, "/api/repos?status=all", nil, "alice", "tok", (*Handlers).ReposList)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "alice", got[0].RequestedBy)
+	assert.Equal(t, "boss", got[0].Approver)
+}
+
+func TestReposList_RedactsActorFieldsForNonStaff(t *testing.T) {
+	store := newFakeRepoStore()
+	ctx := context.Background()
+	a, _ := store.Create(ctx, reporequest.Request{Name: "a", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	_, _ = store.Reject(ctx, a.ID, "boss", "")
+
+	h := repoHandlers(t, nonStaffGH(), store, &fakeRepoCreator{})
+	h.AuditReadAuthzTeam = "staff"
+
+	w := doReq(h, http.MethodGet, "/api/repos?status=all", nil, "mallory", "tok", (*Handlers).ReposList)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].RequestedBy, "non-staff must not see requester identity")
+	assert.Empty(t, got[0].Approver, "non-staff must not see approver identity")
+	assert.Equal(t, "a", got[0].Name, "non-actor fields stay visible")
+}
+
 func TestRepoGet(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "g", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
@@ -359,6 +397,23 @@ func TestRepoGet(t *testing.T) {
 	wMissing := httptest.NewRecorder()
 	h.RepoGet(wMissing, rMissing)
 	assert.Equal(t, http.StatusNotFound, wMissing.Code)
+}
+
+func TestRepoGet_RedactsActorFieldsForNonStaff(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "g", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h := repoHandlers(t, nonStaffGH(), store, &fakeRepoCreator{})
+
+	r := withID(httptest.NewRequest(http.MethodGet, "/api/repo/"+created.ID, nil).
+		WithContext(contextWithLogin(context.Background(), "mallory", "tok")), created.ID)
+	w := httptest.NewRecorder()
+	h.RepoGet(w, r)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var got RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Empty(t, got.RequestedBy, "non-staff must not see requester on single-repo GET")
+	assert.Equal(t, "g", got.Name, "non-actor fields stay visible")
 }
 
 func approveReq(h *Handlers, id, login, token string) *httptest.ResponseRecorder {

@@ -234,6 +234,7 @@ func (h *Handlers) ReposList(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.list", err)
 		return
 	}
+	seesActors := h.callerSeesActors(r)
 	rows := make([]RepoRow, 0, len(all))
 	for _, req := range all {
 		if status != "all" && string(req.Status) != status {
@@ -242,7 +243,12 @@ func (h *Handlers) ReposList(w http.ResponseWriter, r *http.Request) {
 		if mine && req.RequestedBy != login {
 			continue
 		}
-		rows = append(rows, toRepoRow(req))
+		row := toRepoRow(req)
+		if !seesActors {
+			row.RequestedBy = ""
+			row.Approver = ""
+		}
+		rows = append(rows, row)
 	}
 	writeJSON(w, http.StatusOK, rows)
 }
@@ -263,7 +269,12 @@ func (h *Handlers) RepoGet(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toRepoRow(req))
+	row := toRepoRow(req)
+	if !h.callerSeesActors(r) {
+		row.RequestedBy = ""
+		row.Approver = ""
+	}
+	writeJSON(w, http.StatusOK, row)
 }
 
 // RepoApprove implements POST /api/repo/{id}/approve. Authz: caller on
