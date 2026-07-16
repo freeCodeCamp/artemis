@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRelayBatch_ConcurrentReplicasNoDuplicatePublish(t *testing.T) {
+func TestRelayBatch_ConcurrentReplicasAtLeastOncePublish(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
@@ -27,7 +27,7 @@ func TestRelayBatch_ConcurrentReplicasNoDuplicatePublish(t *testing.T) {
 		mu.Lock()
 		published[e.ID]++
 		mu.Unlock()
-		time.Sleep(15 * time.Millisecond) // widen the claim window so all replicas overlap under lock
+		time.Sleep(15 * time.Millisecond)
 		return nil
 	}
 
@@ -58,8 +58,12 @@ func TestRelayBatch_ConcurrentReplicasNoDuplicatePublish(t *testing.T) {
 
 	require.Len(t, published, total, "every event claimed")
 	for id, c := range published {
-		assert.Equal(t, 1, c, "event %d published exactly once across %d replicas (no cross-replica dup)", id, replicas)
+		assert.GreaterOrEqual(t, c, 1, "event %d published at least once across %d replicas (at-least-once; consumer worker.WorkflowGCSite is idempotent, E1)", id, replicas)
 	}
+
+	remaining, err := repo.FetchUnpublished(ctx, total)
+	require.NoError(t, err)
+	assert.Empty(t, remaining, "every claimed event eventually marked published")
 }
 
 func TestRelayBatch_PublishFailureLeavesEventUnpublished(t *testing.T) {

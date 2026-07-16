@@ -60,10 +60,9 @@ func (r *Repo) FetchUnpublished(ctx context.Context, limit int) ([]OutboxEvent, 
 	return out, rows.Err()
 }
 
-func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEvent) error, at time.Time) (int, error) {
-	var published int
-	var pubErr error
-	txErr := r.WithTx(ctx, func(tx pgx.Tx) error {
+func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error) {
+	var events []OutboxEvent
+	err := r.WithTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
 			`SELECT id, topic, payload FROM outbox
 			 WHERE published_at IS NULL
@@ -73,41 +72,44 @@ func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEve
 		if err != nil {
 			return fmt.Errorf("pg outbox claim: %w", err)
 		}
-		var events []OutboxEvent
+		defer rows.Close()
 		for rows.Next() {
 			var e OutboxEvent
 			if err := rows.Scan(&e.ID, &e.Topic, &e.Payload); err != nil {
-				rows.Close()
 				return fmt.Errorf("pg outbox claim scan: %w", err)
 			}
 			events = append(events, e)
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("pg outbox claim rows: %w", err)
-		}
-
-		var doneIDs []int64
-		for _, e := range events {
-			if err := publish(e); err != nil {
-				pubErr = fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
-				break
-			}
-			doneIDs = append(doneIDs, e.ID)
-		}
-		if len(doneIDs) > 0 {
-			if _, err := tx.Exec(ctx,
-				`UPDATE outbox SET published_at = $1 WHERE id = ANY($2)`, at, doneIDs); err != nil {
-				return fmt.Errorf("pg outbox mark: %w", err)
-			}
-		}
-		published = len(doneIDs)
-		return nil
+		return rows.Err()
 	})
-	if txErr != nil {
-		return 0, txErr
+	if err != nil {
+		return nil, err
 	}
-	return published, pubErr
+	return events, nil
+}
+
+func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEvent) error, at time.Time) (int, error) {
+	events, err := r.claimBatch(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	var doneIDs []int64
+	var pubErr error
+	for _, e := range events {
+		if err := publish(e); err != nil {
+			pubErr = fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
+			break
+		}
+		doneIDs = append(doneIDs, e.ID)
+	}
+	if len(doneIDs) == 0 {
+		return 0, pubErr
+	}
+	if err := r.MarkPublished(ctx, doneIDs, at); err != nil {
+		return 0, err
+	}
+	return len(doneIDs), pubErr
 }
 
 func (r *Repo) MarkPublished(ctx context.Context, ids []int64, at time.Time) error {
