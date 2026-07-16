@@ -56,8 +56,40 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, "staff", cfg.Registry.AuthzTeam)
 	assert.Equal(t, "valkey.artemis.svc:6379", cfg.Registry.Valkey.Addr)
 	assert.Empty(t, cfg.Registry.Valkey.Password)
+	assert.Equal(t, 5*time.Second, cfg.Registry.Valkey.RetryWindow)
 
 	assert.Equal(t, 45*time.Second, cfg.PGConnectRetryWindow)
+}
+
+func TestLoad_ValkeyConnectRetryWindow(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "override", value: "20s", want: 20 * time.Second},
+		{name: "zero disables", value: "0s", want: 0},
+		{name: "negative rejected", value: "-5s", wantErr: true},
+		{name: "garbage rejected", value: "forty-five", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range requiredEnv() {
+				t.Setenv(k, v)
+			}
+			t.Setenv("VALKEY_CONNECT_RETRY_WINDOW", tc.value)
+
+			cfg, err := Load()
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "VALKEY_CONNECT_RETRY_WINDOW")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.Registry.Valkey.RetryWindow)
+		})
+	}
 }
 
 func TestLoad_PGConnectRetryWindow(t *testing.T) {

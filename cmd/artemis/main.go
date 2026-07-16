@@ -350,10 +350,10 @@ func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), erro
 // OnChange-published cache-front transport; otherwise Valkey is the
 // source-of-truth. Cleanup MUST be called on shutdown.
 func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registry.Writer, *valkey.Reader, *valkey.Store, func(), error) {
-	store, err := valkey.New(ctx, valkey.Config{
+	store, err := valkey.NewWithRetry(ctx, valkey.Config{
 		Addr:     cfg.Registry.Valkey.Addr,
 		Password: cfg.Registry.Valkey.Password,
-	})
+	}, cfg.Registry.Valkey.RetryWindow)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("valkey: %w", err)
 	}
@@ -390,13 +390,20 @@ func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, fun
 	if cfg.Registry.Valkey.Addr == "" {
 		return nil, func() {}, nil
 	}
-	client := redis.NewClient(&redis.Options{
-		Addr:     cfg.Registry.Valkey.Addr,
-		Password: cfg.Registry.Valkey.Password,
-	})
-	if err := client.Ping(ctx).Err(); err != nil {
-		_ = client.Close()
-		return nil, func() {}, fmt.Errorf("teamcache ping %s: %w", cfg.Registry.Valkey.Addr, err)
+	client, err := valkey.RetryConnect(ctx, cfg.Registry.Valkey.RetryWindow, valkey.RetryBackoffBase, valkey.RetryBackoffMax,
+		func(ctx context.Context) (*redis.Client, error) {
+			c := redis.NewClient(&redis.Options{
+				Addr:     cfg.Registry.Valkey.Addr,
+				Password: cfg.Registry.Valkey.Password,
+			})
+			if err := c.Ping(ctx).Err(); err != nil {
+				_ = c.Close()
+				return nil, fmt.Errorf("teamcache ping %s: %w", cfg.Registry.Valkey.Addr, err)
+			}
+			return c, nil
+		})
+	if err != nil {
+		return nil, func() {}, err
 	}
 	return teamcache.New(client, cfg.GitHub.MembershipCacheTTL), func() { _ = client.Close() }, nil
 }

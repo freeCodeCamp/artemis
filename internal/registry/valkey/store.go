@@ -94,6 +94,59 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	return &Store{client: c, Now: time.Now}, nil
 }
 
+const (
+	RetryBackoffBase = 500 * time.Millisecond
+	RetryBackoffMax  = 5 * time.Second
+)
+
+func NewWithRetry(ctx context.Context, cfg Config, window time.Duration) (*Store, error) {
+	return RetryConnect(ctx, window, RetryBackoffBase, RetryBackoffMax,
+		func(ctx context.Context) (*Store, error) {
+			return New(ctx, cfg)
+		})
+}
+
+func RetryConnect[T any](ctx context.Context, window, base, max time.Duration, connect func(context.Context) (T, error)) (T, error) {
+	if window <= 0 {
+		return connect(ctx)
+	}
+
+	deadline := time.Now().Add(window)
+	attemptCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
+	backoff := base
+	for attempt := 1; ; attempt++ {
+		v, err := connect(attemptCtx)
+		if err == nil {
+			return v, nil
+		}
+		if ctx.Err() != nil {
+			var zero T
+			return zero, ctx.Err()
+		}
+		if remaining := time.Until(deadline); remaining <= backoff {
+			var zero T
+			return zero, err
+		}
+		slog.Warn("valkey.connect.retrying",
+			"attempt", attempt,
+			"backoff", backoff,
+			"err", err)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			var zero T
+			return zero, ctx.Err()
+		case <-timer.C:
+		}
+		if backoff *= 2; backoff > max {
+			backoff = max
+		}
+	}
+}
+
 // Ping verifies the underlying connection. Cheap; safe to call on a
 // liveness probe.
 func (s *Store) Ping(ctx context.Context) error {

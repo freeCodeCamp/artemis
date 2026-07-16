@@ -131,8 +131,9 @@ type RegistryConfig struct {
 // (no scheme). Password is required by the production chart but
 // dev / unauthenticated instances may set it to the empty string.
 type ValkeyConfig struct {
-	Addr     string
-	Password string
+	Addr        string
+	Password    string
+	RetryWindow time.Duration
 }
 
 // RepoConfig holds the repo-creation feature settings: the target org,
@@ -189,6 +190,7 @@ const (
 	defaultAuditReadAuthzTeam     = "staff"
 	defaultSentryTracesSampleRate = 0.2
 	defaultPGConnectRetryWindow   = 45 * time.Second
+	defaultValkeyRetryWindow      = 5 * time.Second
 )
 
 var validLogLevels = map[string]struct{}{
@@ -226,6 +228,7 @@ func Load() (*Config, error) {
 		LogLevel:           "info",
 		Registry: RegistryConfig{
 			AuthzTeam: defaultRegistryAuthzTeam,
+			Valkey:    ValkeyConfig{RetryWindow: defaultValkeyRetryWindow},
 		},
 		Repo: RepoConfig{
 			Org:                defaultRepoOrg,
@@ -312,6 +315,13 @@ func Load() (*Config, error) {
 	cfg.Registry.Valkey.Addr = getEnv("VALKEY_ADDR")
 	if v, ok := os.LookupEnv("VALKEY_PASSWORD"); ok && v != "" {
 		cfg.Registry.Valkey.Password = v
+	}
+	if v, ok := os.LookupEnv("VALKEY_CONNECT_RETRY_WINDOW"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("invalid VALKEY_CONNECT_RETRY_WINDOW %q: must be a non-negative Go duration (0 disables retry)", v)
+		}
+		cfg.Registry.Valkey.RetryWindow = d
 	}
 
 	if v, ok := os.LookupEnv("GH_REPO_ORG"); ok && v != "" {
