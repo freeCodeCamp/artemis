@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func bindRecordingHub(t *testing.T) *recordingTransport {
@@ -101,9 +103,11 @@ func TestCaptureBackground_SuppressesTransient(t *testing.T) {
 
 	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
 	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	CaptureBackground("reconcile.schedule", fmt.Errorf("hatchet: publish site.reconcile: %w", status.Error(codes.DeadlineExceeded, "context deadline exceeded")))
+	CaptureBackground("gc.site.run", fmt.Errorf("site lock x: %w", &pgconn.PgError{Code: "55P03"}))
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.Empty(t, rt.events, "context.Canceled and 57P03 must not create Sentry issues")
+	require.Empty(t, rt.events, "canceled, 57P03, gRPC DeadlineExceeded, and 55P03 must not create Sentry issues")
 }
 
 func TestCaptureBackground_CapturesRealError(t *testing.T) {
@@ -114,6 +118,16 @@ func TestCaptureBackground_CapturesRealError(t *testing.T) {
 
 	require.Len(t, rt.events, 1, "a non-transient error must still page Sentry")
 	require.Equal(t, "gc.site.run", rt.events[0].Tags["op"])
+}
+
+func TestCaptureBackground_GRPCUnavailablePages(t *testing.T) {
+	rt := bindRecordingHub(t)
+
+	CaptureBackground("relay.run", fmt.Errorf("hatchet: publish x: %w", status.Error(codes.Unavailable, "backend down")))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "a non-deadline/cancel gRPC error is a real outage and must page")
+	require.Equal(t, "relay.run", rt.events[0].Tags["op"])
 }
 
 func TestWorkflowPanic_SlogAndSentry(t *testing.T) {

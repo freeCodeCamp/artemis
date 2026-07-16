@@ -35,6 +35,8 @@ import (
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
 	sentryslog "github.com/getsentry/sentry-go/slog"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const flushTimeout = 2 * time.Second
@@ -388,7 +390,14 @@ func CaptureBackground(op string, err error) {
 }
 
 func IsTransient(err error) bool {
-	return errors.Is(err, context.Canceled) || pg.IsInRecovery(err)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Canceled, codes.DeadlineExceeded:
+		return true
+	}
+	return pg.IsInRecovery(err) || pg.IsLockTimeout(err)
 }
 
 func CaptureWorkflowPanic(recovered any) {
