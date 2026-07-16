@@ -307,6 +307,14 @@ func run() error {
 		}
 	}()
 
+	if pgDB != nil {
+		go func() {
+			if err := pg.MigrateConcurrent(rootCtx, pgDB.Pool); err != nil {
+				observability.CaptureBackground("pg.migrate.concurrent", err)
+			}
+		}()
+	}
+
 	select {
 	case <-rootCtx.Done():
 		slog.Info("server.shutdown.signal")
