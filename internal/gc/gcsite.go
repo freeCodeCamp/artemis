@@ -101,6 +101,7 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 	defer sess.Close(ctx)
 	for _, d := range plan.Delete {
 		d := d
+		var tombstoned bool
 		opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
 		err := sess.WithSiteLock(opCtx, site, func() error {
 			live, err := g.LiveAliases(opCtx, site)
@@ -121,16 +122,19 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 			}
 			res.Tombstoned = append(res.Tombstoned, d.ID)
 			res.BytesReclaimed += d.Bytes
-			if g.Audit != nil {
-				if aErr := g.Audit.AuditTombstone(opCtx, site, d.ID); aErr != nil {
-					slog.WarnContext(opCtx, "gc.site.audit_failed", "site", site, "deploy_id", d.ID, "err", aErr)
-				}
-			}
+			tombstoned = true
 			return nil
 		})
 		cancel()
 		if err != nil {
 			return res, fmt.Errorf("gc %s: %w", site, err)
+		}
+		if tombstoned && g.Audit != nil {
+			auditCtx, auditCancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
+			if aErr := g.Audit.AuditTombstone(auditCtx, site, d.ID); aErr != nil {
+				slog.WarnContext(auditCtx, "gc.site.audit_failed", "site", site, "deploy_id", d.ID, "err", aErr)
+			}
+			auditCancel()
 		}
 	}
 

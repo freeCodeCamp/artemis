@@ -122,6 +122,50 @@ func TestGC_AuditsEachTombstone(t *testing.T) {
 	}
 }
 
+type orderRecordingLocker struct {
+	log *[]string
+}
+
+func (l *orderRecordingLocker) NewLockSession(_ context.Context) (LockSession, error) {
+	return l, nil
+}
+
+func (l *orderRecordingLocker) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+	*l.log = append(*l.log, "lock")
+	err := fn()
+	*l.log = append(*l.log, "unlock")
+	return err
+}
+
+func (l *orderRecordingLocker) Close(context.Context) {}
+
+type orderRecordingAuditor struct {
+	log *[]string
+}
+
+func (a *orderRecordingAuditor) AuditTombstone(_ context.Context, _, _ string) error {
+	*a.log = append(*a.log, "audit")
+	return nil
+}
+
+func TestGC_AuditRunsOutsideSiteLock(t *testing.T) {
+	ds := sixOld()
+	store := &fakeStore{deploys: map[string][]Deploy{"www": ds}, targetsSeq: []map[string]struct{}{{}}}
+	mover := &fakeMover{}
+	g := newSiteGC(store, mover)
+	var log []string
+	g.Locker = &orderRecordingLocker{log: &log}
+	g.Audit = &orderRecordingAuditor{log: &log}
+
+	res, err := g.Run(context.Background(), "www", false)
+	require.NoError(t, err)
+	require.Len(t, res.Tombstoned, 3)
+
+	want := []string{"lock", "unlock", "audit", "lock", "unlock", "audit", "lock", "unlock", "audit"}
+	assert.Equal(t, want, log,
+		"audit write must happen after the site lock releases, not inside the WithSiteLock closure (T3A5)")
+}
+
 func TestGC_AuditFailureDoesNotAbortSweep(t *testing.T) {
 	ds := sixOld()
 	store := &fakeStore{deploys: map[string][]Deploy{"www": ds}, targetsSeq: []map[string]struct{}{{}}}
