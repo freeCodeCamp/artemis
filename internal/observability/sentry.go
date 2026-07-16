@@ -380,6 +380,14 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 func CaptureBackground(op string, err error) {
 	if IsTransient(err) {
 		slog.Warn("background.transient", "op", op, "err", err)
+		if backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
+			sentry.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("op", op)
+				scope.SetTag("transient_sustained", "true")
+				scope.SetFingerprint([]string{op, "sustained"})
+				sentry.CaptureException(err)
+			})
+		}
 		return
 	}
 	sentry.WithScope(func(scope *sentry.Scope) {

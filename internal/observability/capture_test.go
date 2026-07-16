@@ -110,6 +110,86 @@ func TestCaptureBackground_SuppressesTransient(t *testing.T) {
 	require.Empty(t, rt.events, "canceled, 57P03, gRPC DeadlineExceeded, and 55P03 must not create Sentry issues")
 }
 
+func withTransientClock(t *testing.T, now func() time.Time) {
+	t.Helper()
+	backgroundTransientRate.mu.Lock()
+	prevClock := backgroundTransientRate.clock
+	backgroundTransientRate.clock = now
+	backgroundTransientRate.states = make(map[string]*transientOpState)
+	backgroundTransientRate.mu.Unlock()
+	t.Cleanup(func() {
+		backgroundTransientRate.mu.Lock()
+		backgroundTransientRate.clock = prevClock
+		backgroundTransientRate.states = make(map[string]*transientOpState)
+		backgroundTransientRate.mu.Unlock()
+	})
+}
+
+func TestCaptureBackground_SingleTransientStaysSuppressed(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Empty(t, rt.events, "a single transient blip must stay suppressed")
+}
+
+func TestCaptureBackground_SustainedTransientEscalatesOnce(t *testing.T) {
+	rt := bindRecordingHub(t)
+	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return cur })
+
+	transientErr := fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"})
+	CaptureBackground("relay.run", transientErr)
+	cur = cur.Add(time.Hour)
+	CaptureBackground("relay.run", transientErr)
+	cur = cur.Add(time.Hour)
+	CaptureBackground("relay.run", transientErr)
+	cur = cur.Add(time.Hour)
+	CaptureBackground("relay.run", transientErr)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "3rd consecutive transient must escalate exactly once")
+	require.Equal(t, "relay.run", rt.events[0].Tags["op"])
+	require.Equal(t, "true", rt.events[0].Tags["transient_sustained"])
+	require.Equal(t, []string{"relay.run", "sustained"}, rt.events[0].Fingerprint)
+}
+
+func TestCaptureBackground_LowCadenceTransientStillEscalates(t *testing.T) {
+	rt := bindRecordingHub(t)
+	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return cur })
+
+	transientErr := fmt.Errorf("hatchet: publish site.reconcile: %w", context.DeadlineExceeded)
+	CaptureBackground("reconcile.schedule", transientErr)
+	cur = cur.Add(24 * time.Hour)
+	CaptureBackground("reconcile.schedule", transientErr)
+	cur = cur.Add(24 * time.Hour)
+	CaptureBackground("reconcile.schedule", transientErr)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "3 daily-cadence failures 24h apart must still escalate")
+	require.Equal(t, []string{"reconcile.schedule", "sustained"}, rt.events[0].Fingerprint)
+}
+
+func TestCaptureBackground_GapBeyondResetWindowRearms(t *testing.T) {
+	rt := bindRecordingHub(t)
+	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return cur })
+
+	transientErr := fmt.Errorf("tombstone-move: %w", context.Canceled)
+	CaptureBackground("tombstone.purge", transientErr)
+	cur = cur.Add(time.Hour)
+	CaptureBackground("tombstone.purge", transientErr)
+	cur = cur.Add(27 * time.Hour)
+	CaptureBackground("tombstone.purge", transientErr)
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Empty(t, rt.events, "a gap beyond resetWindow must reset the streak, not escalate")
+}
+
 func TestCaptureBackground_CapturesRealError(t *testing.T) {
 	rt := bindRecordingHub(t)
 
