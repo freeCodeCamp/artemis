@@ -13,9 +13,13 @@
 //	PATCH  /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	DELETE /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
+//	DELETE /api/site/{site}/deploys/{deployId}            — GitHub bearer
+//	POST   /api/site/{site}/deploys/{deployId}/restore    — GitHub bearer
+//	GET    /api/site/{site}/trash                         — GitHub bearer
 //	GET    /api/site/{site}/alias/{mode}                  — GitHub bearer
 //	POST   /api/site/{site}/promote                       — GitHub bearer
 //	POST   /api/site/{site}/rollback                      — GitHub bearer
+//	GET    /api/audit                                     — GitHub bearer + audit-read team (staff)
 //	POST   /api/repo                                      — GitHub bearer + repo-create team   (feature-gated)
 //	GET    /api/repos                                     — GitHub bearer                       (feature-gated)
 //	GET    /api/repo/templates                            — GitHub bearer                       (feature-gated)
