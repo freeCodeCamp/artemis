@@ -77,6 +77,15 @@ func toRepoRow(r reporequest.Request) RepoRow {
 	}
 }
 
+func (h *Handlers) repoRowFor(r *http.Request, req reporequest.Request) RepoRow {
+	row := toRepoRow(req)
+	if !h.callerSeesActors(r) {
+		row.RequestedBy = ""
+		row.Approver = ""
+	}
+	return row
+}
+
 // RepoCreateRequest is the body of POST /api/repo.
 type RepoCreateRequest struct {
 	Name        string `json:"name"`
@@ -382,7 +391,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.auditFromScope(durCtx, "repo.approve", "approved_failed", map[string]any{"id": id, "name": approved.Name})
-		writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "approved_failed", Request: toRepoRow(failed)})
+		writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "approved_failed", Request: h.repoRowFor(r, failed)})
 		return
 	}
 
@@ -393,7 +402,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.InfoContext(r.Context(), "repo.approve.created", "id", id, "name", active.Name, "url", created.URL)
 	h.auditFromScope(durCtx, "repo.approve", "success", map[string]any{"id": id, "name": active.Name, "url": created.URL})
-	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: toRepoRow(active)})
+	writeJSON(w, http.StatusOK, RepoApproveResponse{Outcome: "ok", Request: h.repoRowFor(r, active)})
 }
 
 // RepoReject implements POST /api/repo/{id}/reject. Authz: caller on
@@ -439,7 +448,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.InfoContext(r.Context(), "repo.reject.recorded", "id", id, "name", rejected.Name, "reason", body.Reason)
 	h.auditFromScope(r.Context(), "repo.reject", "success", map[string]any{"id": id, "name": rejected.Name, "reason": body.Reason})
-	writeJSON(w, http.StatusOK, toRepoRow(rejected))
+	writeJSON(w, http.StatusOK, h.repoRowFor(r, rejected))
 }
 
 func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {

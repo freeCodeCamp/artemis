@@ -233,6 +233,13 @@ func adminRepoGH() *fakeGH {
 	}
 }
 
+func approverStaffRepoGH() *fakeGH {
+	return &fakeGH{
+		tokenLogins: map[string]string{"atok": "boss"},
+		userTeams:   map[string]map[string]bool{"boss": {"apollo-11-approvers": true, "staff": true}},
+	}
+}
+
 func doReq(h *Handlers, method, target string, body []byte, login, token string, route func(*Handlers, http.ResponseWriter, *http.Request)) *httptest.ResponseRecorder {
 	var rdr *bytes.Reader
 	if body != nil {
@@ -428,7 +435,7 @@ func TestRepoApprove_OK(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "live", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
 	creator := &fakeRepoCreator{created: githubapp.Created{FullName: "freeCodeCamp-Universe/live", URL: "https://github.com/freeCodeCamp-Universe/live", Visibility: "private"}}
-	h := repoHandlers(t, adminRepoGH(), store, creator)
+	h := repoHandlers(t, approverStaffRepoGH(), store, creator)
 
 	w := approveReq(h, created.ID, "boss", "atok")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -438,6 +445,7 @@ func TestRepoApprove_OK(t *testing.T) {
 	assert.Equal(t, "active", resp.Request.Status)
 	assert.Equal(t, "https://github.com/freeCodeCamp-Universe/live", resp.Request.URL)
 	assert.Equal(t, "boss", resp.Request.Approver)
+	assert.Equal(t, "alice", resp.Request.RequestedBy)
 	// spec mapped correctly (private → Private true).
 	assert.True(t, creator.lastSpec.Private)
 }
@@ -738,4 +746,73 @@ func TestRepoCreate_KeepsPendingClaimWithoutProbe(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	assert.Equal(t, 0, creator.existsCalls)
+}
+
+func TestRepoApprove_RedactsActorFieldsForNonAuditStaff(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "live", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	creator := &fakeRepoCreator{created: githubapp.Created{URL: "https://github.com/freeCodeCamp-Universe/live"}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp RepoApproveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "ok", resp.Outcome)
+	assert.Equal(t, "active", resp.Request.Status)
+	assert.Empty(t, resp.Request.RequestedBy, "approver not on the audit team must not see the requester identity")
+	assert.Empty(t, resp.Request.Approver, "approver not on the audit team must not see actor identity")
+}
+
+func TestRepoApprove_ApprovedFailedRedactsActorFields(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "boom", RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	creator := &fakeRepoCreator{createErr: &githubapp.UserFacingError{Msg: "template not accessible"}}
+	h := repoHandlers(t, adminRepoGH(), store, creator)
+
+	w := approveReq(h, created.ID, "boss", "atok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp RepoApproveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "approved_failed", resp.Outcome)
+	assert.Empty(t, resp.Request.RequestedBy, "approved_failed response must redact requester for non-audit-staff")
+	assert.Empty(t, resp.Request.Approver)
+}
+
+func TestRepoReject_RedactsActorFieldsForNonAuditStaff(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "r", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h := repoHandlers(t, adminRepoGH(), store, &fakeRepoCreator{})
+
+	body, _ := json.Marshal(RepoRejectRequest{Reason: "out of scope"})
+	r := withID(httptest.NewRequest(http.MethodPost, "/api/repo/"+created.ID+"/reject", bytes.NewReader(body)).
+		WithContext(contextWithLogin(context.Background(), "boss", "atok")), created.ID)
+	w := httptest.NewRecorder()
+	h.RepoReject(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "rejected", got.Status, "reject still succeeds")
+	assert.Equal(t, "out of scope", got.RejectReason)
+	assert.Empty(t, got.RequestedBy, "non-audit-staff approver must not see requester on reject")
+	assert.Empty(t, got.Approver)
+}
+
+func TestRepoReject_StaffApproverSeesActorFields(t *testing.T) {
+	store := newFakeRepoStore()
+	created, _ := store.Create(context.Background(), reporequest.Request{Name: "r2", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
+	h := repoHandlers(t, approverStaffRepoGH(), store, &fakeRepoCreator{})
+
+	r := withID(httptest.NewRequest(http.MethodPost, "/api/repo/"+created.ID+"/reject", nil).
+		WithContext(contextWithLogin(context.Background(), "boss", "atok")), created.ID)
+	w := httptest.NewRecorder()
+	h.RepoReject(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "rejected", got.Status)
+	assert.Equal(t, "alice", got.RequestedBy, "a staff (audit-team) approver sees the requester")
+	assert.Equal(t, "boss", got.Approver)
 }
