@@ -125,11 +125,13 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 						continue
 					}
 					if err := publisher.Publish(pctx, topicSiteReconcile, payload); err != nil {
-						captureBackground("reconcile.schedule", err)
 						if firstErr == nil {
 							firstErr = err
 						}
 					}
+				}
+				if firstErr != nil {
+					captureBackground("reconcile.schedule", firstErr)
 				}
 				return firstErr
 			})),

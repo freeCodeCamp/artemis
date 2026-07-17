@@ -304,6 +304,38 @@ func TestReconcileScheduler_BreaksOnExhaustedBudget(t *testing.T) {
 		"exactly one capture for the exhausted budget, not one per remaining site")
 }
 
+type failingPublisher struct{ calls int }
+
+func (p *failingPublisher) Publish(_ context.Context, _ string, _ []byte) error {
+	p.calls++
+	return errors.New("publish boom")
+}
+
+func TestReconcileScheduler_AggregatesFanoutCaptures(t *testing.T) {
+	var captured []string
+	orig := captureBackground
+	captureBackground = func(op string, _ error) { captured = append(captured, op) }
+	t.Cleanup(func() { captureBackground = orig })
+
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	pub := &failingPublisher{}
+	sites := func() []string { return []string{"a", "b", "c", "d", "e"} }
+	defs := gcWorkflowDefs(gcw, true, pub, sites)
+
+	var sched worker.WorkflowDef
+	for _, d := range defs {
+		if d.Name == workflowReconcileScheduler {
+			sched = d
+		}
+	}
+	require.NotNil(t, sched.Handler)
+	_ = sched.Handler(context.Background(), nil)
+
+	assert.Equal(t, 5, pub.calls, "every site attempted — no deadline exhaustion in this scenario")
+	assert.Equal(t, []string{"reconcile.schedule"}, captured,
+		"per-site independent publish failures aggregate to exactly one capture per tick, not N — else a single-tick multi-site blip trips T14 3-strike sustained-escalation")
+}
+
 func TestSiteFromInput(t *testing.T) {
 	s, err := siteFromInput(map[string]any{"site": "www.freecode.camp"})
 	require.NoError(t, err)
