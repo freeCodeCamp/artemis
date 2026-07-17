@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.6.1](https://github.com/freeCodeCamp/artemis/compare/v1.6.0...v1.6.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* **handler:** redact actor fields on approve/reject for non-staff ([04284c6](https://github.com/freeCodeCamp/artemis/commit/04284c63871c88683a669efa6b85ceaebc45360e))
+
 ## [1.6.0](https://github.com/freeCodeCamp/artemis/compare/v1.5.0...v1.6.0) (2026-07-17)
 
 
