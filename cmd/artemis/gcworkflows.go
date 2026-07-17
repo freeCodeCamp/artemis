@@ -21,6 +21,17 @@ import (
 var captureCheckIn = sentry.CaptureCheckIn
 var captureBackground = observability.CaptureBackground
 
+func onConcurrentMigrateErr(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		slog.WarnContext(ctx, "pg.migrate.concurrent.aborted", "err", err)
+		return
+	}
+	captureBackground("pg.migrate.concurrent", err)
+}
+
 func withCheckIn(slug, cron string, fn worker.Handler) worker.Handler {
 	return func(ctx context.Context, input map[string]any) error {
 		cfg := &sentry.MonitorConfig{Schedule: sentry.CrontabSchedule(cron)}
