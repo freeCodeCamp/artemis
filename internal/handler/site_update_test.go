@@ -31,6 +31,8 @@ func callUpdate(h *Handlers, slug string, body []byte, login, token string) *htt
 
 func TestSiteUpdate_HappyPath(t *testing.T) {
 	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h.RepoGH = staffCallerGH()
+	h.AuditReadAuthzTeam = "staff"
 
 	// Seed an existing site via Register.
 	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
@@ -45,6 +47,27 @@ func TestSiteUpdate_HappyPath(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, []string{"news-editors", "platform"}, got.Teams)
 	assert.Equal(t, "alice", got.CreatedBy, "created_by must round-trip")
+}
+
+func TestSiteUpdate_RedactsCreatedByForNonAuditStaff(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h.RepoGH = &fakeGH{
+		tokenLogins: map[string]string{"tok": "alice"},
+		userTeams:   map[string]map[string]bool{"alice": {"platform": true}},
+	}
+	h.AuditReadAuthzTeam = "staff"
+
+	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
+	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
+
+	updBody, _ := json.Marshal(SiteUpdateRequest{Teams: []string{"platform"}})
+	w := callUpdate(h, "example", updBody, "alice", "tok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var got SiteRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Empty(t, got.CreatedBy, "a registry-authorized but non-audit-staff caller must not see actor identity on update")
+	assert.Equal(t, []string{"platform"}, got.Teams, "the update itself still succeeds")
 }
 
 func TestSiteUpdate_404OnAbsentSlug(t *testing.T) {

@@ -193,7 +193,11 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	h.logAction(r.Context(), "site.update", "success",
 		slog.Any("before", beforeTeams), slog.Any("after", site.Teams))
 	h.auditFromScope(r.Context(), "site.update", "success", map[string]any{"before": beforeTeams, "after": site.Teams})
-	writeJSON(w, http.StatusOK, toSiteRow(site))
+	row := toSiteRow(site)
+	if !h.callerSeesActors(r) {
+		row.CreatedBy = ""
+	}
+	writeJSON(w, http.StatusOK, row)
 }
 
 // SiteDelete implements DELETE /api/site/{slug} — removes a slug
