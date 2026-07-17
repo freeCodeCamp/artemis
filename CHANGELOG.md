@@ -2,6 +2,27 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.6.0](https://github.com/freeCodeCamp/artemis/compare/v1.5.0...v1.6.0) (2026-07-17)
+
+
+### Features
+
+* **observability:** escalate sustained transients ([0fee610](https://github.com/freeCodeCamp/artemis/commit/0fee610c00ecff4855e66b925abcc636ca171b84))
+* **pg:** concurrent no-tx migration path + audit 0008 ([0d7442b](https://github.com/freeCodeCamp/artemis/commit/0d7442b63a79a7f802d2adc9d9eccbae8b076aae))
+
+
+### Bug Fixes
+
+* **gc:** move tombstone audit outside site lock ([b4648fd](https://github.com/freeCodeCamp/artemis/commit/b4648fd878d8411e6c9434a034347ffd2713ea75))
+* **handler:** gate actor-identity fields to staff ([85f4455](https://github.com/freeCodeCamp/artemis/commit/85f4455f9c9b0c624042b0989cf86ce36ad8c33b))
+* **handler:** redact CreatedBy on SiteUpdate for non-staff ([0e5a04f](https://github.com/freeCodeCamp/artemis/commit/0e5a04f63b687ea345703b9586c528b905f1c351))
+* **main:** wire RepoGH independent of repo-create feature ([0c3fc8b](https://github.com/freeCodeCamp/artemis/commit/0c3fc8bd64f909aad6e7fa007d497b9bf56a830e))
+* **observability:** treat deadline/55P03 as transient ([fbde5c1](https://github.com/freeCodeCamp/artemis/commit/fbde5c189fce16b966ecbb432616e90d927f8271))
+* **pg:** don't hold outbox tx across publish ([155e7df](https://github.com/freeCodeCamp/artemis/commit/155e7df458f6f7b4488dc7fb96442f2b80fd02ac))
+* **reconcile:** emit one aggregated capture per tick ([4030f53](https://github.com/freeCodeCamp/artemis/commit/4030f5394ebc812cc3e5bbd68fd67daf7f13da69))
+* **scheduler:** break reconcile loop on exhausted budget ([4d2d50d](https://github.com/freeCodeCamp/artemis/commit/4d2d50da67d02735c181e0395d0d569f9e473187))
+* **valkey:** bound-retry boot connect for store + teamcache ([66fdf00](https://github.com/freeCodeCamp/artemis/commit/66fdf00eb84ec0309214b51c029d7fe938db6a40))
+
 ## [1.5.0](https://github.com/freeCodeCamp/artemis/compare/v1.4.0...v1.5.0) (2026-07-15)
 
 
