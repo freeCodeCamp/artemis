@@ -77,11 +77,15 @@ func toRepoRow(r reporequest.Request) RepoRow {
 	}
 }
 
+func redactActors(row *RepoRow) {
+	row.RequestedBy = ""
+	row.Approver = ""
+}
+
 func (h *Handlers) repoRowFor(r *http.Request, req reporequest.Request) RepoRow {
 	row := toRepoRow(req)
 	if !h.callerSeesActors(r) {
-		row.RequestedBy = ""
-		row.Approver = ""
+		redactActors(&row)
 	}
 	return row
 }
@@ -254,8 +258,7 @@ func (h *Handlers) ReposList(w http.ResponseWriter, r *http.Request) {
 		}
 		row := toRepoRow(req)
 		if !seesActors {
-			row.RequestedBy = ""
-			row.Approver = ""
+			redactActors(&row)
 		}
 		rows = append(rows, row)
 	}

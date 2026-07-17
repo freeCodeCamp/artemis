@@ -388,6 +388,23 @@ func TestReposList_RedactsActorFieldsForNonStaff(t *testing.T) {
 	assert.Equal(t, "a", got[0].Name, "non-actor fields stay visible")
 }
 
+func TestReposList_SingleProbeForManyRows(t *testing.T) {
+	store := newFakeRepoStore()
+	ctx := context.Background()
+	for _, n := range []string{"a", "b", "c", "d"} {
+		_, _ = store.Create(ctx, reporequest.Request{Name: n, RequestedBy: "alice", Visibility: reporequest.VisibilityPrivate})
+	}
+	gh := staffRepoGH()
+	h := repoHandlers(t, gh, store, &fakeRepoCreator{})
+
+	w := doReq(h, http.MethodGet, "/api/repos?status=all", nil, "alice", "tok", (*Handlers).ReposList)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []RepoRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 4)
+	assert.Equal(t, 1, gh.authorizeCalls, "actor-visibility probed ONCE per list, never per row")
+}
+
 func TestRepoGet(t *testing.T) {
 	store := newFakeRepoStore()
 	created, _ := store.Create(context.Background(), reporequest.Request{Name: "g", RequestedBy: "alice", Visibility: reporequest.VisibilityPublic})
