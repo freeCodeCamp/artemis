@@ -118,3 +118,20 @@ func TestSitesList_502OnRegistryReadError(t *testing.T) {
 	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "registry_read_failed")
 }
+
+func TestSitesList_ActorGateIndependentOfRepoFeature(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h.RepoGH = staffCallerGH()
+	h.AuditReadAuthzTeam = "staff"
+	require.False(t, h.RepoEnabled(), "repo-create feature off (Repos/GitHubApp nil) — actor/audit gating must not depend on it")
+
+	body := []byte(`{"slug":"alpha","teams":["staff"]}`)
+	require.Equal(t, http.StatusCreated, callRegister(h, body, "alice", "tok").Code)
+
+	w := callSitesList(h, "alice", "tok")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []SiteRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	require.Len(t, got, 1)
+	assert.Equal(t, "alice", got[0].CreatedBy, "staff sees actor identity even when the repo-create feature is disabled")
+}

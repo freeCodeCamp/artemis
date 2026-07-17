@@ -156,9 +156,13 @@ func run() error {
 	// (cfg.Repo.Org), distinct from ghClient's site-registry org.
 	var (
 		repoStore handler.RepoStore
-		repoGH    *auth.GitHubClient
 		appClient *githubapp.Client
 	)
+	repoGH := auth.NewGitHubClient(auth.GitHubClientConfig{
+		APIBase:  cfg.GitHub.APIBase,
+		Org:      cfg.Repo.Org,
+		CacheTTL: cfg.GitHub.MembershipCacheTTL,
+	})
 	if cfg.Repo.Enabled() {
 		appSigner, err := githubapp.NewAppJWTSigner(cfg.Repo.App.AppID, cfg.Repo.App.PrivateKeyPEM)
 		if err != nil {
@@ -177,11 +181,6 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("open repo-request store: %w", err)
 		}
-		repoGH = auth.NewGitHubClient(auth.GitHubClientConfig{
-			APIBase:  cfg.GitHub.APIBase,
-			Org:      cfg.Repo.Org,
-			CacheTTL: cfg.GitHub.MembershipCacheTTL,
-		})
 		slog.Info("repo.feature.enabled",
 			"org", cfg.Repo.Org,
 			"createTeam", cfg.Repo.CreateAuthzTeam,
@@ -278,8 +277,8 @@ func run() error {
 	// Assign the repo interface deps only when enabled — assigning a
 	// typed-nil pointer to an interface field would make RepoEnabled()
 	// (which compares != nil) true and mount routes onto nil deps.
+	h.RepoGH = repoGH
 	if cfg.Repo.Enabled() {
-		h.RepoGH = repoGH
 		h.Repos = repoStore
 		h.GitHubApp = appClient
 	}
