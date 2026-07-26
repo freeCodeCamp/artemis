@@ -128,6 +128,7 @@ func TestSitePromote_AliasWriteUnderSiteLock(t *testing.T) {
 	h.Locker = &fakeLocker{log: log}
 
 	deployID := "20260420-141522-abc1234"
+	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("hi")
 	body, _ := json.Marshal(SitePromoteRequest{DeployID: deployID})
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
 		"/api/site/www/promote", body,
@@ -164,6 +165,7 @@ func TestSitePromote_CASReadInsideLock(t *testing.T) {
 	log := &eventLog{}
 	store := &loggingR2{fakeR2: newFakeR2(), log: log}
 	store.aliases["www/production"] = "20260101-000000-old0001"
+	store.objects["www.freecode.camp/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 
 	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
 	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)

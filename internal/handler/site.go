@@ -128,6 +128,17 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		hasIndex, err := h.R2.HasObject(r.Context(), h.deployPrefix(site, deployID)+rootIndexKey)
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_head_failed", "r2.head.index.promote", err)
+			return errAliasWriteHandled
+		}
+		if !hasIndex {
+			writeError(w, http.StatusUnprocessableEntity, "missing_index",
+				"target deploy has no root index.html; it cannot be served at /")
+			return errAliasWriteHandled
+		}
+
 		telemetry.Breadcrumb(r.Context(), "promote", "production alias write")
 		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.promote", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, prodKey, deployID)
@@ -209,6 +220,16 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		}
 		if !exists {
 			writeError(w, http.StatusUnprocessableEntity, "deploy_missing", "target deploy no longer exists in r2")
+			return errAliasWriteHandled
+		}
+		hasIndex, err := h.R2.HasObject(r.Context(), prefix+rootIndexKey)
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_head_failed", "r2.head.index.rollback", err)
+			return errAliasWriteHandled
+		}
+		if !hasIndex {
+			writeError(w, http.StatusUnprocessableEntity, "missing_index",
+				"target deploy has no root index.html; it cannot be served at /")
 			return errAliasWriteHandled
 		}
 

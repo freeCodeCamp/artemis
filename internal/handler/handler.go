@@ -59,6 +59,7 @@ type R2Store interface {
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 	HasPrefix(ctx context.Context, prefix string) (bool, error)
+	HasObject(ctx context.Context, key string) (bool, error)
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
 	MovePrefix(ctx context.Context, src, dst string) (int, error)
 	PrefixBytes(ctx context.Context, prefix string) (int64, error)

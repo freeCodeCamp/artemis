@@ -133,6 +133,7 @@ func TestSitePromote_PGWriteThrough(t *testing.T) {
 	h.Outbox = ob
 
 	deployID := "20260420-141522-abc1234"
+	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("hi")
 	body, _ := json.Marshal(SitePromoteRequest{DeployID: deployID})
 
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
