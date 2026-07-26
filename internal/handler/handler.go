@@ -247,6 +247,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func writeErrorDetail(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	if sw, ok := w.(*statusWriter); ok {
+		sw.errCode = code
+	}
+	errObj := map[string]any{"code": code, "message": message}
+	for k, v := range extra {
+		errObj[k] = v
+	}
+	writeJSON(w, status, map[string]any{"error": errObj})
+}
+
 // writeUpstreamError logs err with full context and writes an opaque
 // generic message to the client. Use whenever err comes from a
 // transitive dependency (R2 SDK, go-redis, GitHub API) whose strings

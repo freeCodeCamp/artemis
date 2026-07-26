@@ -212,6 +212,15 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			"files manifest is required and must list at least one path")
 		return
 	}
+	if !hasIndexHTML(req.Files) {
+		var extra map[string]any
+		if hint := frameworkBuildHint(req.Files); hint != "" {
+			extra = map[string]any{"hint": hint}
+		}
+		writeErrorDetail(w, http.StatusUnprocessableEntity, "missing_index",
+			"deploy has no root index.html; the site cannot be served at /", extra)
+		return
+	}
 
 	prefix := h.deployPrefix(claims.Site, deployID)
 	if err := telemetry.WithSpan(r.Context(), "r2.list.verify", func(ctx context.Context) error {
@@ -299,6 +308,51 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		"deployId": deployID,
 		"mode":     mode,
 	})
+}
+
+const rootIndexKey = "index.html"
+
+const staticExportHint = "This looks like a framework build directory, not a static export. " +
+	"Configure a static export (e.g. Next.js output: 'export', Nuxt nuxi generate, SvelteKit adapter-static) " +
+	"and point platform.yaml build.output at the export directory (e.g. out/, dist/, build/)."
+
+func hasIndexHTML(files []string) bool {
+	for _, f := range files {
+		if f == rootIndexKey {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeFrameworkBuild(files []string) bool {
+	var hasBuildID, hasBuildManifest bool
+	for _, f := range files {
+		p := strings.ReplaceAll(f, `\`, "/")
+		switch p {
+		case "BUILD_ID":
+			hasBuildID = true
+		case "build-manifest.json":
+			hasBuildManifest = true
+		case "nitro.json":
+			return true
+		}
+		if strings.HasPrefix(p, "_app/immutable/") ||
+			strings.HasPrefix(p, ".next/") ||
+			strings.HasPrefix(p, ".nuxt/") ||
+			strings.HasPrefix(p, ".svelte-kit/") ||
+			strings.HasPrefix(p, ".output/") {
+			return true
+		}
+	}
+	return hasBuildID && hasBuildManifest
+}
+
+func frameworkBuildHint(files []string) string {
+	if looksLikeFrameworkBuild(files) {
+		return staticExportHint
+	}
+	return ""
 }
 
 // deployPrefix returns the R2 key prefix for one deploy, e.g.
