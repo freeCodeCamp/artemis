@@ -59,6 +59,7 @@ type R2Store interface {
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 	HasPrefix(ctx context.Context, prefix string) (bool, error)
+	HasObject(ctx context.Context, key string) (bool, error)
 	VerifyDeployComplete(ctx context.Context, prefix string, expected []string) error
 	MovePrefix(ctx context.Context, src, dst string) (int, error)
 	PrefixBytes(ctx context.Context, prefix string) (int64, error)
@@ -245,6 +246,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 			"message": message,
 		},
 	})
+}
+
+func writeErrorDetail(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
+	if sw, ok := w.(*statusWriter); ok {
+		sw.errCode = code
+	}
+	errObj := map[string]any{"code": code, "message": message}
+	for k, v := range extra {
+		errObj[k] = v
+	}
+	writeJSON(w, status, map[string]any{"error": errObj})
 }
 
 // writeUpstreamError logs err with full context and writes an opaque

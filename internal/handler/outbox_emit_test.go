@@ -74,6 +74,7 @@ func TestFinalize_EmitsSiteChanged(t *testing.T) {
 func TestPromote_EmitsSiteChanged(t *testing.T) {
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-abc1234"
+	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
 	ob := &fakeOutbox{}
 	h.Outbox = ob

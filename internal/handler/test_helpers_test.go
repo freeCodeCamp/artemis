@@ -396,6 +396,16 @@ func (f *fakeR2) HasPrefix(_ context.Context, prefix string) (bool, error) {
 	return false, nil
 }
 
+func (f *fakeR2) HasObject(_ context.Context, key string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return false, f.listErr
+	}
+	_, ok := f.objects[key]
+	return ok, nil
+}
+
 func (f *fakeR2) MovePrefix(ctx context.Context, src, dst string) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

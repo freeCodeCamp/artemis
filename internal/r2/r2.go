@@ -153,6 +153,24 @@ func (c *Client) HasPrefix(ctx context.Context, prefix string) (bool, error) {
 	return len(page.Contents) > 0, nil
 }
 
+func (c *Client) HasObject(ctx context.Context, key string) (bool, error) {
+	_, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: awsv2.String(c.bucket),
+		Key:    awsv2.String(key),
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.ErrorCode() {
+			case "NoSuchKey", "NotFound":
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("r2 head %s: %w", key, err)
+	}
+	return true, nil
+}
+
 // ListPrefix returns all keys under the given prefix.
 func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error) {
 	var out []string

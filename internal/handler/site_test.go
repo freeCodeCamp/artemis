@@ -42,6 +42,7 @@ func TestSitePromote_Atomic(t *testing.T) {
 	}
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-abc1234"
+	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
@@ -297,6 +298,7 @@ func TestSitePromote_DirectWriteSkipsPreviewRead(t *testing.T) {
 	// Pre-seed a preview alias that would be promoted under the
 	// legacy path. It must remain untouched here.
 	store.aliases["www/preview"] = "20260420-141522-pre1234"
+	store.objects["www/deploys/20260513-101010-cas9999/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
 	body, _ := json.Marshal(SitePromoteRequest{DeployID: "20260513-101010-cas9999"})
@@ -402,6 +404,7 @@ func TestSitePromote_CAS_HappyPath(t *testing.T) {
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-newer1"
 	store.aliases["www/production"] = "20260101-101010-older1"
+	store.objects["www/deploys/20260420-141522-newer1/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
 	body, _ := json.Marshal(SitePromoteRequest{ExpectedCurrent: "20260101-101010-older1"})
@@ -461,6 +464,7 @@ func TestSitePromote_CAS_AndDeployID_AtomicSwap(t *testing.T) {
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-pre1234"
 	store.aliases["www/production"] = "20260101-101010-current"
+	store.objects["www/deploys/20260513-101010-cas9999/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t, gh, standardSites(), store)
 
 	body, _ := json.Marshal(SitePromoteRequest{

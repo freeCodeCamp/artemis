@@ -34,6 +34,7 @@ func TestDestructiveFlow_BreadcrumbsAndSpans(t *testing.T) {
 
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-abc1234"
+	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}, userTeams: map[string]map[string]bool{"alice": {"team-a": true}}},
 		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},

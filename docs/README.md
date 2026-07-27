@@ -21,8 +21,8 @@ DELETE /api/site/{site}/deploys/{deployId}                      → 200 { site, 
 POST   /api/site/{site}/deploys/{deployId}/restore              → 200 { site, deployId, status: "restored", moved, bytes } · 410 site_gone/already_purged
 GET    /api/site/{site}/trash                                   → [{ deployId, trashedAt, expiresAt, bytes }]
 GET    /api/site/{site}/alias/{mode}                            → { site, mode, deployId, url }
-POST   /api/site/{site}/promote                                 → { url }
-POST   /api/site/{site}/rollback          { to }                → { url }
+POST   /api/site/{site}/promote                                 → { url } · 422 missing_index
+POST   /api/site/{site}/rollback          { to }                → { url } · 422 missing_index
 
 POST   /api/repo                          { name, visibility?, description?, template? } → 201 RepoRow  (feature-gated)
 GET    /api/repos                         [?status=&mine=]      → [RepoRow]                              (feature-gated)
@@ -35,10 +35,12 @@ DELETE /api/repo/{id}                                           → 204         
 GET    /api/audit                         [?site=&actor=&action=&since=&limit=&offset=] → [AuditRow]  (durable trail, newest-first)
 
 PUT    /api/deploy/{deployId}/upload      multipart stream      → { received }
-POST   /api/deploy/{deployId}/finalize    { mode }              → { url }
+POST   /api/deploy/{deployId}/finalize    { mode }              → { url } · 422 missing_index
 ```
 
 `/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
+
+A deploy becomes live only if it is servable at `/`: `finalize`, `promote`, and `rollback` reject with `422 missing_index` (alias untouched, previous deploy keeps serving) when the target deploy has no root `index.html` — the one object the serve plane requires for `/`. On `finalize` the `422` body additionally carries an advisory `hint` when the upload looks like a framework build directory (e.g. a raw `.next` server build) rather than a static export. See ADR-016 §2026-07-26.
 
 `GET /api/audit` reads the durable, append-only `audit_log` — every privileged action attributed to an actor: staff/CI lifecycle (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`, reconcile under `actor=system:reconcile`). Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500 — `limit=0` clamps to the default 100, it does not return zero rows; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. Because the trail is cross-tenant, the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`) — not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
 
