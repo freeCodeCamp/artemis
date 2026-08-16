@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -17,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sort"
+	"strings"
 )
 
 type fakeReaper struct{}
@@ -214,6 +217,67 @@ func TestReconcileScheduler_BoundsPublishDeadline(t *testing.T) {
 	assert.LessOrEqual(t, d, 30*time.Second, "publish deadline is bounded, not open-ended")
 }
 
+type slowPublisher struct {
+	stallOn string
+	mu      sync.Mutex
+	sites   []string
+}
+
+func (p *slowPublisher) Publish(ctx context.Context, _ string, payload []byte) error {
+	var m map[string]string
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return err
+	}
+	if p.stallOn != "" && m["site"] == p.stallOn {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sites = append(p.sites, m["site"])
+	return nil
+}
+
+func (p *slowPublisher) published() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.sites...)
+}
+
+func reconcileSiteNames(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("site-%03d", i)
+	}
+	return out
+}
+
+func TestPublishReconcileEvents_PublishesEverySite(t *testing.T) {
+	sites := reconcileSiteNames(50)
+	pub := &slowPublisher{}
+
+	published, err := publishReconcileEvents(context.Background(), pub, sites, 100*time.Millisecond)
+
+	require.NoError(t, err)
+	assert.Equal(t, len(sites), published,
+		"every registered site must get a reconcile event; a per-run budget must never truncate the list")
+	assert.ElementsMatch(t, sites, pub.published())
+}
+
+func TestPublishReconcileEvents_StalledSiteDoesNotDropTheRest(t *testing.T) {
+	sites := reconcileSiteNames(20)
+	pub := &slowPublisher{stallOn: sites[5]}
+
+	published, err := publishReconcileEvents(context.Background(), pub, sites, 20*time.Millisecond)
+
+	require.Error(t, err, "a stalled publish is still reported to the caller")
+	assert.Equal(t, len(sites)-1, published,
+		"one stalled site must not stop the sites after it")
+	assert.NotContains(t, pub.published(), sites[5])
+	assert.Contains(t, pub.published(), sites[19],
+		"the last site in the list must still be reached")
+}
+
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
@@ -259,8 +323,10 @@ func TestReconcileScheduler_PublishesPerSite(t *testing.T) {
 
 	require.Len(t, pub.topics, 2, "one site.reconcile event published per registered site")
 	assert.Equal(t, []string{topicSiteReconcile, topicSiteReconcile}, pub.topics)
-	assert.Contains(t, string(pub.payloads[0]), `"site":"www"`)
-	assert.Contains(t, string(pub.payloads[1]), `"site":"learn"`)
+	payloads := []string{string(pub.payloads[0]), string(pub.payloads[1])}
+	sort.Strings(payloads)
+	assert.Equal(t, []string{`{"site":"learn"}`, `{"site":"www"}`}, payloads,
+		"every site gets one event; publish order is shuffled by design")
 }
 
 type exhaustingPublisher struct {
@@ -460,4 +526,49 @@ func TestRegisterGCWorkflows(t *testing.T) {
 	rt := worker.NewRuntime(&captureEngine{})
 	require.NoError(t, registerGCWorkflows(rt, gcw, false, &capturingPublisher{}, noSites))
 	assert.Len(t, rt.Registered(), 4)
+}
+
+type truncatingPublisher struct {
+	mu     sync.Mutex
+	sites  []string
+	after  int
+	cancel context.CancelFunc
+}
+
+func (p *truncatingPublisher) Publish(_ context.Context, _ string, payload []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var m map[string]string
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return err
+	}
+	p.sites = append(p.sites, m["site"])
+	if len(p.sites) >= p.after {
+		p.cancel()
+	}
+	return nil
+}
+
+func TestReconcileScheduler_TruncatedRunsCoverDisjointSuffixes(t *testing.T) {
+	sites := reconcileSiteNames(40)
+	const keep = 8
+	const runs = 6
+
+	publishedSets := make([]string, 0, runs)
+	for range runs {
+		ctx, cancel := context.WithCancel(context.Background())
+		pub := &truncatingPublisher{after: keep, cancel: cancel}
+		_, _ = publishReconcileEvents(ctx, pub, sites, time.Second)
+		cancel()
+		got := append([]string(nil), pub.sites...)
+		sort.Strings(got)
+		publishedSets = append(publishedSets, strings.Join(got, ","))
+	}
+
+	distinct := map[string]bool{}
+	for _, s := range publishedSets {
+		distinct[s] = true
+	}
+	require.Greater(t, len(distinct), 1,
+		"a truncated run must not cover the identical site prefix every time; a fixed order starves the same tail every night")
 }

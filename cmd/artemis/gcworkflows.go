@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	mrand "math/rand/v2"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
@@ -71,13 +72,39 @@ const (
 	cronTombstonePurge         = "0 3 * * *"
 	cronReconcile              = "0 4 * * *"
 	relayInterval              = 5 * time.Second
-
-	reconcilePublishFloor   = 4 * time.Second
-	reconcilePublishPerSite = 150 * time.Millisecond
 )
 
-func reconcilePublishDeadline(n int) time.Duration {
-	return reconcilePublishFloor + time.Duration(n)*reconcilePublishPerSite
+func publishReconcileEvents(ctx context.Context, publisher worker.Publisher, sites []string, perPublish time.Duration) (int, error) {
+	shuffled := append([]string(nil), sites...)
+	mrand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	var firstErr error
+	published := 0
+	for _, site := range shuffled {
+		if ctx.Err() != nil {
+			if firstErr == nil {
+				firstErr = ctx.Err()
+			}
+			break
+		}
+		payload, err := json.Marshal(map[string]string{"site": site})
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		pctx, cancel := context.WithTimeout(ctx, perPublish)
+		err = publisher.Publish(pctx, topicSiteReconcile, payload)
+		cancel()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		published++
+	}
+	return published, firstErr
 }
 
 func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
@@ -118,28 +145,12 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 			Cron: []string{cronReconcile},
 			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
 				sites := reconcileSites()
-				pctx, cancel := context.WithTimeout(ctx, reconcilePublishDeadline(len(sites)))
-				defer cancel()
-				var firstErr error
-				for _, site := range sites {
-					if pctx.Err() != nil {
-						if firstErr == nil {
-							firstErr = pctx.Err()
-						}
-						break
-					}
-					payload, err := json.Marshal(map[string]string{"site": site})
-					if err != nil {
-						if firstErr == nil {
-							firstErr = err
-						}
-						continue
-					}
-					if err := publisher.Publish(pctx, topicSiteReconcile, payload); err != nil {
-						if firstErr == nil {
-							firstErr = err
-						}
-					}
+				published, firstErr := publishReconcileEvents(ctx, publisher, sites, worker.DefaultPublishTimeout)
+				if published < len(sites) {
+					slog.ErrorContext(ctx, "reconcile.schedule.incomplete",
+						"sites", len(sites),
+						"published", published,
+						"skipped", len(sites)-published)
 				}
 				if firstErr != nil {
 					captureBackground("reconcile.schedule", firstErr)
