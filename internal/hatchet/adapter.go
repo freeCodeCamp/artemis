@@ -117,9 +117,13 @@ func (a *Adapter) buildWorkflow(client *hsdk.Client, def worker.WorkflowDef) *hs
 	}
 	wf := client.NewWorkflow(def.Name, opts...)
 	handler := def.Handler
+	var taskOpts []hsdk.TaskOption
+	if def.ExecutionTimeout > 0 {
+		taskOpts = append(taskOpts, hsdk.WithExecutionTimeout(def.ExecutionTimeout))
+	}
 	wf.NewTask(def.Name, func(ctx hsdk.Context, input map[string]any) (any, error) {
 		return nil, handler(ctx, input)
-	})
+	}, taskOpts...)
 	return wf
 }
 

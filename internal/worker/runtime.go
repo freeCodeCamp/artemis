@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 const ConcurrencyKeySite = "site"
@@ -19,11 +20,12 @@ const (
 type Handler func(ctx context.Context, input map[string]any) error
 
 type WorkflowDef struct {
-	Name           string
-	ConcurrencyKey string
-	EventTriggers  []string
-	Cron           []string
-	Handler        Handler
+	Name             string
+	ConcurrencyKey   string
+	EventTriggers    []string
+	Cron             []string
+	ExecutionTimeout time.Duration
+	Handler          Handler
 }
 
 type Engine interface {

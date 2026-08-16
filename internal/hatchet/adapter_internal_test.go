@@ -177,3 +177,29 @@ func TestAdapterPublishDecodeErrorPath(t *testing.T) {
 	require.Error(t, err, "malformed payload must surface a decode error, not push garbage to the event bus")
 	require.ErrorContains(t, err, "decode payload")
 }
+
+func TestAdapterBuildWorkflow_CarriesTheExecutionTimeout(t *testing.T) {
+	isolateClientEnv(t)
+
+	a := New(Config{Token: craftJWT(t), Addr: "localhost:7077"})
+	c, err := a.connect()
+	require.NoError(t, err)
+	noop := func(context.Context, map[string]any) error { return nil }
+
+	withTimeout := a.buildWorkflow(c, worker.WorkflowDef{
+		Name:             "drift-detect",
+		Cron:             []string{"0 4 * * *"},
+		ExecutionTimeout: 15 * time.Minute,
+		Handler:          noop,
+	})
+	req, _, _, _ := withTimeout.Dump()
+	require.Len(t, req.GetTasks(), 1)
+	require.Equal(t, "900s", req.GetTasks()[0].GetTimeout(),
+		"a fleet-wide sweep runs for minutes; on the engine default it would be killed every night")
+
+	bare := a.buildWorkflow(c, worker.WorkflowDef{Name: "gc-site", Handler: noop})
+	bareReq, _, _, _ := bare.Dump()
+	require.Len(t, bareReq.GetTasks(), 1)
+	require.Empty(t, bareReq.GetTasks()[0].GetTimeout(),
+		"an unset timeout must stay unset, so short workflows keep the engine default")
+}
