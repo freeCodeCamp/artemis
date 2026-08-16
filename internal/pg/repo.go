@@ -39,6 +39,21 @@ func (r *Repo) UpsertDeploy(ctx context.Context, site, id string, mtime time.Tim
 	return nil
 }
 
+func (r *Repo) ReindexDeploy(ctx context.Context, site, id string, mtime time.Time, hasMarker bool) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
+		SELECT $1, $2, $3, 0, $4, 'active'
+		WHERE NOT EXISTS (SELECT 1 FROM tombstones WHERE site = $1 AND id IN ($2, ''))
+		ON CONFLICT (site, id) DO UPDATE SET
+			has_marker = EXCLUDED.has_marker,
+			state = 'active'`,
+		site, id, mtime, hasMarker)
+	if err != nil {
+		return false, fmt.Errorf("pg reindex deploy %s/%s: %w", site, id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (r *Repo) UpsertAlias(ctx context.Context, site, name, deployID string, updatedAt time.Time) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO aliases (site, name, deploy_id, updated_at)
@@ -71,6 +86,37 @@ func (r *Repo) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, er
 			d.AliasReleasedAt = *released
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repo) CountDeploys(ctx context.Context) (int, error) {
+	var n int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM deploys WHERE state = 'active'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("pg count deploys: %w", err)
+	}
+	return n, nil
+}
+
+func (r *Repo) KnownSiteDirnames(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT site FROM deploys
+		UNION SELECT site FROM aliases
+		UNION SELECT site FROM tombstones
+		ORDER BY 1`)
+	if err != nil {
+		return nil, fmt.Errorf("pg known site dirnames: %w", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var site string
+		if err := rows.Scan(&site); err != nil {
+			return nil, fmt.Errorf("pg scan site dirname: %w", err)
+		}
+		out = append(out, site)
 	}
 	return out, rows.Err()
 }
@@ -124,6 +170,23 @@ func (r *Repo) RecordTombstone(ctx context.Context, site, id string, bytes int64
 		if _, err := tx.Exec(ctx,
 			`DELETE FROM deploys WHERE site = $1 AND id = $2`, site, id); err != nil {
 			return fmt.Errorf("pg record tombstone delete deploy %s/%s: %w", site, id, err)
+		}
+		return nil
+	})
+}
+
+func (r *Repo) RecordSitePurge(ctx context.Context, site string) error {
+	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO tombstones (site, id, bytes) VALUES ($1, '', 0)
+			 ON CONFLICT (site, id) DO UPDATE SET trashed_at = now()`, site); err != nil {
+			return fmt.Errorf("pg site purge tombstone %s: %w", site, err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM aliases WHERE site = $1`, site); err != nil {
+			return fmt.Errorf("pg site purge aliases %s: %w", site, err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM deploys WHERE site = $1`, site); err != nil {
+			return fmt.Errorf("pg site purge deploys %s: %w", site, err)
 		}
 		return nil
 	})

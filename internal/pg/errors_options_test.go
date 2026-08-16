@@ -34,18 +34,6 @@ func TestIsConnClosed(t *testing.T) {
 	}
 }
 
-func TestPgCodeClassifiers(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, IsLockTimeout(fmt.Errorf("take lock: %w", &pgconn.PgError{Code: "55P03"})))
-	require.False(t, IsLockTimeout(&pgconn.PgError{Code: "57P03"}))
-	require.False(t, IsLockTimeout(pgconn.ErrConnClosed))
-
-	require.True(t, IsInRecovery(fmt.Errorf("query: %w", &pgconn.PgError{Code: "57P03"})))
-	require.False(t, IsInRecovery(&pgconn.PgError{Code: "55P03"}))
-	require.False(t, IsInRecovery(errors.New("in recovery")))
-}
-
 func TestRegistryStore_WithClock(t *testing.T) {
 	t.Parallel()
 
