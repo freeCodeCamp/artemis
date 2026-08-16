@@ -73,14 +73,14 @@ Orphan class (never-finalized / aborted upload): finalize writes a `_artemis_met
 
 ## 5. Engine invariants (durability layer)
 
-| id  | invariant                                                                                           |
-| --- | --------------------------------------------------------------------------------------------------- |
-| E1  | every activity idempotent (no non-idempotent side effect) — the keystone making at-least-once safe  |
-| E2  | all events for one site process in per-site order (Hatchet concurrency key)                         |
-| E3  | R2 authoritative for bytes; Postgres authoritative for metadata; Valkey reconstructable             |
-| E4  | every event-GC gap (orphan, missed event) is closed by the reconciliation drift-audit               |
-| E5  | no operation holds a lock across a crash; durability is the engine's, resume is replay-from-journal |
-| E6  | a workflow exceeding max attempts dead-letters + alerts; never blocks its concurrency key           |
+| id  | invariant                                                                                             |
+| --- | ----------------------------------------------------------------------------------------------------- |
+| E1  | every activity idempotent (no non-idempotent side effect) — the keystone making at-least-once safe    |
+| E2  | all events for one site process in per-site order (Hatchet concurrency key)                           |
+| E3  | R2 authoritative for bytes; Postgres authoritative for metadata; Valkey reconstructable               |
+| E4  | the reconciliation drift-audit finds every event-GC gap (orphan, missed event); an operator closes it |
+| E5  | no operation holds a lock across a crash; durability is the engine's, resume is replay-from-journal   |
+| E6  | a workflow exceeding max attempts dead-letters + alerts; never blocks its concurrency key             |
 
 ## 6. Transactional integrity — outbox-row + relay
 
@@ -88,7 +88,7 @@ Hatchet events are sent via its API (not inside the app's Postgres tx), so we us
 
 ## 7. Event-driven incremental GC
 
-Steady-state GC is **never** a full-bucket scan. A successful finalize/promote/rollback emits `site.changed{site}` (via outbox) → a **debounced** per-site GC workflow (Hatchet `concurrency:{key:site}` + debounce) evaluates retention for that site only → O(changed sites). A low-cadence **reconciliation** workflow does a sharded R2 ↔ Postgres drift audit (orphan bytes w/ no row → tombstone; row w/ no bytes → alert) — DR + the event-miss backstop (E4), never the steady-state path.
+Steady-state GC is **never** a full-bucket scan. A successful finalize/promote/rollback emits `site.changed{site}` (via outbox) → a **debounced** per-site GC workflow (Hatchet `concurrency:{key:site}` + debounce) evaluates retention for that site only → O(changed sites). A low-cadence **reconciliation** workflow does a read-only R2 ↔ Postgres drift audit (orphan bytes w/ no row → report; row w/ no bytes → alert) — DR + the event-miss backstop (E4), never the steady-state path. It writes nothing; an operator does the repair.
 
 ## 8. Serve plane coupling (verified)
 
@@ -172,3 +172,17 @@ Two latent gaps confirmed in code against the shipped v1.3.0 tag. Canonical reco
 
 - **Reconcile drift-audit backstop (E4) not wired** — `WorkflowReconcile` consumes `site.reconcile` (`cmd/artemis/gcworkflows.go:79-94`) but no producer emits it; the §5 E4 backstop has never run in prod.
 - **Outbox relay duplicate-publish** — `FetchUnpublished` (`internal/pg/outbox.go:41`) lacks `FOR UPDATE SKIP LOCKED`; `runRelayLoop` runs per-replica (`cmd/artemis/main.go:262`, `replicaCount: 3`), so duplicate publishes are possible (bounded by concurrency-key + idempotency).
+
+### Update (2026-08-16)
+
+The E4 gap above was first closed by a `reconcile-scheduler` cron that produced `site.reconcile` for each registered site. That cron carried two defects: it published the registry slug where the reconciler needs the storage dirname, so every run found zero drift; and the reconciler decided from one unlocked read, which let a concurrent `gc-site` tombstone race each repair. Both are fixed. The cron itself is retired — see the next block. See `docs/ARCHITECTURE.md` §6 and §10.
+
+### Update (2026-08-16) — the repair cron is retired
+
+The `reconcile-scheduler` cron and its per-site `site.reconcile` fan-out are removed. A single read-only `drift-detect` cron replaces them in the same 04:00 UTC slot. It runs the same sweep as the `artemis driftreport` command, and it cannot write: its store and its mover are read-only types.
+
+The repair itself stays in `internal/gc`, with its site lock, its in-lock second read, its grace gate and its blast cap. An operator starts it with `artemis reconcile <site> --apply`.
+
+The reason is empirical. The repair cron ran nightly for months and repaired nothing, because it swept registry slugs where the bytes live under storage dirnames. A read-only sweep of production then measured the real drift: 32 orphan byte prefixes and 5 lost index rows, with zero rows to prune and zero aliases pointing at nothing. The dangerous classes were empty. A daily unattended job that deletes bytes is not worth that.
+
+See [0004](0004-drift-detection-and-alerting.md).

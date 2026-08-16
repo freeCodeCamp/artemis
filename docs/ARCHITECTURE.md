@@ -174,7 +174,11 @@ Restore moves the bytes back and makes the deploy row again. **Restore never wri
 
 ## 6. What reconciliation is
 
-Reconciliation repairs the drift between the two stores. R2 holds the bytes. Postgres holds the index. The two can disagree, because no write spans both stores atomically.
+Reconciliation finds the drift between the two stores. R2 holds the bytes. Postgres holds the index. The two can disagree, because no write spans both stores atomically.
+
+A daily job only reports the drift. It cannot write. An operator does the repair with the `artemis reconcile <site> --apply` command. Design note [0004](design/0004-drift-detection-and-alerting.md) gives the reason.
+
+The reconciler receives one site name, and that name must be the storage dirname, not the registry slug (section 9 defines both). The reconciler builds the R2 prefix and the Postgres query from this one name. The drift sweep converts each registry slug to a dirname before it reads a site. A reconciler that receives the bare slug instead builds a prefix and a query that no write path ever produces, and it finds zero drift on every site, silently. The repair command refuses a name that neither the index nor the registry knows, for the same reason.
 
 For one site, the reconciler compares two sets of deploy ids:
 
@@ -182,6 +186,8 @@ For one site, the reconciler compares two sets of deploy ids:
 - **Side B** — the ids in the Postgres `deploys` table with the state `active`.
 
 It uses two signals to decide what to do: the set of alias targets, and the presence of the `_artemis_meta.json` marker. The marker means that a finalize completed at that prefix.
+
+The daily job reports every row of the table below and repairs none of them. An operator starts the repair.
 
 | Drift | Condition                                                                   | Repair                                   |
 | ----- | --------------------------------------------------------------------------- | ---------------------------------------- |
@@ -192,29 +198,41 @@ It uses two signals to decide what to do: the set of alias targets, and the pres
 | 5     | In Postgres, not in R2, aliased                                             | Report only                              |
 | 6     | In Postgres, not in R2, not aliased                                         | Remove the index row                     |
 
-An unmarked orphan that is younger than the grace window (72 hours by default) agrees with no case. The reconciler does not touch it. This protects an upload that is still in progress.
+An unmarked orphan that is younger than the grace window (72 hours by default) agrees with no case. The reconciler does not touch it. This protects an upload that is still in progress. Drift 6 uses the same window. The reconciler does not remove an index row that is younger than the grace window, because the bytes for that row can still be on their way.
 
-Before drift 4 removes anything, the reconciler reads the alias targets again. If an alias appeared in the interval, the reconciler skips that deploy and reports it.
+The reconciler reads the two sides one time, at the start of the run. It then repairs one deploy at a time. Each repair takes the site lock, and each repair reads the state again while it holds that lock. This second read is necessary. Another workflow, or a deploy from a user, can change the site in the interval between the first read and the repair. The reconciler stops the repair if the second read shows any one of these:
+
+- The deploy has an index row again.
+- An alias points at the deploy.
+- The bytes are gone from R2.
+- The marker is present, which means that a finalize completed.
+
+The alias check reads the alias objects in R2, and it also reads the alias rows in Postgres. A deploy that either store calls live is live. Section 9 gives the reason: the R2 object is the truth, and Postgres only mirrors it. Reconciliation runs against sites whose Postgres state is suspect, because a wrong Postgres state is the condition it exists to repair. It must therefore not ask Postgres alone which deploy the users get.
+
+Postgres refuses a drift 1 or a drift 3 repair for a deploy that holds a tombstone. This refusal is part of one SQL statement, so no interval exists between the check and the write. The reconciler can therefore never return a deleted deploy to the active set.
+
+The reconciler stops the run for a site if Postgres holds deploys for that site and the R2 listing returns no deploy prefix at all. An empty listing looks the same as total drift, and total drift would delete every index row for the site. The reconciler treats it as a fault instead, and it reports the fault. This is the shape the name defect in section 10 had, and it is also the shape of a wrong bucket or a wrong prefix.
+
+The blast cap limits how many deploys one run can move to the trash or remove from the index. A run that plans more repairs than the cap repairs the oldest deploys first, reports the cap, and leaves the remainder for the next run. The cap does not limit the repairs that write an index row, because those repairs remove nothing.
 
 Two limits are important:
 
 - The reconciler finds **presence** drift only. If an id is on both sides, the reconciler compares no field. It never repairs a wrong size or a wrong time.
-- The reconciler takes **no site lock**, unlike each other destructive path.
+- Each repair holds the site lock for its own operation only. The reconciler does not hold the lock for the full run. The first read of R2 has no time limit, and a long hold would make a deploy from a user fail.
 
-Drift 2 and drift 5 are the dangerous cases. Artemis reports them at the error level and sends one Sentry event.
+Drift 2 and drift 5 are the dangerous cases. The `drift-detect` cron reports them at the error level and sends one Sentry event with the op `drift.aliased_missing`.
 
 ## 7. Background work
 
-Artemis starts the background plane only when Postgres exists **and** `HATCHET_ADDR` is set. It registers four workflows.
+Artemis starts the background plane only when Postgres exists **and** `HATCHET_ADDR` is set. It registers three workflows.
 
-| Workflow              | Trigger                    | What it does                                              |
-| --------------------- | -------------------------- | --------------------------------------------------------- |
-| `gc-site`             | The `site.changed` event   | Runs the retention cleanup for one site                   |
-| `reconcile`           | The `site.reconcile` event | Runs the drift repair for one site                        |
-| `reconcile-scheduler` | Cron `0 4 * * *`           | Sends one `site.reconcile` event for each registered site |
-| `tombstone-purge`     | Cron `0 3 * * *`           | Deletes the trash of each expired tombstone               |
+| Workflow          | Trigger                  | What it does                                       |
+| ----------------- | ------------------------ | -------------------------------------------------- |
+| `gc-site`         | The `site.changed` event | Runs the retention cleanup for one site            |
+| `tombstone-purge` | Cron `0 3 * * *`         | Deletes the trash of each expired tombstone        |
+| `drift-detect`    | Cron `0 4 * * *`         | Reads each site, reports the drift, writes nothing |
 
-Both event workflows run one at a time for each site.
+The `gc-site` workflow runs one at a time for each site. The `drift-detect` cron takes no site lock, because it only reads.
 
 ### The event path
 
@@ -226,7 +244,7 @@ Artemis uses a transactional outbox, so a data write and its event commit togeth
 
 The claim transaction commits before the relay sends anything. Delivery is therefore **at least once**, and never exactly once. A workflow must tolerate a repeat.
 
-The `reconcile-scheduler` workflow is the one exception. It sends the `site.reconcile` events straight to Hatchet, and it does not use the outbox. Those events are not durable.
+Every event goes through the outbox. The two cron workflows need no event, because each one enumerates its own work.
 
 ### The retention rules
 
@@ -242,7 +260,7 @@ Condition 5 is important. The retention window applies only to a deploy that hol
 
 Before it moves a deploy, `gc-site` takes the per-site lock and reads the **live R2 aliases** again. The plan uses the Postgres alias rows, but the execution uses the R2 objects. A deploy that became live in the interval is skipped.
 
-Neither `gc-site` nor `reconcile` deletes bytes. Both only move a prefix into the trash. The `tombstone-purge` workflow is the only hard delete in the service.
+The `gc-site` workflow deletes no bytes. It only moves a prefix into the trash. The `drift-detect` cron writes nothing at all: its store and its mover are read-only types, and every write method returns an error. The `tombstone-purge` workflow is the only hard delete in the service.
 
 ## 8. How identity and authorization work
 
@@ -284,7 +302,7 @@ Two more gaps are important:
 | Deploy files        | R2                           | **R2**                                        |
 | Alias pointer       | R2 object                    | **R2** — the alias object decides what serves |
 | Alias row           | Postgres `aliases`           | Follower. The cleanup plan reads it           |
-| Deploy index        | Postgres `deploys`           | Follower of R2. Reconciliation repairs it     |
+| Deploy index        | Postgres `deploys`           | Follower of R2. An operator repairs it        |
 | Site registry       | Postgres `sites`, or Valkey  | **Postgres when it exists**, else Valkey      |
 | Registry read cache | In-process map               | Follower                                      |
 | Tombstones          | Postgres `tombstones`        | **Postgres**                                  |
@@ -292,6 +310,19 @@ Two more gaps are important:
 | Audit log           | Postgres `audit_log`         | **Postgres**                                  |
 | Repo queue          | Postgres `repo_requests`     | **Postgres**                                  |
 | GitHub teams        | Valkey and an in-process map | Follower of GitHub                            |
+
+### Two names for one site
+
+Artemis uses two different strings for one site.
+
+- The **registry slug** is the bare name a developer chooses at `POST /api/site/register`. The `sites` table uses this slug as its primary key. The HTTP routes and the deploy-session JWT carry this slug.
+- The **storage dirname** is the first path segment of the rendered R2 key for that site. Artemis computes the dirname by rendering the site prefix template with the slug, then taking the text up to the first `/`.
+
+The default `DEPLOY_PREFIX_FORMAT` is `<site>/deploys/<ts>-<sha>/`. With this format, the storage dirname equals the slug. The deployed format adds a domain suffix, for example `<site>.freecode.camp/deploys/<ts>-<sha>/`. With this format, the slug `test` renders to the dirname `test.freecode.camp`.
+
+R2 keys always come from the raw slug, rendered through the template. The `deploys` table, the `aliases` table, the `tombstones` table, and the `site.changed` outbox payload always hold the storage dirname, never the slug. Each write path converts the slug to a dirname before it touches one of these stores.
+
+A caller that reads the registry and skips this conversion sends the bare slug to a store that expects the dirname. The query or the R2 prefix then matches nothing, even though the site is real. Section 10 describes one case where this happened.
 
 ### The registry, in detail
 
@@ -307,15 +338,18 @@ Team revocation is therefore eventually consistent, and not immediate.
 ### Two invariants that hold the design together
 
 1. **The alias object is the only truth about what is live.** Postgres mirrors it. When the two disagree, reconciliation and the cleanup job both trust R2.
-1. **One Postgres advisory lock, keyed by the site, serializes each mutation of that site.** Finalize, promote, rollback, delete, restore, purge, and the cleanup job all take the same key. The timeout is 30 seconds, and a contended request gets 409.
+1. **One Postgres advisory lock, keyed by the site, serializes each mutation of that site.** Finalize, promote, rollback, delete, restore, purge, the cleanup job, and each reconciler repair all take the same key. The timeout is 30 seconds, and a contended request gets 409.
 
 The second invariant has one dangerous limit. With no Postgres, the lock becomes a silent no-op, and concurrent alias writes race with no error.
 
 ## 10. Divergence between this code and the deployed release
 
-This document describes what the code at HEAD does. Two behaviours it describes are fixes that a deployed release older than this branch does not yet carry:
+This document describes what the code at HEAD does. The deployed release still runs a nightly repair cron. HEAD removes it.
 
-- The scheduler used to bound the whole publish loop with one run deadline over an alphabetically sorted site list, so a slow run starved the same tail every night. Each publish now has its own 10-second bound, the order is shuffled, and a truncated run logs `reconcile.schedule.incomplete`.
-- The relay claim used to release its row locks at commit, before the publish, so replicas could re-publish the same rows. A claim now stamps `claim_expires_at` and other replicas skip claimed rows until it expires; delivery stays at-least-once (an expired claim is re-published by design).
+The deployed `reconcile-scheduler` workflow reads the registry slugs and publishes each one straight into a `site.reconcile` event, with no conversion to a storage dirname (section 9 defines both names). Every other write path converts the slug first. The deployed reconciler therefore builds an R2 prefix and a Postgres query from a name that no store recognizes. With the default `DEPLOY_PREFIX_FORMAT`, the slug and the dirname are the same string, so the reconciler still works. With a format that adds a suffix, such as the deployed `<site>.freecode.camp/deploys/<ts>-<sha>/`, the slug and the dirname differ, and the reconciler finds nothing on either side. It reports zero drift and completes without error, on every site, every night. This is why the split must stay documented even though the default format hides it.
 
-Until the release carrying these fixes is deployed, the running service still shows the old behaviour in sections 6 and 7.
+A read-only sweep at HEAD replaces that scheduler. The sweep converts each registry slug to its storage dirname, and it also reads the site names that only the index knows. It writes nothing.
+
+The deployed reconciler also carries a second hazard. It reads the two sides one time and then repairs from that first read, with no lock and no second read. It has no blast cap, and it removes an index row of any age. The retirement removes the hazard, because no scheduled job repairs anything. The repair path at HEAD takes the site lock and reads the state again inside that lock, and only an operator can start it.
+
+Until the release carrying this change is deployed, the running service still shows the old behaviour: the nightly reconcile workflow completes and repairs nothing.

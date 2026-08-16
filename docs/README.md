@@ -44,7 +44,7 @@ POST   /api/deploy/{deployId}/finalize    { mode }              → { url } · 4
 
 A deploy becomes live only if the serve plane can serve it at `/`. When the target deploy has no root `index.html` — the one object the serve plane requires for `/` — `finalize`, `promote`, and `rollback` reject with `422 missing_index`. The alias does not change, and the previous deploy continues to serve. On `finalize` the `422` body also carries an advisory `hint` when the upload looks like a framework build directory (for example a raw `.next` server build) and not a static export. See ADR-016 §2026-07-26.
 
-`GET /api/audit` reads the durable, append-only `audit_log`. The log holds every privileged action attributed to an actor: staff/CI lifecycle actions (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`, reconcile under `actor=system:reconcile`). Filter by `site` / `actor` / `action` / `since` (RFC3339). Results are paginated newest-first (`limit` default 100, max 500; `offset`). `limit=0` clamps to the default 100 — it does not return zero rows. This endpoint replaces raw `psql` against production as the read path for the trail. The trail is cross-tenant, so the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`), not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]`. The endpoint shipped in artemis v1.5.0; universe-cli gained the verb in a later release, because the verb depends on the deployed endpoint.
+`GET /api/audit` reads the durable, append-only `audit_log`. The log holds every privileged action attributed to an actor: staff/CI lifecycle actions (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`). A reconcile repair writes `gc.reconcile` rows under `actor=system:reconcile`, and only when an operator starts one. Filter by `site` / `actor` / `action` / `since` (RFC3339). Results are paginated newest-first (`limit` default 100, max 500; `offset`). `limit=0` clamps to the default 100 — it does not return zero rows. This endpoint replaces raw `psql` against production as the read path for the trail. The trail is cross-tenant, so the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`), not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]`. The endpoint shipped in artemis v1.5.0; universe-cli gained the verb in a later release, because the verb depends on the deployed endpoint.
 
 Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
@@ -141,30 +141,49 @@ Observability is **Sentry-only** and independent. artemis is platform infra, so 
 - **Issues** — errors, panics, and background-job failures via explicit `CaptureException` / `CaptureBackground` (op-tagged, fingerprinted). `slog.Error` does NOT create issues; the slog tee emits logs only.
 - **Performance (traces)** — inbound HTTP transactions `<METHOD> <route>` + outbound spans (GitHub/R2). Probes sampled at 0; destructive routes at 100%; base `SENTRY_TRACES_SAMPLE_RATE` otherwise.
 - **Logs** — a `slog`→Sentry Logs tee (`EnableLogs`), scrubbed via `BeforeSendLog`, trace-correlated; numeric attributes preserved as typed values.
-- **Crons** — check-ins on `tombstone-purge` (`0 3 * * *`) and `reconcile-scheduler` (`0 4 * * *`).
+- **Crons** — check-ins on `tombstone-purge` (`0 3 * * *`) and `drift-detect` (`0 4 * * *`).
 - **Stdout logs** — JSON via `log/slog` (`LOG_LEVEL`, default `info`) for `kubectl logs`; probe paths (`/healthz`, `/readyz`) silenced. Keep `LOG_LEVEL=info` in prod — several Sentry-Logs-covered signals are Info-level.
 - **Durable audit trail** — a Postgres append-only `audit_log` (indefinite retention) records every privileged action attributed to an actor. This is the forensic system-of-record, distinct from Sentry Logs (a stream with ~90-day retention). Sentry answers "what happens now, and what is trending"; `audit_log` answers "who did X, provably, months later". Read it via `GET /api/audit` or `universe audit ls` (see API). `request_id` correlates a durable row back to its Sentry trace and its stdout access-log line.
 
 There is **no Prometheus `/metrics` endpoint** (removed in v1.4.0). Signals that were counters are covered by the mechanisms above; [ADR-016](../../fCC-U/Architecture/decisions/016-deploy-proxy.md) holds the design rationale + the full signal→Sentry map.
 
-### Sentry Monitors + Alerts (operator setup)
+### Sentry Monitors + Alerts
 
-Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to notify) — both must exist to page. Create a Monitor (dataset → query → threshold) plus an Alert route (Slack / PagerDuty) for each:
+#### Configured today
+
+Live Sentry holds exactly two issue alert rules, and no metric alert rules. No Monitor/Alert pair from the target-state table below exists yet.
+
+| Rule                                            | Conditions                                                              | Action                                                      |
+| ----------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `Notify Errors via Google Chat` (id `3504127`)  | Regression event · first seen event · issue resolved · reappeared event | Webhook `sentry-google-chat-4b39c5`                         |
+| `Notify High Priority via Email` (id `3507165`) | New high-priority issue · existing high-priority issue                  | Email, target type `issue_owners`, fallthrough `AllMembers` |
+
+Both rules fire only on an issue state change, per the conditions listed above — never on a steady, unchanged failure state. One incident on record shows the effect: a cron failure repeated for 33 consecutive nights, and Sentry sent exactly one notification, on the first night. The issue reached its first-seen state that night, then stayed in that same state on every later night, so neither rule fired again. A cron whose failure state never changes can keep failing indefinitely while alerting only once. An operator who watches only these two rules can miss a long-running failure entirely.
+
+Cron check-ins exist for `drift-detect` (`0 4 * * *`) and `tombstone-purge` (`0 3 * * *`); the check-in code path (the `withCheckIn` wrapper in `cmd/artemis/gcworkflows.go`) runs independent of alert coverage. No alert rule is scoped to a missed or failed check-in today — a missed cron reaches Sentry as a Crons signal, but no rule above watches the Crons dataset.
+
+#### Target state (operator setup — recommended, not yet created)
+
+Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to notify) — both must exist to page. The table below is a recommendation: create a Monitor (dataset → query → threshold) plus an Alert route (Slack / PagerDuty) for each row. None of it exists in the live project today; read every row as a to-do, not as a description of current state.
 
 | Signal                    | Monitor dataset | Condition                                                                                |
 | ------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
 | upstream faults           | Issues          | new issue where `op` in (`r2.*`, `valkey.*`, `github.*`)                                 |
-| workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `reconcile.run`, `tombstone.purge`, `relay.run`) |
+| workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `tombstone.purge`, `relay.run`, `drift.sweep`)   |
 | audit write failure       | Issues          | new issue `op=audit.record`                                                              |
-| reconcile dangerous drift | Issues          | new issue `op=reconcile.aliased_missing`                                                 |
-| cron missed / failed      | Crons           | `tombstone-purge` / `reconcile-scheduler` missed or errored                              |
+| dangerous drift           | Issues          | new issue where `op` in (`drift.aliased_missing`, `drift.unreadable`, `drift.selfcheck`) |
+| cron missed / failed      | Crons           | `tombstone-purge` / `drift-detect` missed or errored                                     |
 | HTTP error rate / latency | Spans           | 5xx rate or p99 on `POST /api/*` transactions                                            |
+
+The `drift-detect` cron stays silent when it finds only reclaimable drift. It sends an event only when a person must act. A green check-in with no event therefore means "the job ran and found nothing to do", and a missed check-in is the only signal that the job stopped running. Both rows above are needed: the Crons row proves the job runs, and the drift row carries what it found.
+
+The two configured rules above fire on state transitions only. A Monitor built from this table still needs its own re-notification policy for any signal that can stay in one failed state across many runs, such as a cron that fails silently every night. The exact policy is an operator decision; the fact to carry forward is that "an alert rule exists" does not by itself mean "a repeating failure keeps notifying."
 
 Deferred: a DLQ-depth gauge — Hatchet v0.88.6 exposes queue depth only via a deprecated API; dead-letter events are already covered by the per-failure Issues above.
 
 ### Who-did-what dashboard (operator setup)
 
-The quick "who did what" view is a **Sentry Logs** dashboard. The slog stream carries `actor` on every request-scoped line (injected by the context log handler), so no code change is needed to query it. Add these widgets to the **Artemis** dashboard in the Sentry UI (the MCP has no dashboard-write API). This view has ~90-day retention; the durable, forensic answer is the Postgres `audit_log` via `GET /api/audit` / `universe audit ls`.
+The quick "who did what" view is a **Sentry Logs** dashboard. The slog stream carries `actor` on every request-scoped line (injected by the context log handler), so no code change is needed to query it. Add these widgets to the **Artemis** dashboard in the Sentry UI (the MCP has no dashboard-write API). This view has ~90-day retention; the durable, forensic answer is the Postgres `audit_log` via `GET /api/audit` / `universe audit ls`. Neither the configured rules nor the target-state table above has a Logs-dataset row, even though this dashboard is a Logs view — no alert rule watches the Logs dataset today.
 
 Three widgets, dataset **Logs** for each:
 
@@ -174,7 +193,7 @@ Three widgets, dataset **Logs** for each:
 | Actor leaderboard (7d) | Bar   | `count(message)` grouped by `actor`                     | `message:[<privileged set>]`              |
 | Unattributed actions   | Table | `actor`, `message`                                      | `message:[<privileged set>]` `!has:actor` |
 
-The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression alarm. It stays empty in normal operation; a row in it means an action reached Sentry with no actor. GC tombstone and reconcile actions are system-driven. They land in `audit_log` (`actor=system:gc` / `system:reconcile`) and in Issues, not in this human-activity view.
+The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression alarm. It stays empty in normal operation; a row in it means an action reached Sentry with no actor. GC tombstone actions are system-driven. They land in `audit_log` (`actor=system:gc`) and in Issues, not in this human-activity view. A reconcile repair is an operator action, started by hand, and it writes under `actor=system:reconcile`.
 
 When enabled, Sentry captures:
 
@@ -204,11 +223,13 @@ Each event carries `release = artemis@<version>+<commit>`, the GitHub `login` as
     └── production                       # alias → "deploys/20260420-141522-abc1234"
 ```
 
+`<site>` here is the storage dirname, not always the registered slug. Artemis derives it by rendering `DEPLOY_PREFIX_FORMAT` with the slug and taking the text up to the first `/`. With the default `DEPLOY_PREFIX_FORMAT` (see the Configuration table above), the dirname equals the slug. See [`ARCHITECTURE.md`](ARCHITECTURE.md) section 9 for the full rule.
+
 Alias writes are atomic: R2 makes each `PutObject` atomic for one key. The old deploy serves until the alias `PUT` completes. Artemis verifies the deploy before the `PUT`, so a partial deploy never becomes live.
 
 ## Sites registry
 
-Authoritative store: Valkey (`VALKEY_ADDR`, namespace `valkey`). Each entry maps a site slug to the list of GitHub teams whose members may deploy to that site. Mutations go through the registry endpoints:
+Authoritative store: Postgres when `DATABASE_URL` is set, else Valkey (`VALKEY_ADDR`, namespace `valkey`). See [`ARCHITECTURE.md`](ARCHITECTURE.md) section 9 for the promotion detail. Each entry maps a site slug to the list of GitHub teams whose members may deploy to that site. Mutations go through the registry endpoints:
 
 ```
 POST   /api/site/register      { slug, teams? }      → 201 SiteRow
@@ -230,7 +251,7 @@ universe sites ls       [--mine]
 
 Mutations propagate to every artemis replica via the `registry.changed` pub-sub channel within seconds, or ≤ 60 s on the TTL fallback.
 
-See `config/sites.yaml.example` for the on-disk schema shape. The live registry is Valkey; the on-disk YAML form is not consumed at runtime.
+See `config/sites.yaml.example` for the on-disk schema shape. The live registry is Postgres or Valkey, per the rule above; the on-disk YAML form is not consumed at runtime.
 
 ## Local development
 
@@ -245,6 +266,20 @@ just image                # docker build — multi-stage distroless
 just clean                # remove build artifacts
 just                      # list all recipes
 ```
+
+### Operator subcommands
+
+The `artemis` binary carries two subcommands beside the server. Both read the same environment as the server, and both need `DATABASE_URL`.
+
+```sh
+artemis driftreport               # read the whole fleet, print the drift, write nothing
+artemis reconcile <site>          # read one site, print its drift, write nothing
+artemis reconcile <site> --apply  # repair that one site
+```
+
+`driftreport` is the same sweep that the `drift-detect` cron runs. It cannot write: its store and its mover are read-only types, and its locker is `nil`. Read-only R2 credentials are enough for it.
+
+`reconcile` without `--apply` does the same read for one site. `--apply` does the repair, so it needs R2 credentials that can write, and it takes the per-site lock for each repair. It accepts a registry slug or a storage dirname, and it refuses a name that neither the index nor the registry knows. There is no fleet-wide `--apply`: name one site.
 
 Heavier suites, each with its own stack (see the recipe body for what it boots):
 

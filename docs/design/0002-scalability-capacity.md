@@ -149,7 +149,7 @@ o11y is **Sentry-only** as of v1.4.0 (the Prometheus `/metrics` leg was removed 
 
 | capacity signal            | Sentry home                                                                |
 | -------------------------- | -------------------------------------------------------------------------- |
-| per-workflow failure ratio | `workflow.failed` logs + per-op Issues (`gc.site.run`, `reconcile.run`, …) |
+| per-workflow failure ratio | `workflow.failed` logs + per-op Issues (`gc.site.run`, `drift.sweep`, …)   |
 | relay liveness / failures  | `relay.run` Error log + Issue on a failed pass                             |
 | GC pass volume + blast-cap | `gc.site.done` / `gc.site.capped` logs (numeric attrs queryable)           |
 | reclaim progress           | `gc.tombstone-purge.done` log (`bytes`, `purged`)                          |
