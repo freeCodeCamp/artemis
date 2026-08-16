@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRelayBatch_ConcurrentReplicasAtLeastOncePublish(t *testing.T) {
+func TestRelayBatch_ExclusiveAcrossReplicas(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
@@ -58,7 +58,7 @@ func TestRelayBatch_ConcurrentReplicasAtLeastOncePublish(t *testing.T) {
 
 	require.Len(t, published, total, "every event claimed")
 	for id, c := range published {
-		assert.GreaterOrEqual(t, c, 1, "event %d published at least once across %d replicas (at-least-once; consumer worker.WorkflowGCSite is idempotent, E1)", id, replicas)
+		assert.Equal(t, 1, c, "event %d must publish exactly once across %d replicas while its claim marker holds (B3); duplicates mean the claim is not exclusive", id, replicas)
 	}
 
 	remaining, err := repo.FetchUnpublished(ctx, total)
@@ -97,4 +97,59 @@ func payloadSite(t *testing.T, e OutboxEvent) string {
 	var m map[string]string
 	require.NoError(t, json.Unmarshal(e.Payload, &m))
 	return m["site"]
+}
+
+func TestRelayBatch_MarkSurvivesContextDeath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	for _, s := range []string{"a", "b", "c"} {
+		require.NoError(t, repo.EnqueueSiteChanged(context.Background(), s))
+	}
+
+	calls := 0
+	publish := func(OutboxEvent) error {
+		calls++
+		if calls == 1 {
+			return nil
+		}
+		cancel()
+		return fmt.Errorf("publish: %w", context.Canceled)
+	}
+
+	n, err := repo.RelayBatch(ctx, 10, publish, time.Now())
+	require.Error(t, err, "the publish failure must surface, not be swallowed by the mark")
+	assert.Equal(t, 1, n, "the pre-failure publish must be marked even though the batch ctx died")
+
+	remaining, ferr := repo.FetchUnpublished(context.Background(), 10)
+	require.NoError(t, ferr)
+	assert.Len(t, remaining, 2, "only the published event may be marked; the rest stay for retry")
+}
+
+func TestClaimTTL_ExceedsBatchAndMarkBudget(t *testing.T) {
+	require.Greater(t, claimTTL, 2*time.Minute+10*time.Second,
+		"claimTTL must exceed worker.DefaultRelayBatchTimeout (2m) plus the 10s detached mark window, or an expiring claim re-publishes the rows it protects; worker cannot be imported here (cycle), so the bound is pinned literally")
+}
+
+func TestClaimBatch_ExpiredClaimIsReclaimable(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	for _, s := range []string{"a", "b"} {
+		require.NoError(t, repo.EnqueueSiteChanged(ctx, s))
+	}
+
+	first, err := repo.claimBatch(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+
+	second, err := repo.claimBatch(ctx, 10)
+	require.NoError(t, err)
+	require.Empty(t, second, "a live claim must be exclusive")
+
+	_, err = repo.pool.Exec(ctx, `UPDATE outbox SET claim_expires_at = now() - interval '1 second'`)
+	require.NoError(t, err)
+
+	third, err := repo.claimBatch(ctx, 10)
+	require.NoError(t, err)
+	require.Len(t, third, 2, "an expired claim is the crash-recovery path; its rows must become claimable again")
 }

@@ -86,8 +86,32 @@ func TestOutboxRelay_BoundsPublishDeadline(t *testing.T) {
 	require.True(t, pub.hadDeadline,
 		"publish must run under a bounded deadline so a Hatchet stall can't pin the pool connection + FOR UPDATE row locks")
 
-	assert.InDelta(t, float64(19*time.Second), float64(time.Until(pub.deadline)), float64(2*time.Second),
-		"publish deadline is ~19s (4s floor + 100*150ms) so a full default batch has budget to drain")
+	assert.InDelta(t, float64(DefaultPublishTimeout), float64(time.Until(pub.deadline)), float64(2*time.Second),
+		"each publish carries its own bound, so one stalled publish cannot consume the whole batch's budget")
+}
+
+type ctxRecordingSource struct {
+	*fakeSource
+	deadline    time.Time
+	hadDeadline bool
+}
+
+func (s *ctxRecordingSource) RelayBatch(ctx context.Context, limit int, publish func(pg.OutboxEvent) error, at time.Time) (int, error) {
+	s.deadline, s.hadDeadline = ctx.Deadline()
+	return s.fakeSource.RelayBatch(ctx, limit, publish, at)
+}
+
+func TestOutboxRelay_BoundsTheWholeBatch(t *testing.T) {
+	src := &ctxRecordingSource{fakeSource: newFakeSource("a")}
+	relay := &Relay{Source: src, Publisher: &fakePublisher{}, Now: func() time.Time { return time.Unix(0, 0) }}
+
+	_, err := relay.RunOnce(context.Background())
+	require.NoError(t, err)
+
+	require.True(t, src.hadDeadline,
+		"the batch runs under its own bound so a stalled drain cannot pin the pool connection and row locks")
+	assert.InDelta(t, float64(DefaultRelayBatchTimeout), float64(time.Until(src.deadline)), float64(2*time.Second),
+		"the batch bound is DefaultRelayBatchTimeout and does not follow the per-publish bound")
 }
 
 func TestOutboxRelay(t *testing.T) {

@@ -16,38 +16,42 @@ type Publisher interface {
 }
 
 const (
-	relayTimeoutFloor   = 4 * time.Second
-	relayTimeoutPerItem = 150 * time.Millisecond
+	DefaultPublishTimeout    = 10 * time.Second
+	DefaultRelayBatchTimeout = 2 * time.Minute
+	defaultRelayBatch        = 100
 )
 
-func relayTimeout(batch int) time.Duration {
-	return relayTimeoutFloor + time.Duration(batch)*relayTimeoutPerItem
-}
-
 type Relay struct {
-	Source    OutboxSource
-	Publisher Publisher
-	Batch     int
-	Timeout   time.Duration
-	Now       func() time.Time
+	Source         OutboxSource
+	Publisher      Publisher
+	Batch          int
+	PublishTimeout time.Duration
+	BatchTimeout   time.Duration
+	Now            func() time.Time
 }
 
 func (r *Relay) RunOnce(ctx context.Context) (int, error) {
 	batch := r.Batch
 	if batch <= 0 {
-		batch = 100
+		batch = defaultRelayBatch
 	}
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = relayTimeout(batch)
+	perPublish := r.PublishTimeout
+	if perPublish <= 0 {
+		perPublish = DefaultPublishTimeout
+	}
+	batchTimeout := r.BatchTimeout
+	if batchTimeout <= 0 {
+		batchTimeout = DefaultRelayBatchTimeout
 	}
 	now := time.Now
 	if r.Now != nil {
 		now = r.Now
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
 	defer cancel()
 	return r.Source.RelayBatch(ctx, batch, func(e pg.OutboxEvent) error {
-		return r.Publisher.Publish(ctx, e.Topic, e.Payload)
+		pctx, pcancel := context.WithTimeout(ctx, perPublish)
+		defer pcancel()
+		return r.Publisher.Publish(pctx, e.Topic, e.Payload)
 	}, now())
 }

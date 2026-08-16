@@ -23,3 +23,7 @@ func IsInRecovery(err error) bool {
 	code, ok := pgCode(err)
 	return ok && code == "57P03"
 }
+
+func IsConnClosed(err error) bool {
+	return errors.Is(err, pgconn.ErrConnClosed)
+}

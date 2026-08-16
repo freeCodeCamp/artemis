@@ -3,7 +3,9 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -60,15 +62,22 @@ func (r *Repo) FetchUnpublished(ctx context.Context, limit int) ([]OutboxEvent, 
 	return out, rows.Err()
 }
 
+const claimTTL = 5 * time.Minute
+
 func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	var events []OutboxEvent
 	err := r.WithTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT id, topic, payload FROM outbox
-			 WHERE published_at IS NULL
-			 ORDER BY id
-			 LIMIT $1
-			 FOR UPDATE SKIP LOCKED`, limit)
+			`UPDATE outbox
+			 SET claimed_at = now(), claim_expires_at = now() + $2::interval
+			 WHERE id IN (
+			   SELECT id FROM outbox
+			   WHERE published_at IS NULL
+			     AND (claim_expires_at IS NULL OR claim_expires_at < now())
+			   ORDER BY id
+			   LIMIT $1
+			   FOR UPDATE SKIP LOCKED)
+			 RETURNING id, topic, payload`, limit, claimTTL.String())
 		if err != nil {
 			return fmt.Errorf("pg outbox claim: %w", err)
 		}
@@ -80,11 +89,15 @@ func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error)
 			}
 			events = append(events, e)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("pg outbox claim rows: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	slices.SortFunc(events, func(a, b OutboxEvent) int { return int(a.ID - b.ID) })
 	return events, nil
 }
 
@@ -106,8 +119,10 @@ func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEve
 	if len(doneIDs) == 0 {
 		return 0, pubErr
 	}
-	if err := r.MarkPublished(ctx, doneIDs, at); err != nil {
-		return 0, err
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := r.MarkPublished(markCtx, doneIDs, at); err != nil {
+		return len(doneIDs), errors.Join(pubErr, err)
 	}
 	return len(doneIDs), pubErr
 }
