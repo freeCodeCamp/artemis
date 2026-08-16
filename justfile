@@ -80,7 +80,7 @@ hatchet-integration:
         HATCHET_COMPOSE_FILE="$PWD/compose.hatchet.yaml" \
         {{go}} test -tags=integration -count=1 -timeout=10m ../../../internal/hatchet/...
 
-# go vet (CI also runs golangci-lint)
+# go vet (the only linter CI runs)
 lint:
     {{go}} vet {{pkg}}
 

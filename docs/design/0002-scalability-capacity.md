@@ -81,7 +81,7 @@ Total PG connections = `pool_max_conns x replica_count` (R13: N >= 2 stateless r
 | Hatchet engine conns          | ~20          | separate role/db on the same instance (ADR 0001 / T13) |
 | PG `max_connections`          | 200          | 120 + 20 + ~60 headroom (admin, backup, autovac)       |
 
-The reference harness ran PG with `max_connections=200`, which comfortably holds this envelope. Below ~120 effective `max_connections` the fleet risks `too many clients` at full replica scale -- that is the first hard cliff (section 6).
+The reference harness ran PG with `max_connections=200`, which holds this envelope with margin. Below ~120 effective `max_connections` the fleet risks `too many clients` at full replica scale -- that is the first hard cliff (section 6).
 
 ## 5. Hatchet per-site concurrency bound
 
@@ -118,7 +118,7 @@ Measured against `valkey/valkey:8-alpine`, representative rows (two teams, RFC33
 
 That is **~290 bytes/site** of resident memory (dataset portion ~263 B/site). The full 10k-site registry cache fits in **under 3 MB** on top of the ~1 MB Valkey baseline. Extrapolation is linear in site count (one hash + one set member per site); deploy count does NOT enter the registry cache. Formula: `valkey_bytes ~= 1_000_000 + 290 * sites`.
 
-The auth `teamcache` (`internal/teamcache`) is a separate key space bounded by distinct GitHub logins seen within the membership TTL, not by site count; at fCC staff cardinality (hundreds of logins) it is negligible. A 256 MB Valkey `maxmemory` -- already over 80x the projected registry envelope -- leaves ample room; Valkey stays artemis-exclusive and NetworkPolicy-locked.
+The auth `teamcache` (`internal/teamcache`) is a separate key space bounded by distinct GitHub logins seen within the membership TTL, not by site count; at fCC staff cardinality (hundreds of logins) it is negligible. A 256 MB Valkey `maxmemory` -- already over 80x the projected registry envelope -- leaves a large margin; Valkey stays artemis-exclusive and NetworkPolicy-locked.
 
 ## 7. PG storage envelope
 
@@ -130,7 +130,7 @@ Measured table sizes after the 20,000-row run (heap + indexes, `pg_total_relatio
 | `sites`   | 500    | 344,064     | 688 (inflated at low row count)       |
 | `outbox`  | 500    | 212,992     | 426 (transient -- drained + prunable) |
 
-The deploy row is the dominant term at scale. At **326.5 bytes/row** including the `deploys_site_mtime_idx` index, **3,000,000 deploy rows ~= 980 MB**. Add the sites table (10k x ~500 B heap ~= 5 MB) and tombstones (bounded by the recovery window) and the artemis metadata DB lands **comfortably under 2 GB** at full target scale -- well inside a single bundled StatefulSet PVC with backup headroom (T13/T17). Formula: `deploys_bytes ~= 327 * deploy_rows`.
+The deploy row is the dominant term at scale. At **326.5 bytes/row** including the `deploys_site_mtime_idx` index, **3,000,000 deploy rows ~= 980 MB**. Add the sites table (10k x ~500 B heap ~= 5 MB) and tombstones (bounded by the recovery window) and the artemis metadata DB stays **under 2 GB with margin** at full target scale -- well inside a single bundled StatefulSet PVC with backup headroom (T13/T17). Formula: `deploys_bytes ~= 327 * deploy_rows`.
 
 ## 8. Known cliffs + headroom
 

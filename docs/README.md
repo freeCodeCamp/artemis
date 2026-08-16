@@ -1,6 +1,6 @@
 # Artemis — reference
 
-Audience: artemis contributors + maintainers. Architecture, API contract, configuration, observability, and the integration suite. Project overview lives in the [root README](../README.md); the release flow in [`RELEASING.md`](RELEASING.md).
+Audience: artemis contributors and maintainers. This reference covers the API contract, configuration, observability, the R2 layout, the sites registry, and the test suites. The [root README](../README.md) gives the project overview. [`ORIENTATION.md`](ORIENTATION.md) gives the read sequence for a new contributor. [`ARCHITECTURE.md`](ARCHITECTURE.md) describes how the service is built. [`RELEASING.md`](RELEASING.md) gives the release flow.
 
 ## API
 
@@ -8,7 +8,7 @@ Full route table, cross-checked against `internal/server/server.go` (`chi` wirin
 
 ```
 GET    /healthz                                               → { ok: true }
-GET    /readyz                                                → readiness (probes Valkey + R2)
+GET    /readyz                                                → readiness (probes Valkey + R2 + Postgres)
 
 GET    /api/whoami                                             → { login, authorizedSites }
 POST   /api/deploy/init                   { site, sha, files? } → { deployId, jwt, expiresAt }
@@ -38,11 +38,13 @@ PUT    /api/deploy/{deployId}/upload      multipart stream      → { received }
 POST   /api/deploy/{deployId}/finalize    { mode }              → { url } · 422 missing_index
 ```
 
-`/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` additionally moves the site's R2 prefix to `_trash/` and records a tombstone (gated the same as the plain delete); the bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone, moving the bytes back from `_trash/` and re-marking the deploy active; `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` out from `trashedAt`).
+`/readyz` probes the three upstreams concurrently (5 s each, `internal/handler/readyz.go`). The grades differ by upstream. An unreachable Valkey or R2 returns `503` with `valkey_unreachable` / `r2_unreachable`. An unreachable Postgres returns `200 {"ready":true,"degraded":true}` and only logs `readyz.postgres.degraded` — Postgres is optional, so it never fails the readiness gate. A failing Valkey or R2 probe reaches Sentry only after `readyzPageThreshold` (3) consecutive failures, and then once per outage until the probe recovers.
 
-A deploy becomes live only if it is servable at `/`: `finalize`, `promote`, and `rollback` reject with `422 missing_index` (alias untouched, previous deploy keeps serving) when the target deploy has no root `index.html` — the one object the serve plane requires for `/`. On `finalize` the `422` body additionally carries an advisory `hint` when the upload looks like a framework build directory (e.g. a raw `.next` server build) rather than a static export. See ADR-016 §2026-07-26.
+`/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}?purge=true` also moves the site's R2 prefix to `_trash/` and records a tombstone; the same team gate applies as for the plain delete. The bare `DELETE` only removes the registry row. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone. It moves the bytes back from `_trash/` and marks the deploy active again. `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` after `trashedAt`).
 
-`GET /api/audit` reads the durable, append-only `audit_log` — every privileged action attributed to an actor: staff/CI lifecycle (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`, reconcile under `actor=system:reconcile`). Filter by `site` / `actor` / `action` / `since` (RFC3339), paginated (`limit` default 100, max 500 — `limit=0` clamps to the default 100, it does not return zero rows; `offset`), newest-first. It replaces the raw-`psql`-on-prod path for reading the trail. Because the trail is cross-tenant, the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`) — not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]` (universe-cli release follows artemis v1.5.0, since it depends on the deployed endpoint).
+A deploy becomes live only if the serve plane can serve it at `/`. When the target deploy has no root `index.html` — the one object the serve plane requires for `/` — `finalize`, `promote`, and `rollback` reject with `422 missing_index`. The alias does not change, and the previous deploy continues to serve. On `finalize` the `422` body also carries an advisory `hint` when the upload looks like a framework build directory (for example a raw `.next` server build) and not a static export. See ADR-016 §2026-07-26.
+
+`GET /api/audit` reads the durable, append-only `audit_log`. The log holds every privileged action attributed to an actor: staff/CI lifecycle actions (deploy, site, repo) plus system-driven GC rows (`gc.purge` under `actor=system:gc`, reconcile under `actor=system:reconcile`). Filter by `site` / `actor` / `action` / `since` (RFC3339). Results are paginated newest-first (`limit` default 100, max 500; `offset`). `limit=0` clamps to the default 100 — it does not return zero rows. This endpoint replaces raw `psql` against production as the read path for the trail. The trail is cross-tenant, so the endpoint is team-gated: the caller must be on the Universe-org staff team (`AUDIT_READ_AUTHZ_TEAM`, default `staff`), not merely any authenticated GitHub bearer. From the CLI: `universe audit ls [--actor --action --site --since --limit] [--json]`. The endpoint shipped in artemis v1.5.0; universe-cli gained the verb in a later release, because the verb depends on the deployed endpoint.
 
 Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
@@ -51,7 +53,7 @@ Auth headers (`/api/*` except `/healthz`, `/readyz`):
 | `GET /api/*`, `POST /api/deploy/init`, `POST /api/site/*`, `POST`/`GET`/`DELETE /api/repo*` | GitHub token (PAT / OIDC)                                                    |
 | `PUT /api/deploy/{deployId}/upload`, `POST /api/deploy/{deployId}/finalize`                 | Deploy-session JWT (HS256, ≤15 min, scoped to one `(login, site, deployId)`) |
 
-Team-gated beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM`, the sole team-gated read — cross-tenant trail). All other `/api/*` reads are open to any authenticated GitHub bearer.
+These routes have a team gate beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM` — the only team-gated read, because the trail is cross-tenant). All other `/api/*` reads are open to any authenticated GitHub bearer.
 
 ## Configuration (env-driven)
 
@@ -71,15 +73,16 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 **GitHub identity + site registry**
 
-| Variable                  | Default                  | Description                                             |
-| ------------------------- | ------------------------ | ------------------------------------------------------- |
-| `GH_CLIENT_ID`            | _(required)_             | GitHub OAuth app client ID (CLI device flow)            |
-| `GH_ORG`                  | `freeCodeCamp`           | GitHub org for site-registry team probes                |
-| `GH_API_BASE`             | `https://api.github.com` | GitHub REST API base                                    |
-| `GH_MEMBERSHIP_CACHE_TTL` | `300`                    | GH `/user` + team membership cache TTL, seconds (5 min) |
-| `VALKEY_ADDR`             | _(required)_             | Valkey `host:port` for the sites registry               |
-| `VALKEY_PASSWORD`         | _(empty)_                | Valkey AUTH password; empty for unauthenticated dev     |
-| `REGISTRY_AUTHZ_TEAM`     | `staff`                  | GH team allowed to mutate the sites registry            |
+| Variable                      | Default                  | Description                                                                          |
+| ----------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| `GH_CLIENT_ID`                | _(required)_             | GitHub OAuth app client ID (CLI device flow)                                         |
+| `GH_ORG`                      | `freeCodeCamp`           | GitHub org for site-registry team probes                                             |
+| `GH_API_BASE`                 | `https://api.github.com` | GitHub REST API base                                                                 |
+| `GH_MEMBERSHIP_CACHE_TTL`     | `300`                    | GH `/user` + team membership cache TTL, seconds (5 min)                              |
+| `VALKEY_ADDR`                 | _(required)_             | Valkey `host:port` for the sites registry                                            |
+| `VALKEY_PASSWORD`             | _(empty)_                | Valkey AUTH password; empty for unauthenticated dev                                  |
+| `VALKEY_CONNECT_RETRY_WINDOW` | `5s`                     | Boot-time retry window for the initial Valkey dial (Go duration; `0` disables retry) |
+| `REGISTRY_AUTHZ_TEAM`         | `staff`                  | GH team allowed to mutate the sites registry                                         |
 
 **Deploy-session JWT + R2 key layout**
 
@@ -103,7 +106,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
 | `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                                 |
 
-`GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY` are all-or-none: set all three to enable the `/api/repo*` self-service repo-creation feature, or none. The two ids must be digit-only strings — `validate()` rejects a malformed value at boot (a YAML int sealed in sops renders as scientific notation through Helm `quote`; seal them as strings).
+`GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY` are all-or-none: set all three to enable the `/api/repo*` self-service repo-creation feature, or set none. The two ids must be digit-only strings — `validate()` rejects a malformed value at boot. A YAML int sealed in sops renders as scientific notation through Helm `quote`, so seal both ids as strings.
 
 **Sentry**
 
@@ -133,14 +136,14 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 ## Observability
 
-Observability is **Sentry-only** and independent. artemis is platform infra, so it does NOT route its own telemetry through the platform o11y stack (GlitchTip / VictoriaMetrics / ClickHouse) it deploys — that would be circular. `SENTRY_DSN` MUST point at an **external** Sentry project (`ingest.sentry.io`), never the self-hosted GlitchTip. Everything is off unless `SENTRY_DSN` is set, so dev/test runs send nothing.
+Observability is **Sentry-only** and independent. artemis is platform infra, so it does NOT route its own telemetry through the platform observability stack (GlitchTip / VictoriaMetrics / ClickHouse) that it deploys — that path would be circular. `SENTRY_DSN` MUST point at an **external** Sentry project (`ingest.sentry.io`), never the self-hosted GlitchTip. All telemetry is off unless `SENTRY_DSN` is set, so dev and test runs send nothing.
 
 - **Issues** — errors, panics, and background-job failures via explicit `CaptureException` / `CaptureBackground` (op-tagged, fingerprinted). `slog.Error` does NOT create issues; the slog tee emits logs only.
 - **Performance (traces)** — inbound HTTP transactions `<METHOD> <route>` + outbound spans (GitHub/R2). Probes sampled at 0; destructive routes at 100%; base `SENTRY_TRACES_SAMPLE_RATE` otherwise.
 - **Logs** — a `slog`→Sentry Logs tee (`EnableLogs`), scrubbed via `BeforeSendLog`, trace-correlated; numeric attributes preserved as typed values.
 - **Crons** — check-ins on `tombstone-purge` (`0 3 * * *`) and `reconcile-scheduler` (`0 4 * * *`).
 - **Stdout logs** — JSON via `log/slog` (`LOG_LEVEL`, default `info`) for `kubectl logs`; probe paths (`/healthz`, `/readyz`) silenced. Keep `LOG_LEVEL=info` in prod — several Sentry-Logs-covered signals are Info-level.
-- **Durable audit trail** — a Postgres append-only `audit_log` (indefinite retention) records every privileged action attributed to an actor. This is the forensic system-of-record, distinct from Sentry Logs (a ~90-day glance stream): Sentry answers "what is happening / trending now"; `audit_log` answers "who did X, provably, months later". Read via `GET /api/audit` or `universe audit ls` (see API). `request_id` correlates a durable row back to its Sentry trace / stdout access-log line.
+- **Durable audit trail** — a Postgres append-only `audit_log` (indefinite retention) records every privileged action attributed to an actor. This is the forensic system-of-record, distinct from Sentry Logs (a stream with ~90-day retention). Sentry answers "what happens now, and what is trending"; `audit_log` answers "who did X, provably, months later". Read it via `GET /api/audit` or `universe audit ls` (see API). `request_id` correlates a durable row back to its Sentry trace and its stdout access-log line.
 
 There is **no Prometheus `/metrics` endpoint** (removed in v1.4.0). Signals that were counters are covered by the mechanisms above; [ADR-016](../../fCC-U/Architecture/decisions/016-deploy-proxy.md) holds the design rationale + the full signal→Sentry map.
 
@@ -161,7 +164,7 @@ Deferred: a DLQ-depth gauge — Hatchet v0.88.6 exposes queue depth only via a d
 
 ### Who-did-what dashboard (operator setup)
 
-The at-a-glance "who did what" view is a **Sentry Logs** dashboard — the slog stream carries `actor` on every request-scoped line (auto-injected by the context log handler), so no code change is needed to query it. Add these widgets to the **Artemis** dashboard in the Sentry UI (the MCP has no dashboard-write API). This is the ~90-day glance; the durable/forensic answer is Postgres `audit_log` via `GET /api/audit` / `universe audit ls`.
+The quick "who did what" view is a **Sentry Logs** dashboard. The slog stream carries `actor` on every request-scoped line (injected by the context log handler), so no code change is needed to query it. Add these widgets to the **Artemis** dashboard in the Sentry UI (the MCP has no dashboard-write API). This view has ~90-day retention; the durable, forensic answer is the Postgres `audit_log` via `GET /api/audit` / `universe audit ls`.
 
 Three widgets, dataset **Logs** for each:
 
@@ -171,7 +174,7 @@ Three widgets, dataset **Logs** for each:
 | Actor leaderboard (7d) | Bar   | `count(message)` grouped by `actor`                     | `message:[<privileged set>]`              |
 | Unattributed actions   | Table | `actor`, `message`                                      | `message:[<privileged set>]` `!has:actor` |
 
-The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression tripwire — it should stay empty; anything in it means an action reached Sentry with no actor. GC tombstone/reconcile are system-driven and land in `audit_log` (`actor=system:gc` / `system:reconcile`) + Issues, not this human-activity view.
+The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression alarm. It stays empty in normal operation; a row in it means an action reached Sentry with no actor. GC tombstone and reconcile actions are system-driven. They land in `audit_log` (`actor=system:gc` / `system:reconcile`) and in Issues, not in this human-activity view.
 
 When enabled, Sentry captures:
 
@@ -185,7 +188,7 @@ When enabled, Sentry captures:
 
 Each event carries `release = artemis@<version>+<commit>`, the GitHub `login` as user, and the `request_id` tag — the same value returned in the `X-Request-ID` response header, so a Sentry issue joins directly to the stdout log line and the caller's request.
 
-**Secrets never leave the process.** `SendDefaultPII` is off, and each of the three egress channels has its own scrubber (sharing one secret-aware core so they cannot diverge). Issues + transactions (`BeforeSend` / `BeforeSendTransaction`) strip the `Authorization`, `Cookie`, `Proxy-Authorization`, and `X-Forwarded-For` headers, the request body, the query string, and breadcrumbs, and redact secret-shaped substrings from exception values and messages. Logs (`BeforeSendLog` — the SDK does **not** run `BeforeSend` on log envelopes) redact the body and drop attributes keyed as secret or client IP. So GitHub bearer tokens, deploy-session JWTs, and upload bytes never ship on any channel. The R2 admin key, JWT signing key, and GitHub App private key are never attached (the SDK does not send the process env); the redaction pass is defense in depth over already-audited error wrapping.
+**Secrets never leave the process.** `SendDefaultPII` is off. Each of the three egress channels has its own scrubber, and the three share one secret-aware core so they cannot diverge. Issues and transactions (`BeforeSend` / `BeforeSendTransaction`) strip the `Authorization`, `Cookie`, `Proxy-Authorization`, and `X-Forwarded-For` headers, the request body, the query string, and breadcrumbs. They also redact secret-shaped substrings from exception values and messages. Logs (`BeforeSendLog` — the SDK does **not** run `BeforeSend` on log envelopes) redact the body and drop attributes keyed as secret or client IP. GitHub bearer tokens, deploy-session JWTs, and upload bytes therefore never ship on any channel. The R2 admin key, JWT signing key, and GitHub App private key are never attached (the SDK does not send the process env). The redaction pass is defense in depth over already-audited error wrapping.
 
 ## R2 layout
 
@@ -201,7 +204,7 @@ Each event carries `release = artemis@<version>+<commit>`, the GitHub `login` as
     └── production                       # alias → "deploys/20260420-141522-abc1234"
 ```
 
-Atomic alias semantics: `PutObject` is atomic per-key in R2. Old deploy keeps serving until the alias `PUT` lands. Verify-then-PUT order means a partial deploy never becomes live.
+Alias writes are atomic: R2 makes each `PutObject` atomic for one key. The old deploy serves until the alias `PUT` completes. Artemis verifies the deploy before the `PUT`, so a partial deploy never becomes live.
 
 ## Sites registry
 
@@ -216,7 +219,7 @@ DELETE /api/site/{slug}                              → 204
 
 Write endpoints are gated on `REGISTRY_AUTHZ_TEAM` (default `staff`). The read endpoint is open to any GitHub bearer.
 
-Operator-facing CLI surface (universe-cli ≥ 0.5.0):
+Operator-facing CLI surface (universe-cli; the verb table it ships is authoritative — see its `docs/reference.md`):
 
 ```sh
 universe sites register <slug> --team <team>[,<team>...]
@@ -232,23 +235,39 @@ See `config/sites.yaml.example` for the on-disk schema shape. The live registry 
 ## Local development
 
 ```sh
-cp .env.example .env  # then fill values
-just run              # boots HTTP server on $PORT
-just test             # go test ./... -cover (unit only)
-just image            # docker build
-just                  # list all recipes
+cp .env.example .env      # then fill values
+just run                  # boots HTTP server on $PORT
+just test                 # go test -race -cover (unit only — integration excluded by build tag)
+just cover                # same, plus coverage.out + coverage.html
+just lint                 # go vet
+just tidy                 # go mod tidy
+just image                # docker build — multi-stage distroless
+just clean                # remove build artifacts
+just                      # list all recipes
+```
+
+Heavier suites, each with its own stack (see the recipe body for what it boots):
+
+```sh
+just e2e-local            # artemis + pg + valkey + minio + hatchet, runs test/e2e
+just hatchet-integration  # real hatchet-lite via compose; R2/R3/R4/R5 workflow cases
+just loadgen              # scalability harness: ephemeral pg, registry/outbox/gc throughput (R14)
+just smoke                # repo create → approve → list against the local stack
+just integration          # live-deployment E2E (see Integration testing below)
 ```
 
 ## Local stack (docker-compose)
 
-A fully offline stack — no real GitHub, no real R2, no secrets — for exercising the repo command surface end to end. `docker-compose.yml` wires four services:
+A fully offline stack — no real GitHub, no real R2, no secrets — that exercises the repo command surface end to end. `docker-compose.yml` wires six services:
 
-| Service      | Image / build            | Role                                                               |
-| ------------ | ------------------------ | ------------------------------------------------------------------ |
-| `valkey`     | `valkey/valkey:8-alpine` | Registry + name-claim store                                        |
-| `minio`      | `minio/minio`            | S3-compatible R2 stand-in (path-style; `minio-setup` seeds bucket) |
-| `fakegithub` | `Dockerfile.fakegithub`  | In-memory GitHub API double (`cmd/fakegithub`)                     |
-| `artemis`    | `Dockerfile`             | The service under test, pointed at the three fakes via env         |
+| Service       | Image / build             | Role                                                    |
+| ------------- | ------------------------- | ------------------------------------------------------- |
+| `postgres`    | `postgres:<major>-alpine` | Deploy index, outbox, audit log, tombstones, repo queue |
+| `valkey`      | `valkey/valkey:8-alpine`  | Registry + name-claim store                             |
+| `minio`       | `minio/minio:latest`      | S3-compatible R2 stand-in (path-style)                  |
+| `minio-setup` | `minio/mc:latest`         | One-shot: seeds the bucket, then exits                  |
+| `fakegithub`  | `Dockerfile.fakegithub`   | In-memory GitHub API double (`cmd/fakegithub`)          |
+| `artemis`     | `Dockerfile`              | The service under test, pointed at the fakes via env    |
 
 `cmd/fakegithub` validates the App JWT (RS256 signature + `iss` + ≤600s `exp` cap, like real GitHub) and serves the identity (`/user`, `/user/teams`, team membership) and App (`access_tokens`, repo create/generate/get/list/contents) endpoints artemis calls. One staff user (`smoke-bot`) is a member of `staff` + `apollo-11-approvers`.
 
@@ -263,7 +282,15 @@ just compose-down  # tear down + drop volumes
 
 ## Integration testing
 
-End-to-end suite under `internal/integration/`. Build-tagged behind `integration` so it stays out of `just test`. Hits a live, deployed artemis over HTTPS and exercises the full deploy lifecycle:
+Three separate suites, none of them in `just test`:
+
+| Suite                       | Recipe                     | Runs against                                             |
+| --------------------------- | -------------------------- | -------------------------------------------------------- |
+| `internal/integration/`     | `just integration`         | A live, deployed artemis over HTTPS                      |
+| `test/e2e/`                 | `just e2e-local`           | A locally composed full stack (pg + hatchet + R2 double) |
+| `test/integration/hatchet/` | `just hatchet-integration` | A real `hatchet-lite` engine in compose                  |
+
+The rest of this section covers the first of the three. It is build-tagged behind `integration` so it stays out of `just test`, and exercises the full deploy lifecycle:
 
 ```
 healthz → whoami → init → upload → finalize(preview) → curl preview
@@ -279,7 +306,7 @@ ARTEMIS_URL=https://uploads.freecode.camp \
   just integration
 ```
 
-`just integration-help` prints the full env-var reference. The suite is **safe to run against production** — it writes only under the `test` site (a staff-only smoke target registered in the artemis registry) and relies on the cleanup cron (7-day retention) for prefix GC.
+`just integration-help` prints the full env-var reference. The suite is **safe to run against production**. It writes only under the `test` site (a staff-only smoke target registered in the artemis registry), and the cleanup cron (7-day retention) removes its prefixes.
 
 ### Setup / teardown
 

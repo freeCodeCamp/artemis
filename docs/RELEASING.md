@@ -6,9 +6,9 @@ Releases are driven by [release-please](https://github.com/googleapis/release-pl
 
 ## Versioning rule
 
-artemis follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) with a single **pre-1.0 caveat**: until `v1.0.0` is cut, a `MINOR` bump may introduce a backwards-incompatible API change. This caveat is enforced mechanically by `bump-minor-pre-major: true` in `release-please-config.json` — a `BREAKING CHANGE` commit on a `0.x` line bumps `MINOR`, not `MAJOR`.
+artemis follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). **`v1.0.0` is released** — read `.release-please-manifest.json` for the current version — so the standard contract applies in full: `MAJOR` for breaks, `MINOR` for additive features, `PATCH` for fixes.
 
-Post-1.0, the standard semver contract applies: `MAJOR` for breaks, `MINOR` for additive features, `PATCH` for fixes.
+> **Historical.** Before `v1.0.0`, a `MINOR` bump was allowed to break the API, enforced by `bump-minor-pre-major: true` in `release-please-config.json`. That key is still set but is now **inert** — it governs only a `0.x` line. It is not live policy. The "Pre-1.0 bump" column below is kept so that readers can understand old `CHANGELOG.md` entries.
 
 | Conventional Commit prefix                                                         | Pre-1.0 bump | Post-1.0 bump |
 | ---------------------------------------------------------------------------------- | ------------ | ------------- |
@@ -18,11 +18,11 @@ Post-1.0, the standard semver contract applies: `MAJOR` for breaks, `MINOR` for 
 | `chore(deps):`                                                                     | `PATCH`      | `PATCH`       |
 | `test(*):`, `docs(*):`, `ci(*):`, `chore(*):` (non-deps), `style(*):`, `build(*):` | _no release_ | _no release_  |
 
-`feat:` deliberately bumps `MINOR` even pre-1.0 — `bump-patch-for-minor-pre-major` is left **off**. A release PR is opened **only** when the unreleased commits contain at least one releasable change (`feat`, `fix`, `perf`, `refactor`, `chore(deps)`); pure test/docs/chore drift accumulates silently until a behaviour-bearing commit ships alongside it.
+`feat:` deliberately bumps `MINOR` even pre-1.0 — `bump-patch-for-minor-pre-major` is left **off**. A release PR is opened **only** when the unreleased commits contain at least one releasable change (`feat`, `fix`, `perf`, `refactor`, `chore(deps)`). Pure test, docs, and chore commits accumulate without a release until a releasable change ships alongside them.
 
-### `v1.0.0` trigger
+### Forcing a version
 
-Cut `v1.0.0` when the API surface is declared frozen — practically, after `GET /api/site/{site}/alias/{mode}`, the sites-registry CRUD, and the deploy/promote/rollback verbs have settled in production CLI use without breaking changes for two consecutive minor releases. Force it with a `Release-As: 1.0.0` footer (see step 2) or by editing the release PR.
+`Release-As:` is the general override, not a one-off for `v1.0.0` (which has shipped). Any commit landing on `main` may carry the footer to pin the next version — see step 2.
 
 ## Release flow
 
@@ -35,11 +35,11 @@ Every push to `main` runs `.github/workflows/release.yml`. The `release-please` 
 - bumps `version.txt` and `.release-please-manifest.json` to the computed version, and
 - regenerates the `CHANGELOG.md` section from the Conventional Commits since the last release.
 
-Read the PR. The diff **is** the proposed release: the version bump and the rendered changelog. Edit the changelog body directly in the PR if wording needs work — release-please preserves manual edits to its PR.
+Read the PR. The diff **is** the proposed release: the version bump and the rendered changelog. If the text needs changes, edit the changelog body directly in the PR — release-please preserves manual edits to its PR.
 
 ### 2. (Optional) Override the version
 
-release-please's computed bump is a strong default, not gospel — it cannot detect a quiet behaviour break hidden behind a `refactor:` prefix. To force a specific version, add a `Release-As:` footer to any commit that lands on `main` (e.g. an empty commit), then let release-please re-groom the PR:
+The computed bump is a default, not a guarantee — release-please cannot detect a behaviour break hidden behind a `refactor:` prefix. To force a specific version, add a `Release-As:` footer to any commit that lands on `main` (for example an empty commit), then let release-please update the PR:
 
 ```bash
 git commit --allow-empty -m "chore: release 0.4.0" -m "Release-As: 0.4.0"
@@ -109,6 +109,8 @@ Behaviour-bearing warnings emitted by the running service. Each entry lists the 
 
 Telemetry consumers can grep `event=promote.legacy_bare` in the artemis access log to find remaining callers before the flip.
 
+> **This deprecation is overdue.** The warn landed in `e050648`, before `v0.2.0`, and still emits from the `promote.legacy_bare` slog call in `internal/handler/site.go`. Against its own "one release after first appearance" trigger it is many releases late (every release since `v0.2.0`), and `docs/ARCHITECTURE.md` §4 still documents the promote body as optional. Either flip the empty-body branch to `400` in a dedicated behaviour-bearing commit, or retire the removal trigger and call the bare promote supported. It is an operator decision, not a docs edit.
+
 ## Hotfix on an older release line
 
 If `v0.3.x` is current but `v0.2.x` is still pinned in some downstream deployment and needs a fix, run release-please against a maintenance branch:
@@ -124,6 +126,6 @@ If `v0.3.x` is current but `v0.2.x` is still pinned in some downstream deploymen
 
 ## Why this shape
 
-- Operators map deployed releases back to changelog entries via the semver portion of `image.tag`. Even though `@sha256:<digest>` is the load-bearing pin, the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) gives a `grep`-able human anchor. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — intentional, consistent with release-please + docker/metadata-action defaults.
-- The release decision is a **PR review**, not a local tag. The diff under review is exactly what ships (version + changelog), so a mistaken bump is caught before merge, and the version can be overridden with a `Release-As:` footer.
-- `MINOR-may-break` pre-1.0 is enforced by `bump-minor-pre-major: true` and documented here so operators reading `CHANGELOG.md` see the caveat without diving into the tooling config.
+- Operators map deployed releases back to changelog entries via the semver portion of `image.tag`. The `@sha256:<digest>` digest is the pin that the deployment resolves; the `X.Y.Z` semver prefix (no `v`, per OCI tag convention) gives a human anchor that `grep` can find. Git tags carry the `v` (`v0.2.0`); registry tags do not (`0.2.0`) — intentional, consistent with release-please and docker/metadata-action defaults.
+- The release decision is a **PR review**, not a local tag. The diff under review is exactly what ships (version + changelog), so a review catches a mistaken bump before merge, and a `Release-As:` footer can override the version.
+- `MINOR-may-break` pre-1.0 is enforced by `bump-minor-pre-major: true` and documented here, so operators who read `CHANGELOG.md` see the caveat without reading the tooling config.

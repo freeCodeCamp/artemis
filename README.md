@@ -2,7 +2,7 @@
 
 Static-apps deploy proxy for the freeCodeCamp Universe platform. Public hostname: `uploads.freecode.camp`.
 
-Staff devs and CI run `universe deploy`; the artifact lands on R2 behind a Caddy `r2_alias` upstream. Zero R2 tokens reach staff hands or CI secrets — Artemis is the sole holder of the admin S3 token. Identity is GitHub team membership.
+Staff developers and CI run `universe static deploy`. The CLI uploads the build artifact to artemis, artemis writes it to R2, and a Caddy `r2_alias` upstream serves it. Staff and CI hold no R2 tokens — artemis is the only holder of the admin S3 token. Caller identity comes from GitHub team membership.
 
 ## Quick start
 
@@ -15,10 +15,12 @@ just                   # list every recipe
 
 ## Docs
 
+- **[`docs/ORIENTATION.md`](docs/ORIENTATION.md)** — the read sequence for a new contributor.
+- **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — what the service does and how it is built, written from the source code.
 - **[`docs/README.md`](docs/README.md)** — API contract, configuration, observability, R2 layout, sites registry, integration testing, curl examples.
 - **[`docs/RELEASING.md`](docs/RELEASING.md)** — versioning rule, release-please flow, image build, downstream deploy pin.
 
-The CLI ↔ artemis contract and per-site authorization model are specified in ADR-016 (Universe platform repo).
+ADR-016 (Universe platform repo) specifies the CLI ↔ artemis contract and the per-site authorization model.
 
 ## License
 
