@@ -46,15 +46,36 @@ var (
 const bootPhaseTimeout = 20 * time.Second
 
 func main() {
-	if err := run(); err != nil {
-		if errors.Is(err, context.Canceled) {
-			slog.Info("boot.aborted", "err", err)
-			return
+	if len(os.Args) > 1 && os.Args[1] == driftReportCommand {
+		if err := runDriftReport(context.Background(), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "drift report failed:", err)
+			os.Exit(1)
 		}
-		observability.CaptureFatal(err) // no-op unless Sentry was initialised
-		slog.Error("boot.fatal", "err", err)
-		os.Exit(1)
+		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == reconcileCommand {
+		if err := runReconcileCLI(context.Background(), os.Stdout, os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "reconcile failed:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if code := exitCodeFor(run()); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func exitCodeFor(err error) int {
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, context.Canceled) {
+		slog.Info("boot.aborted", "err", err)
+		return 0
+	}
+	observability.CaptureFatal(err)
+	slog.Error("boot.fatal", "err", err)
+	return 1
 }
 
 func run() error {
@@ -101,6 +122,10 @@ func run() error {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	return runWith(rootCtx, cfg)
+}
+
+func runWith(rootCtx context.Context, cfg *config.Config) error {
 	pgDB, pgCleanup, err := openPostgres(rootCtx, cfg)
 	if err != nil {
 		return fmt.Errorf("open postgres: %w", err)
@@ -238,8 +263,11 @@ func run() error {
 			WorkerName: "artemis",
 		})
 		workerRuntime := worker.NewRuntime(hatchetAdapter)
-		reconcileSites := func() []string { return registryReader.Snapshot().Sites() }
-		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, hatchetAdapter, reconcileSites); err != nil {
+		sweepDrift := func(ctx context.Context) (sweepResult, error) {
+			return newReadOnlySweeper(gcw.Reconciler, r2Client, pgRepo,
+				pg.NewRegistryStore(pgDB), deployPrefix).Run(ctx)
+		}
+		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, sweepDrift); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)
 		}
 		go func() {
@@ -252,36 +280,18 @@ func run() error {
 		slog.Info("outbox.relay.started", "interval", relayInterval)
 	}
 
-	h := &handler.Handlers{
-		GH:                   ghClient,
-		JWT:                  signer,
-		Sites:                registryReader,
-		Registry:             registryWriter,
-		Health:               registryHealth,
-		R2:                   r2Client,
-		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
-		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
-		DeployPrefix:         deployPrefix,
-		TrashPrefixBase:      cfg.Cleanup.TrashPrefix,
-		TrashRecovery:        time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
-		UploadMaxBytes:       cfg.UploadMaxBytes,
-		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
-		RepoOrg:              cfg.Repo.Org,
-		RepoCreateAuthzTeam:  cfg.Repo.CreateAuthzTeam,
-		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
-		AuditReadAuthzTeam:   cfg.Repo.AuditReadAuthzTeam,
-		NewDeployID:          r2.NewDeployID,
-		Now:                  time.Now,
-	}
-
-	// Assign the repo interface deps only when enabled — assigning a
-	// typed-nil pointer to an interface field would make RepoEnabled()
-	// (which compares != nil) true and mount routes onto nil deps.
-	h.RepoGH = repoGH
-	if cfg.Repo.Enabled() {
-		h.Repos = repoStore
-		h.GitHubApp = appClient
-	}
+	h := buildHandlers(cfg, handlerDeps{
+		gh:           ghClient,
+		repoGH:       repoGH,
+		jwt:          signer,
+		sites:        registryReader,
+		registry:     registryWriter,
+		health:       registryHealth,
+		r2:           r2Client,
+		deployPrefix: deployPrefix,
+		repoStore:    repoStore,
+		appClient:    appClient,
+	})
 
 	wirePGRepo(h, pgRepo)
 	if pgDB != nil {
@@ -289,14 +299,7 @@ func run() error {
 	}
 
 	addr := ":" + strconv.Itoa(cfg.Port)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           server.New(h),
-		ReadHeaderTimeout: 10 * time.Second,
-		// No global ReadTimeout — uploads are streamed and may run long.
-		WriteTimeout: 0,
-		IdleTimeout:  120 * time.Second,
-	}
+	srv := newHTTPServer(addr, server.New(h))
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -312,15 +315,8 @@ func run() error {
 		}()
 	}
 
-	select {
-	case <-rootCtx.Done():
-		slog.Info("server.shutdown.signal")
-	case err := <-errCh:
-		return fmt.Errorf("listen: %w", err)
-	case err := <-workerErrCh:
-		if err != nil {
-			return fmt.Errorf("worker: %w", err)
-		}
+	if err := awaitShutdown(rootCtx, errCh, workerErrCh); err != nil {
+		return err
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -437,4 +433,72 @@ func configureLogger(lvl slog.Level, extra slog.Handler) {
 		h = observability.NewMultiHandler(h, extra)
 	}
 	slog.SetDefault(slog.New(telemetry.NewLogHandler(h)))
+}
+
+type handlerDeps struct {
+	gh           handler.GitHubAuthenticator
+	repoGH       handler.GitHubAuthenticator
+	jwt          handler.DeployJWTSigner
+	sites        handler.SitesProvider
+	registry     handler.RegistryWriter
+	health       handler.RegistryHealth
+	r2           handler.R2Store
+	deployPrefix handler.DeployPrefixTemplate
+	repoStore    handler.RepoStore
+	appClient    *githubapp.Client
+}
+
+func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
+	h := &handler.Handlers{
+		GH:                   d.gh,
+		JWT:                  d.jwt,
+		Sites:                d.sites,
+		Registry:             d.registry,
+		Health:               d.health,
+		R2:                   d.r2,
+		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
+		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
+		DeployPrefix:         d.deployPrefix,
+		TrashPrefixBase:      cfg.Cleanup.TrashPrefix,
+		TrashRecovery:        time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
+		UploadMaxBytes:       cfg.UploadMaxBytes,
+		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
+		RepoOrg:              cfg.Repo.Org,
+		RepoCreateAuthzTeam:  cfg.Repo.CreateAuthzTeam,
+		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
+		AuditReadAuthzTeam:   cfg.Repo.AuditReadAuthzTeam,
+		NewDeployID:          r2.NewDeployID,
+		Now:                  time.Now,
+	}
+	h.RepoGH = d.repoGH
+	if cfg.Repo.Enabled() {
+		h.Repos = d.repoStore
+		h.GitHubApp = d.appClient
+	}
+	return h
+}
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
+func awaitShutdown(ctx context.Context, errCh, workerErrCh <-chan error) error {
+	select {
+	case <-ctx.Done():
+		slog.Info("server.shutdown.signal")
+		return nil
+	case err := <-errCh:
+		return fmt.Errorf("listen: %w", err)
+	case err := <-workerErrCh:
+		if err != nil {
+			return fmt.Errorf("worker: %w", err)
+		}
+		return nil
+	}
 }

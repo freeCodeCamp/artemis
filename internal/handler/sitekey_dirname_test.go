@@ -51,8 +51,8 @@ func TestSitePurge_DirnameKeyedBytesAndTombstone(t *testing.T) {
 		assert.Truef(t, hasPrefix(k, "_trash/example.freecode.camp/"),
 			"every site object cascades into the dirname-keyed trash prefix, found %q", k)
 	}
-	assert.Equal(t, []string{"example.freecode.camp/"}, tomb.recorded,
-		"site-level tombstone keyed by dirname so tombstone-purge deletes the real trash prefix")
+	assert.Equal(t, []string{"example.freecode.camp"}, tomb.purged,
+		"the site purge is keyed by dirname so tombstone-purge deletes the real trash prefix")
 }
 
 func TestSiteDeployDelete_DirnameKeyedTombstone(t *testing.T) {

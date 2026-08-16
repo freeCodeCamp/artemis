@@ -4,14 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
-	mrand "math/rand/v2"
 	"time"
 
-	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
@@ -67,45 +64,14 @@ func newRunID() string {
 }
 
 const (
-	topicSiteReconcile         = "site.reconcile"
-	workflowReconcileScheduler = "reconcile-scheduler"
-	cronTombstonePurge         = "0 3 * * *"
-	cronReconcile              = "0 4 * * *"
-	relayInterval              = 5 * time.Second
+	workflowDriftDetect  = "drift-detect"
+	cronTombstonePurge   = "0 3 * * *"
+	cronDriftDetect      = "0 4 * * *"
+	driftDetectRunBudget = 30 * time.Minute
+	relayInterval        = 5 * time.Second
 )
 
-func publishReconcileEvents(ctx context.Context, publisher worker.Publisher, sites []string, perPublish time.Duration) (int, error) {
-	shuffled := append([]string(nil), sites...)
-	mrand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-	var firstErr error
-	published := 0
-	for _, site := range shuffled {
-		if ctx.Err() != nil {
-			if firstErr == nil {
-				firstErr = ctx.Err()
-			}
-			break
-		}
-		payload, err := json.Marshal(map[string]string{"site": site})
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		pctx, cancel := context.WithTimeout(ctx, perPublish)
-		err = publisher.Publish(pctx, topicSiteReconcile, payload)
-		cancel()
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		published++
-	}
-	return published, firstErr
-}
+type driftSweeper func(ctx context.Context) (sweepResult, error)
 
 func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -138,24 +104,19 @@ func observeWorkflow(name string, fn worker.Handler) worker.Handler {
 	}
 }
 
-func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reconcileSites func() []string) []worker.WorkflowDef {
+func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worker.WorkflowDef {
 	return []worker.WorkflowDef{
 		{
-			Name: workflowReconcileScheduler,
-			Cron: []string{cronReconcile},
-			Handler: withCheckIn(workflowReconcileScheduler, cronReconcile, observeWorkflow(workflowReconcileScheduler, func(ctx context.Context, _ map[string]any) error {
-				sites := reconcileSites()
-				published, firstErr := publishReconcileEvents(ctx, publisher, sites, worker.DefaultPublishTimeout)
-				if published < len(sites) {
-					slog.ErrorContext(ctx, "reconcile.schedule.incomplete",
-						"sites", len(sites),
-						"published", published,
-						"skipped", len(sites)-published)
+			Name:             workflowDriftDetect,
+			Cron:             []string{cronDriftDetect},
+			ExecutionTimeout: driftDetectRunBudget,
+			Handler: withCheckIn(workflowDriftDetect, cronDriftDetect, observeWorkflow(workflowDriftDetect, func(ctx context.Context, _ map[string]any) error {
+				res, err := sweepDrift(ctx)
+				if err != nil {
+					captureBackground(opDriftSweep, err)
+					return err
 				}
-				if firstErr != nil {
-					captureBackground("reconcile.schedule", firstErr)
-				}
-				return firstErr
+				return alertOnDrift(ctx, res)
 			})),
 		},
 		{
@@ -185,36 +146,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, publisher worker.Publisher, reco
 				return nil
 			})),
 		},
-		{
-			Name:           worker.WorkflowReconcile,
-			ConcurrencyKey: worker.ConcurrencyKeySite,
-			EventTriggers:  []string{topicSiteReconcile},
-			Handler: observeWorkflow(worker.WorkflowReconcile, func(ctx context.Context, input map[string]any) error {
-				site, err := siteFromInput(input)
-				if err != nil {
-					return err
-				}
-				report, err := gcw.Reconciler.ReconcileSite(ctx, site)
-				if err != nil {
-					observability.CaptureBackground("reconcile.run", err)
-					return err
-				}
-				reconcileDriftIssue(ctx, site, report)
-				return nil
-			}),
-		},
 	}
-}
-
-func reconcileDriftIssue(ctx context.Context, site string, report gc.DriftReport) {
-	if len(report.AliasedMissing) == 0 {
-		return
-	}
-	slog.ErrorContext(ctx, "reconcile.aliased_missing",
-		"site", site,
-		"count", len(report.AliasedMissing))
-	observability.CaptureBackground("reconcile.aliased_missing",
-		fmt.Errorf("reconcile %s: %d deploys aliased but missing from R2/index (dangerous drift)", site, len(report.AliasedMissing)))
 }
 
 func siteFromInput(input map[string]any) (string, error) {
@@ -225,11 +157,26 @@ func siteFromInput(input map[string]any) (string, error) {
 	return s, nil
 }
 
-func registerGCWorkflows(rt *worker.Runtime, gcw *gcWiring, dryRun bool, publisher worker.Publisher, reconcileSites func() []string) error {
-	for _, def := range gcWorkflowDefs(gcw, dryRun, publisher, reconcileSites) {
+type workflowRegistrar interface {
+	Register(worker.WorkflowDef) error
+}
+
+func registerGCWorkflows(rt workflowRegistrar, gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) error {
+	for _, def := range gcWorkflowDefs(gcw, dryRun, sweepDrift) {
 		if err := rt.Register(def); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []string {
+	if len(slugs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(slugs))
+	for _, s := range slugs {
+		names = append(names, tmpl.SiteDirname(s))
+	}
+	return names
 }

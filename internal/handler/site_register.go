@@ -258,7 +258,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 			return nil
 		}
-		if err := h.Tombstones.RecordTombstone(opCtx, dirname, "", 0); err != nil {
+		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 			return nil
 		}

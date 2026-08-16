@@ -3,6 +3,7 @@ package gc
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,12 +33,16 @@ func TestSelfHealing_WarnNotError(t *testing.T) {
 	slog.SetDefault(slog.New(cap))
 	t.Cleanup(func() { slog.SetDefault(old) })
 
-	lister := &fakeReconcileLister{keys: []string{}}
+	keeper := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + keeper + "/index.html"}}
 	store := &fakeReconcileStore{
-		deploys: map[string][]Deploy{"www": {{ID: "live", Mtime: ago(time.Hour)}}},
+		deploys: map[string][]Deploy{"www": {
+			{ID: keeper, Mtime: ago(2 * time.Hour)},
+			{ID: "live", Mtime: ago(time.Hour)},
+		}},
 		aliases: map[string]struct{}{"live": {}},
 	}
-	_, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	_, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	var found bool
@@ -51,13 +56,14 @@ func TestSelfHealing_WarnNotError(t *testing.T) {
 }
 
 type fakeReconcileStore struct {
-	deploys      map[string][]Deploy
-	aliases      map[string]struct{}
-	aliasesAfter map[string]struct{}
-	aliasCalls   int
-	reindexed    []string
-	tombstoned   []string
-	pruned       []string
+	deploys       map[string][]Deploy
+	aliases       map[string]struct{}
+	aliasesAfter  map[string]struct{}
+	tombstonedIDs map[string]bool
+	aliasCalls    int
+	reindexed     []string
+	tombstoned    []string
+	pruned        []string
 }
 
 func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
@@ -70,9 +76,12 @@ func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ string) (map[stri
 	}
 	return s.aliases, time.Time{}, nil
 }
-func (s *fakeReconcileStore) UpsertDeploy(_ context.Context, _, id string, _ time.Time, _ int64, _ bool, _ string) error {
+func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _, id string, _ time.Time, _ bool) (bool, error) {
+	if s.tombstonedIDs[id] {
+		return false, nil
+	}
 	s.reindexed = append(s.reindexed, id)
-	return nil
+	return true, nil
 }
 func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
 	s.tombstoned = append(s.tombstoned, id)
@@ -92,14 +101,39 @@ func newReconciler(lister ReconcileLister, store ReconcileStore, mover Mover) *R
 		SitePrefix:   func(site string) string { return site + "/deploys/" },
 		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
 		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
+		LiveAliases:  func(context.Context, string) (map[string]struct{}, error) { return nil, nil },
 		Now:          func() time.Time { return testNow },
+		Locker:       passthroughLocker{},
 	}
+}
+
+type passthroughSession struct{}
+
+func (passthroughSession) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+	return fn()
+}
+func (passthroughSession) Close(context.Context) {}
+
+type passthroughLocker struct{}
+
+func (passthroughLocker) NewLockSession(context.Context) (LockSession, error) {
+	return passthroughSession{}, nil
 }
 
 type fakeReconcileLister struct{ keys []string }
 
-func (f *fakeReconcileLister) ListPrefix(context.Context, string) ([]string, error) {
-	return f.keys, nil
+func (f *fakeReconcileLister) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+	return keysUnder(f.keys, prefix), nil
+}
+
+func keysUnder(keys []string, prefix string) []string {
+	var out []string
+	for _, k := range keys {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 func ts(d time.Duration) string {
@@ -115,7 +149,7 @@ func TestReconcile_AuditsOrphanTombstone(t *testing.T) {
 	aud := &fakeGCAuditor{}
 	rc.Audit = aud
 
-	report, err := rc.ReconcileSite(context.Background(), "www")
+	report, err := rc.ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 	require.Equal(t, []string{orphan}, report.OrphanTombstoned)
 
@@ -132,7 +166,7 @@ func TestReconcile_AuditFailureDoesNotAbortSweep(t *testing.T) {
 	rc := newReconciler(lister, store, mover)
 	rc.Audit = &fakeGCAuditor{err: errAudit}
 
-	report, err := rc.ReconcileSite(context.Background(), "www")
+	report, err := rc.ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err, "an audit write failure must not abort the destructive reconcile sweep")
 	assert.Equal(t, []string{orphan}, report.OrphanTombstoned,
 		"the orphan is still tombstoned even though its audit row failed to persist")
@@ -144,7 +178,7 @@ func TestReconcile_Orphan(t *testing.T) {
 	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{orphan}, report.OrphanTombstoned, "no-marker, past-grace, unindexed R2 prefix -> tombstoned (E4)")
@@ -161,7 +195,7 @@ func TestReconcile_Rebuild(t *testing.T) {
 	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{completed}, report.Reindexed, "marked-complete R2 deploy missing from PG -> re-indexed (E3)")
@@ -175,30 +209,38 @@ func TestReconcile_InflightSkipped(t *testing.T) {
 	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 	assert.Empty(t, report.OrphanTombstoned, "no-marker but within grace -> in-flight, left alone")
 	assert.Empty(t, store.tombstoned)
 }
 
 func TestReconcile_PrunesStalePGRow(t *testing.T) {
-	lister := &fakeReconcileLister{keys: []string{}}
+	keeper := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + keeper + "/index.html"}}
 	store := &fakeReconcileStore{
-		deploys: map[string][]Deploy{"www": {{ID: "ghost", Mtime: ago(time.Hour)}}},
+		deploys: map[string][]Deploy{"www": {
+			{ID: keeper, Mtime: ago(2 * time.Hour)},
+			{ID: "ghost", Mtime: ago(time.Hour)},
+		}},
 		aliases: map[string]struct{}{},
 	}
-	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ghost"}, report.PGPruned, "PG row with no R2 bytes pruned")
 }
 
 func TestReconcile_AliasedMissingNotPruned(t *testing.T) {
-	lister := &fakeReconcileLister{keys: []string{}}
+	keeper := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + keeper + "/index.html"}}
 	store := &fakeReconcileStore{
-		deploys: map[string][]Deploy{"www": {{ID: "live", Mtime: ago(time.Hour)}}},
+		deploys: map[string][]Deploy{"www": {
+			{ID: keeper, Mtime: ago(2 * time.Hour)},
+			{ID: "live", Mtime: ago(time.Hour)},
+		}},
 		aliases: map[string]struct{}{"live": {}},
 	}
-	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 	assert.Empty(t, report.PGPruned, "an aliased deploy whose bytes vanished is alerted, never silently pruned")
 	assert.Equal(t, []string{"live"}, report.AliasedMissing)
@@ -213,7 +255,7 @@ func TestReconcile_AliasedOrphanNotTombstoned(t *testing.T) {
 	}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.NotContains(t, report.OrphanTombstoned, id,
@@ -233,7 +275,7 @@ func TestReconcile_AliasRaceAfterSnapshotNotTombstoned(t *testing.T) {
 	}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.Empty(t, mover.moves, "deploy aliased after the snapshot read must not be tombstoned (V1 TOCTOU)")
@@ -248,7 +290,7 @@ func TestReconcile_ConsistentNoDrift(t *testing.T) {
 		deploys: map[string][]Deploy{"www": {{ID: id, Mtime: ago(2 * time.Hour)}}},
 		aliases: map[string]struct{}{},
 	}
-	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 	assert.Empty(t, report.Reindexed)
 	assert.Empty(t, report.OrphanTombstoned)
@@ -267,7 +309,7 @@ func TestReconcile_AliasedWithMarker_ReindexedNotPaged(t *testing.T) {
 	}
 	mover := &fakeMover{}
 
-	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 	require.NoError(t, err)
 
 	assert.Contains(t, report.Reindexed, id, "aliased + marker + unindexed self-heals via reindex")

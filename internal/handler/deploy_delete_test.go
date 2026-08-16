@@ -13,7 +13,16 @@ import (
 type fakeTombstones struct {
 	recorded []string
 	bytes    []int64
+	purged   []string
 	err      error
+}
+
+func (f *fakeTombstones) RecordSitePurge(_ context.Context, site string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.purged = append(f.purged, site)
+	return nil
 }
 
 func (f *fakeTombstones) RecordTombstone(_ context.Context, site, id string, bytes int64) error {

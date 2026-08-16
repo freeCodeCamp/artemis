@@ -78,8 +78,8 @@ func (s *errReconcileStore) AliasTargets(_ context.Context, _ string) (map[strin
 	return s.aliases, time.Time{}, nil
 }
 
-func (s *errReconcileStore) UpsertDeploy(_ context.Context, _, _ string, _ time.Time, _ int64, _ bool, _ string) error {
-	return nil
+func (s *errReconcileStore) ReindexDeploy(_ context.Context, _, _ string, _ time.Time, _ bool) (bool, error) {
+	return true, nil
 }
 
 func (s *errReconcileStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
@@ -163,7 +163,7 @@ func TestReconcile_ReReadAliasFailureAbortsBeforeTombstone(t *testing.T) {
 	}
 	mover := &errMover{}
 
-	_, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www")
+	_, err := newReconciler(lister, store, mover).ReconcileSite(context.Background(), "www", false)
 
 	require.ErrorContains(t, err, "re-read aliases before tombstone")
 	assert.Empty(t, mover.moves, "no move when the safety re-read failed (V1)")
@@ -171,14 +171,18 @@ func TestReconcile_ReReadAliasFailureAbortsBeforeTombstone(t *testing.T) {
 }
 
 func TestReconcile_PruneFailurePropagates(t *testing.T) {
-	lister := &fakeReconcileLister{keys: nil}
+	keeper := ts(3 * time.Hour)
+	lister := &fakeReconcileLister{keys: []string{"www/deploys/" + keeper + "/index.html"}}
 	store := &errReconcileStore{
-		deploys:  map[string][]Deploy{"www": {{ID: "ghost", Mtime: ago(time.Hour)}}},
+		deploys: map[string][]Deploy{"www": {
+			{ID: keeper, Mtime: ago(3 * time.Hour)},
+			{ID: "ghost", Mtime: ago(time.Hour)},
+		}},
 		aliases:  map[string]struct{}{},
 		pruneErr: errors.New("pg down"),
 	}
 
-	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www")
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
 
 	require.ErrorContains(t, err, "prune ghost")
 	assert.Empty(t, report.PGPruned, "a failed PruneDeploy is not reported as pruned")

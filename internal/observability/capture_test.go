@@ -162,16 +162,16 @@ func TestCaptureBackground_LowCadenceTransientStillEscalates(t *testing.T) {
 	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	withTransientClock(t, func() time.Time { return cur })
 
-	transientErr := fmt.Errorf("hatchet: publish site.reconcile: %w", context.DeadlineExceeded)
-	CaptureBackground("reconcile.schedule", transientErr)
+	transientErr := fmt.Errorf("drift sweep list r2: %w", context.DeadlineExceeded)
+	CaptureBackground("drift.sweep", transientErr)
 	cur = cur.Add(24 * time.Hour)
-	CaptureBackground("reconcile.schedule", transientErr)
+	CaptureBackground("drift.sweep", transientErr)
 	cur = cur.Add(24 * time.Hour)
-	CaptureBackground("reconcile.schedule", transientErr)
+	CaptureBackground("drift.sweep", transientErr)
 	sentry.CurrentHub().Flush(time.Second)
 
 	require.Len(t, rt.events, 3, "a cron-shaped op escalates every occurrence; the cron cadence is the rate limit")
-	require.Equal(t, []string{"reconcile.schedule", "sustained"}, rt.events[0].Fingerprint)
+	require.Equal(t, []string{"drift.sweep", "sustained"}, rt.events[0].Fingerprint)
 }
 
 func TestCaptureBackground_GapBeyondResetWindowRearms(t *testing.T) {
@@ -247,10 +247,10 @@ func TestCaptureBackground_CronOpEscalatesEveryOccurrence(t *testing.T) {
 	cur := time.Date(2026, 7, 15, 4, 0, 0, 0, time.UTC)
 	withTransientClock(t, func() time.Time { return cur })
 
-	transientErr := fmt.Errorf("hatchet: publish site.reconcile: %w", context.DeadlineExceeded)
+	transientErr := fmt.Errorf("drift sweep list r2: %w", context.DeadlineExceeded)
 	const days = 30
 	for range days {
-		CaptureBackground("reconcile.schedule", transientErr)
+		CaptureBackground("drift.sweep", transientErr)
 		cur = cur.Add(24 * time.Hour)
 	}
 	sentry.CurrentHub().Flush(time.Second)
@@ -258,7 +258,7 @@ func TestCaptureBackground_CronOpEscalatesEveryOccurrence(t *testing.T) {
 	require.Len(t, rt.events, days,
 		"a daily cron failing every day must escalate every day — the cron cadence IS the rate limit")
 	for _, ev := range rt.events {
-		require.Equal(t, []string{"reconcile.schedule", "sustained"}, ev.Fingerprint,
+		require.Equal(t, []string{"drift.sweep", "sustained"}, ev.Fingerprint,
 			"all occurrences must group into one Sentry issue")
 	}
 }

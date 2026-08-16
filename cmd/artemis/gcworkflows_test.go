@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
@@ -18,8 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"sort"
-	"strings"
 )
 
 type fakeReaper struct{}
@@ -29,7 +26,7 @@ func (fakeReaper) ExpiredTombstones(context.Context, time.Time) ([]gc.Tombstone,
 }
 func (fakeReaper) ClearTombstone(context.Context, string, string) (bool, error) { return true, nil }
 
-func TestCronCheckIn_ReconcileAndPurge(t *testing.T) {
+func TestCronCheckIn_DriftDetectAndPurge(t *testing.T) {
 	type ci struct {
 		slug   string
 		sched  string
@@ -50,18 +47,18 @@ func TestCronCheckIn_ReconcileAndPurge(t *testing.T) {
 	t.Cleanup(func() { captureCheckIn = orig })
 
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{Store: fakeReaper{}, Now: time.Now}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, true, cleanSweep)
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
 		byName[d.Name] = d
 	}
 
-	require.NoError(t, byName[workflowReconcileScheduler].Handler(context.Background(), nil))
+	require.NoError(t, byName[workflowDriftDetect].Handler(context.Background(), nil))
 	require.NoError(t, byName[worker.WorkflowTombstonePurge].Handler(context.Background(), nil))
 
 	require.Len(t, got, 4, "two check-ins (in_progress+ok) per cron workflow")
-	assert.Equal(t, ci{workflowReconcileScheduler, cronReconcile, sentry.CheckInStatusInProgress}, got[0])
-	assert.Equal(t, workflowReconcileScheduler, got[1].slug)
+	assert.Equal(t, ci{workflowDriftDetect, cronDriftDetect, sentry.CheckInStatusInProgress}, got[0])
+	assert.Equal(t, workflowDriftDetect, got[1].slug)
 	assert.Equal(t, sentry.CheckInStatusOK, got[1].status)
 	assert.Equal(t, ci{worker.WorkflowTombstonePurge, cronTombstonePurge, sentry.CheckInStatusInProgress}, got[2])
 	assert.Equal(t, worker.WorkflowTombstonePurge, got[3].slug)
@@ -132,31 +129,40 @@ func (h *capturingHandler) levelOf(msg string) (slog.Level, bool) {
 	return 0, false
 }
 
-func TestReconcileDriftIssue_ErrorsOnAliasedMissing(t *testing.T) {
+func cleanSweep(context.Context) (sweepResult, error) { return healthySweep(), nil }
+
+func TestAlertOnDrift_LogsAliasedMissingAtErrorLevelNamingTheSite(t *testing.T) {
 	rec := &capturingHandler{}
 	old := slog.Default()
 	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
 	t.Cleanup(func() { slog.SetDefault(old) })
+	restore := captureBackground
+	captureBackground = func(string, error) {}
+	t.Cleanup(func() { captureBackground = restore })
 
-	reconcileDriftIssue(context.Background(), "www", gc.DriftReport{AliasedMissing: []string{"d1", "d2"}})
+	res := healthySweep()
+	res.Reports[0].Aliased = []string{"d1", "d2"}
+	require.NoError(t, alertOnDrift(context.Background(), res))
 
-	assert.Equal(t, "www", rec.attr("reconcile.aliased_missing", "site"),
-		"the dangerous aliased_missing drift must surface for paging")
-	lvl, ok := rec.levelOf("reconcile.aliased_missing")
-	require.True(t, ok)
+	lvl, ok := rec.levelOf("drift.detected")
+	require.True(t, ok, "the dangerous aliased_missing drift must surface in the log, not only in Sentry")
 	assert.Equal(t, slog.LevelError, lvl, "aliased_missing is error-level: a human must investigate")
+	assert.Contains(t, rec.attr("drift.detected", "err"), "www.freecode.camp",
+		"the log line must name the site, or the operator cannot act on the page")
 }
 
-func TestReconcileDriftIssue_SilentWhenClean(t *testing.T) {
+func TestAlertOnDrift_LogsACleanSweepBelowErrorLevel(t *testing.T) {
 	rec := &capturingHandler{}
 	old := slog.Default()
 	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 
-	reconcileDriftIssue(context.Background(), "www", gc.DriftReport{Reindexed: []string{"d1"}})
+	res := healthySweep()
+	res.Reports[0].Reindex = []string{"d1"}
+	require.NoError(t, alertOnDrift(context.Background(), res))
 
-	_, ok := rec.levelOf("reconcile.aliased_missing")
-	assert.False(t, ok, "no aliased_missing -> no dangerous-drift signal")
+	_, ok := rec.levelOf("drift.detected")
+	assert.False(t, ok, "reclaimable drift alone is not a dangerous-drift signal")
 }
 
 func TestWorkflowScope_RunID(t *testing.T) {
@@ -173,115 +179,10 @@ func TestWorkflowScope_RunID(t *testing.T) {
 	assert.Equal(t, runID, rec.attr("workflow.done", "run_id"), "same run_id on the done line")
 }
 
-type capturingPublisher struct {
-	topics   []string
-	payloads [][]byte
-}
-
-func (f *capturingPublisher) Publish(_ context.Context, topic string, payload []byte) error {
-	f.topics = append(f.topics, topic)
-	f.payloads = append(f.payloads, payload)
-	return nil
-}
-
-func noSites() []string { return nil }
-
-type deadlinePublisher struct {
-	hadDeadline bool
-	deadline    time.Time
-}
-
-func (p *deadlinePublisher) Publish(ctx context.Context, _ string, _ []byte) error {
-	p.deadline, p.hadDeadline = ctx.Deadline()
-	return nil
-}
-
-func TestReconcileScheduler_BoundsPublishDeadline(t *testing.T) {
-	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	pub := &deadlinePublisher{}
-	defs := gcWorkflowDefs(gcw, true, pub, func() []string { return []string{"www"} })
-
-	var sched worker.WorkflowDef
-	for _, d := range defs {
-		if d.Name == workflowReconcileScheduler {
-			sched = d
-		}
-	}
-	require.NotNil(t, sched.Handler)
-	require.NoError(t, sched.Handler(context.Background(), nil))
-
-	require.True(t, pub.hadDeadline,
-		"reconcile publish must run under a bounded deadline so a stalled Hatchet Publish can't hang the daily cron indefinitely")
-	d := time.Until(pub.deadline)
-	assert.Greater(t, d, time.Duration(0), "deadline must be in the future")
-	assert.LessOrEqual(t, d, 30*time.Second, "publish deadline is bounded, not open-ended")
-}
-
-type slowPublisher struct {
-	stallOn string
-	mu      sync.Mutex
-	sites   []string
-}
-
-func (p *slowPublisher) Publish(ctx context.Context, _ string, payload []byte) error {
-	var m map[string]string
-	if err := json.Unmarshal(payload, &m); err != nil {
-		return err
-	}
-	if p.stallOn != "" && m["site"] == p.stallOn {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.sites = append(p.sites, m["site"])
-	return nil
-}
-
-func (p *slowPublisher) published() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]string(nil), p.sites...)
-}
-
-func reconcileSiteNames(n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		out[i] = fmt.Sprintf("site-%03d", i)
-	}
-	return out
-}
-
-func TestPublishReconcileEvents_PublishesEverySite(t *testing.T) {
-	sites := reconcileSiteNames(50)
-	pub := &slowPublisher{}
-
-	published, err := publishReconcileEvents(context.Background(), pub, sites, 100*time.Millisecond)
-
-	require.NoError(t, err)
-	assert.Equal(t, len(sites), published,
-		"every registered site must get a reconcile event; a per-run budget must never truncate the list")
-	assert.ElementsMatch(t, sites, pub.published())
-}
-
-func TestPublishReconcileEvents_StalledSiteDoesNotDropTheRest(t *testing.T) {
-	sites := reconcileSiteNames(20)
-	pub := &slowPublisher{stallOn: sites[5]}
-
-	published, err := publishReconcileEvents(context.Background(), pub, sites, 20*time.Millisecond)
-
-	require.Error(t, err, "a stalled publish is still reported to the caller")
-	assert.Equal(t, len(sites)-1, published,
-		"one stalled site must not stop the sites after it")
-	assert.NotContains(t, pub.published(), sites[5])
-	assert.Contains(t, pub.published(), sites[19],
-		"the last site in the list must still be reached")
-}
-
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
-	require.Len(t, defs, 4)
+	defs := gcWorkflowDefs(gcw, true, cleanSweep)
+	require.Len(t, defs, 3, "the per-site reconcile fan-out and its scheduler are gone")
 
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
@@ -297,109 +198,24 @@ func TestGCWorkflowDefs(t *testing.T) {
 	assert.Empty(t, purge.ConcurrencyKey, "tombstone-purge is global")
 	assert.NotEmpty(t, purge.Cron, "tombstone-purge is scheduled")
 
-	rec := byName[worker.WorkflowReconcile]
-	assert.Equal(t, worker.ConcurrencyKeySite, rec.ConcurrencyKey, "reconcile serialized per site")
-	assert.Equal(t, []string{topicSiteReconcile}, rec.EventTriggers, "reconcile consumes site.reconcile events")
-
-	sched := byName[workflowReconcileScheduler]
-	assert.NotEmpty(t, sched.Cron, "reconcile scheduler is cron-triggered — the missing producer for site.reconcile")
-	assert.Empty(t, sched.EventTriggers, "scheduler is not itself event-driven")
+	drift := byName[workflowDriftDetect]
+	assert.NotEmpty(t, drift.Cron, "drift-detect is cron-triggered")
+	assert.GreaterOrEqual(t, drift.ExecutionTimeout, 10*time.Minute,
+		"the sweep lists every object of every site — 22745 objects across 76 sites in production, "+
+			"minutes of work. On the engine default it would be killed every night, which is the "+
+			"nightly-failing cron this change exists to stop")
+	assert.Empty(t, drift.EventTriggers, "drift-detect needs no producer: it enumerates the fleet itself")
+	assert.Empty(t, drift.ConcurrencyKey,
+		"a read-only sweep takes no site lock, so it needs no per-site concurrency key")
 }
 
-func TestReconcileScheduler_PublishesPerSite(t *testing.T) {
+func TestGCWorkflowDefs_NoWorkflowCanRepairOnASchedule(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	pub := &capturingPublisher{}
-	sites := func() []string { return []string{"www", "learn"} }
-	defs := gcWorkflowDefs(gcw, true, pub, sites)
 
-	var sched worker.WorkflowDef
-	for _, d := range defs {
-		if d.Name == workflowReconcileScheduler {
-			sched = d
-		}
+	for _, d := range gcWorkflowDefs(gcw, true, cleanSweep) {
+		assert.NotEqual(t, worker.WorkflowReconcile, d.Name,
+			"reconcile repairs bytes and is human-invoked only; a schedule must never reach it")
 	}
-	require.NotNil(t, sched.Handler)
-	require.NoError(t, sched.Handler(context.Background(), nil))
-
-	require.Len(t, pub.topics, 2, "one site.reconcile event published per registered site")
-	assert.Equal(t, []string{topicSiteReconcile, topicSiteReconcile}, pub.topics)
-	payloads := []string{string(pub.payloads[0]), string(pub.payloads[1])}
-	sort.Strings(payloads)
-	assert.Equal(t, []string{`{"site":"learn"}`, `{"site":"www"}`}, payloads,
-		"every site gets one event; publish order is shuffled by design")
-}
-
-type exhaustingPublisher struct {
-	cancel context.CancelFunc
-	calls  int
-}
-
-func (p *exhaustingPublisher) Publish(ctx context.Context, _ string, _ []byte) error {
-	p.calls++
-	if p.calls == 1 {
-		p.cancel()
-	}
-	return ctx.Err()
-}
-
-func TestReconcileScheduler_BreaksOnExhaustedBudget(t *testing.T) {
-	var captured []string
-	orig := captureBackground
-	captureBackground = func(op string, _ error) { captured = append(captured, op) }
-	t.Cleanup(func() { captureBackground = orig })
-
-	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	pub := &exhaustingPublisher{cancel: cancel}
-	sites := func() []string { return []string{"a", "b", "c", "d", "e"} }
-	defs := gcWorkflowDefs(gcw, true, pub, sites)
-
-	var sched worker.WorkflowDef
-	for _, d := range defs {
-		if d.Name == workflowReconcileScheduler {
-			sched = d
-		}
-	}
-	require.NotNil(t, sched.Handler)
-	_ = sched.Handler(ctx, nil)
-
-	assert.Equal(t, 1, pub.calls,
-		"loop must stop publishing once the shared deadline is exhausted, not hammer every remaining site")
-	assert.Equal(t, []string{"reconcile.schedule"}, captured,
-		"exactly one capture for the exhausted budget, not one per remaining site")
-}
-
-type failingPublisher struct{ calls int }
-
-func (p *failingPublisher) Publish(_ context.Context, _ string, _ []byte) error {
-	p.calls++
-	return errors.New("publish boom")
-}
-
-func TestReconcileScheduler_AggregatesFanoutCaptures(t *testing.T) {
-	var captured []string
-	orig := captureBackground
-	captureBackground = func(op string, _ error) { captured = append(captured, op) }
-	t.Cleanup(func() { captureBackground = orig })
-
-	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	pub := &failingPublisher{}
-	sites := func() []string { return []string{"a", "b", "c", "d", "e"} }
-	defs := gcWorkflowDefs(gcw, true, pub, sites)
-
-	var sched worker.WorkflowDef
-	for _, d := range defs {
-		if d.Name == workflowReconcileScheduler {
-			sched = d
-		}
-	}
-	require.NotNil(t, sched.Handler)
-	_ = sched.Handler(context.Background(), nil)
-
-	assert.Equal(t, 5, pub.calls, "every site attempted — no deadline exhaustion in this scenario")
-	assert.Equal(t, []string{"reconcile.schedule"}, captured,
-		"per-site independent publish failures aggregate to exactly one capture per tick, not N — else a single-tick multi-site blip trips T14 3-strike sustained-escalation")
 }
 
 func TestSiteFromInput(t *testing.T) {
@@ -440,7 +256,7 @@ func TestObserveWorkflow_PropagatesError(t *testing.T) {
 
 func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Reconciler: &gc.Reconciler{}, Purge: &gc.TombstonePurge{}}
-	defs := gcWorkflowDefs(gcw, true, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, true, cleanSweep)
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
 		byName[d.Name] = d
@@ -452,7 +268,7 @@ func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 		input    map[string]any
 	}{
 		{name: "gc-site-empty-input", workflow: worker.WorkflowGCSite, input: map[string]any{}},
-		{name: "reconcile-empty-site", workflow: worker.WorkflowReconcile, input: map[string]any{"site": ""}},
+		{name: "gc-site-empty-site", workflow: worker.WorkflowGCSite, input: map[string]any{"site": ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -498,7 +314,7 @@ func TestGCSiteWorkflow_LockTimeoutDoesNotPage(t *testing.T) {
 	t.Cleanup(func() { hub.BindClient(prev) })
 
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{Store: lockTimeoutStore{}}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	defs := gcWorkflowDefs(gcw, false, &capturingPublisher{}, noSites)
+	defs := gcWorkflowDefs(gcw, false, cleanSweep)
 	var gcSite worker.WorkflowDef
 	for _, d := range defs {
 		if d.Name == worker.WorkflowGCSite {
@@ -524,51 +340,6 @@ func (c *captureEngine) Stop(context.Context) error          { return nil }
 func TestRegisterGCWorkflows(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	rt := worker.NewRuntime(&captureEngine{})
-	require.NoError(t, registerGCWorkflows(rt, gcw, false, &capturingPublisher{}, noSites))
-	assert.Len(t, rt.Registered(), 4)
-}
-
-type truncatingPublisher struct {
-	mu     sync.Mutex
-	sites  []string
-	after  int
-	cancel context.CancelFunc
-}
-
-func (p *truncatingPublisher) Publish(_ context.Context, _ string, payload []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var m map[string]string
-	if err := json.Unmarshal(payload, &m); err != nil {
-		return err
-	}
-	p.sites = append(p.sites, m["site"])
-	if len(p.sites) >= p.after {
-		p.cancel()
-	}
-	return nil
-}
-
-func TestReconcileScheduler_TruncatedRunsCoverDisjointSuffixes(t *testing.T) {
-	sites := reconcileSiteNames(40)
-	const keep = 8
-	const runs = 6
-
-	publishedSets := make([]string, 0, runs)
-	for range runs {
-		ctx, cancel := context.WithCancel(context.Background())
-		pub := &truncatingPublisher{after: keep, cancel: cancel}
-		_, _ = publishReconcileEvents(ctx, pub, sites, time.Second)
-		cancel()
-		got := append([]string(nil), pub.sites...)
-		sort.Strings(got)
-		publishedSets = append(publishedSets, strings.Join(got, ","))
-	}
-
-	distinct := map[string]bool{}
-	for _, s := range publishedSets {
-		distinct[s] = true
-	}
-	require.Greater(t, len(distinct), 1,
-		"a truncated run must not cover the identical site prefix every time; a fixed order starves the same tail every night")
+	require.NoError(t, registerGCWorkflows(rt, gcw, false, cleanSweep))
+	assert.Len(t, rt.Registered(), 3)
 }

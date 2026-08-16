@@ -52,7 +52,9 @@ func TestSitePurge(t *testing.T) {
 	for k := range store.objects {
 		assert.Truef(t, hasPrefix(k, "_trash/example/"), "every example/ object cascaded into _trash, found %q live", k)
 	}
-	assert.Equal(t, []string{"example/"}, tomb.recorded, "site-level tombstone recorded (empty id = whole-site purge)")
+	assert.Equal(t, []string{"example"}, tomb.purged,
+		"a whole-site purge clears the site index in one transaction, tombstone included")
+	assert.Empty(t, tomb.recorded, "no per-deploy tombstone rows are written by a site purge")
 }
 
 func TestSitePurge_SurvivesRequestCancellation(t *testing.T) {
@@ -83,7 +85,7 @@ func TestSitePurge_SurvivesRequestCancellation(t *testing.T) {
 	for k := range store.objects {
 		assert.Truef(t, hasPrefix(k, "_trash/example/"), "object cascaded to _trash despite cancelled request ctx, found live %q", k)
 	}
-	assert.Equal(t, []string{"example/"}, tomb.recorded, "site tombstone recorded, not skipped")
+	assert.Equal(t, []string{"example"}, tomb.purged, "site purge recorded, not skipped")
 }
 
 func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
@@ -131,7 +133,7 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 		assert.Truef(t, hasPrefix(k, "_trash/example/"), "retry cascaded every example/ object into _trash, found %q live", k)
 	}
 	store.mu.Unlock()
-	assert.Equal(t, []string{"example/"}, tomb.recorded, "retry records the site-level tombstone")
+	assert.Equal(t, []string{"example"}, tomb.purged, "retry records the site purge")
 
 	gone := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, gone.Code)
