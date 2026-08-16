@@ -2,6 +2,16 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.6.4](https://github.com/freeCodeCamp/artemis/compare/v1.6.3...v1.6.4) (2026-08-16)
+
+
+### Bug Fixes
+
+* **handler:** harden request lifecycle and input ([949bbd8](https://github.com/freeCodeCamp/artemis/commit/949bbd8e0dffa72bdab9797c1293fe2c26ccdc23))
+* **observability:** escalate cron transients ([e461bb7](https://github.com/freeCodeCamp/artemis/commit/e461bb7f7fd1ec55a5f6fa4cd92bc8b9399cfe09))
+* **reconcile:** cover every site in the sweep ([6342e28](https://github.com/freeCodeCamp/artemis/commit/6342e2837d87ffda2f6399c3b779379974af6e32))
+* **relay:** bound publishes and claim rows once ([5770857](https://github.com/freeCodeCamp/artemis/commit/577085740332b42968f3adc489754e1ab1a41892))
+
 ## [1.6.3](https://github.com/freeCodeCamp/artemis/compare/v1.6.2...v1.6.3) (2026-07-27)
 
 
