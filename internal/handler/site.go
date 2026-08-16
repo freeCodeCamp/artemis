@@ -29,6 +29,8 @@ import (
 // rollback paths.
 var deployIDPattern = regexp.MustCompile(`^\d{8}-\d{6}-[A-Za-z0-9-]{1,64}$`)
 
+var shaPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
 // SitePromoteRequest is the optional body for POST /api/site/{site}/promote.
 // Both fields are additive — an empty body keeps the legacy bare-promote
 // semantics (read preview alias, copy to production).
@@ -82,13 +84,15 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	prodKey := h.aliasKey(site, "production")
 
 	var deployID string
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
-		telemetry.Breadcrumb(r.Context(), "lock", "site lock acquired")
+	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancelCommit()
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		// CAS guard: read current production alias and bail on mismatch.
 		// Treat missing-alias as the empty string so callers can use CAS
 		// to assert "no prod yet" by passing ExpectedCurrent="".
 		if req.ExpectedCurrent != "" {
-			current, err := h.R2.GetAlias(r.Context(), prodKey)
+			current, err := h.R2.GetAlias(commitCtx, prodKey)
 			if err != nil && !r2.IsNotFound(err) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.promote.cas", err)
 				return errAliasWriteHandled
@@ -112,7 +116,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		deployID = req.DeployID
 		if deployID == "" {
 			previewKey := h.aliasKey(site, "preview")
-			v, err := h.R2.GetAlias(r.Context(), previewKey)
+			v, err := h.R2.GetAlias(commitCtx, previewKey)
 			if err != nil {
 				if r2.IsNotFound(err) {
 					writeError(w, http.StatusUnprocessableEntity, "no_preview", "no preview alias to promote")
@@ -128,7 +132,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		hasIndex, err := h.R2.HasObject(r.Context(), h.deployPrefix(site, deployID)+rootIndexKey)
+		hasIndex, err := h.R2.HasObject(commitCtx, h.deployPrefix(site, deployID)+rootIndexKey)
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_head_failed", "r2.head.index.promote", err)
 			return errAliasWriteHandled
@@ -139,20 +143,20 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 
-		telemetry.Breadcrumb(r.Context(), "promote", "production alias write")
-		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.promote", func(ctx context.Context) error {
+		telemetry.Breadcrumb(commitCtx, "promote", "production alias write")
+		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.promote", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, prodKey, deployID)
 		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
 				return errAliasWriteHandled
 			}
 		} else {
-			h.emitSiteChanged(r.Context(), site)
+			h.emitSiteChanged(commitCtx, site)
 		}
 		return nil
 	})
@@ -211,9 +215,11 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 	prodKey := h.aliasKey(site, "production")
 
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(site), func() error {
+	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancelCommit()
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		prefix := h.deployPrefix(site, req.To)
-		exists, err := h.R2.HasPrefix(r.Context(), prefix)
+		exists, err := h.R2.HasPrefix(commitCtx, prefix)
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.has.prefix.rollback", err)
 			return errAliasWriteHandled
@@ -222,7 +228,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "deploy_missing", "target deploy no longer exists in r2")
 			return errAliasWriteHandled
 		}
-		hasIndex, err := h.R2.HasObject(r.Context(), prefix+rootIndexKey)
+		hasIndex, err := h.R2.HasObject(commitCtx, prefix+rootIndexKey)
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_head_failed", "r2.head.index.rollback", err)
 			return errAliasWriteHandled
@@ -237,7 +243,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		// alias normalises to empty-string — symmetric with SitePromote so
 		// callers can use a single response shape across both verbs.
 		if req.ExpectedCurrent != "" {
-			current, err := h.R2.GetAlias(r.Context(), prodKey)
+			current, err := h.R2.GetAlias(commitCtx, prodKey)
 			if err != nil && !r2.IsNotFound(err) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.rollback.cas", err)
 				return errAliasWriteHandled
@@ -256,20 +262,20 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		telemetry.Breadcrumb(r.Context(), "rollback", "production alias write")
-		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.rollback", func(ctx context.Context) error {
+		telemetry.Breadcrumb(commitCtx, "rollback", "production alias write")
+		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.rollback", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, prodKey, req.To)
 		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(r.Context(), h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
 				return errAliasWriteHandled
 			}
 		} else {
-			h.emitSiteChanged(r.Context(), site)
+			h.emitSiteChanged(commitCtx, site)
 		}
 		return nil
 	})

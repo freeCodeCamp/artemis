@@ -235,9 +235,19 @@ type statusWriter struct {
 	http.ResponseWriter
 	code    int
 	errCode string
+	wrote   bool
 }
 
 func (s *statusWriter) WriteHeader(code int) {
+	if s.wrote {
+		return
+	}
+	s.wrote = true
 	s.code = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	s.wrote = true
+	return s.ResponseWriter.Write(b)
 }

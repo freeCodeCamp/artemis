@@ -281,3 +281,25 @@ func TestProbeState_ConcurrentObserveAtThreshold_PagesExactlyOnce(t *testing.T) 
 	assert.Equal(t, int64(1), pages.Load(),
 		"merged observe-and-decide latches under one lock: N concurrent threshold-crossing failures emit exactly one page")
 }
+
+func TestReadyz_ClientAbort_DoesNotCountTowardPage(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
+	r2 := newFakeR2()
+	r2.listErr = fmt.Errorf("r2 has_prefix: %w", context.Canceled)
+	h := &Handlers{Health: &fakeHealth{}, R2: r2}
+
+	for i := 0; i < readyzPageThreshold+1; i++ {
+		ctx, cancel := context.WithCancel(sentry.SetHubOnContext(t.Context(), hub))
+		cancel()
+		r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/readyz", nil)
+		w := httptest.NewRecorder()
+		h.ReadyZ(w, r)
+	}
+	hub.Flush(time.Second)
+
+	require.Empty(t, ft.events, "aborted probes must not page")
+	h.readyzR2.mu.Lock()
+	fails := h.readyzR2.fails
+	h.readyzR2.mu.Unlock()
+	require.Zero(t, fails, "aborted probes must not advance the strike counter")
+}

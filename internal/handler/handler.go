@@ -266,6 +266,23 @@ func writeErrorDetail(w http.ResponseWriter, status int, code, message string, e
 // a short filterable label for the failing operation (e.g.,
 // "r2.put.alias", "valkey.register").
 func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code, op string, err error) {
+	if errors.Is(err, context.Canceled) {
+		slog.WarnContext(r.Context(), "client.disconnect",
+			"op", op,
+			"err", err,
+			"path", r.URL.Path,
+		)
+		if r.Context().Err() == nil {
+			writeError(w, statusClientClosedRequest, "client_closed_request", "request canceled by client")
+			return
+		}
+		if sw, ok := w.(*statusWriter); ok {
+			sw.wrote = true
+			sw.code = statusClientClosedRequest
+			sw.errCode = "client_closed_request"
+		}
+		return
+	}
 	slog.ErrorContext(r.Context(), "upstream.error",
 		"op", op,
 		"err", err,
@@ -275,7 +292,12 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 	writeError(w, status, code, "upstream call failed")
 }
 
+const statusClientClosedRequest = 499
+
 func reportUpstream(r *http.Request, code, op string, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 		sc := telemetry.FromContext(r.Context())
 		hub.WithScope(func(scope *sentry.Scope) {

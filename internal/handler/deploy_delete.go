@@ -14,6 +14,8 @@ import (
 
 const destructiveMoveTimeout = 10 * time.Minute
 
+const aliasCommitTimeout = 60 * time.Second
+
 func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 	site := chi.URLParam(r, "site")
 	if err := h.requireSiteAuthz(w, r, site); err != nil {

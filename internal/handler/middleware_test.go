@@ -250,3 +250,28 @@ func TestWriteError_StashesErrCodeForAccessLog(t *testing.T) {
 	assert.Equal(t, "user_unauthorized", sw.errCode)
 	assert.Equal(t, http.StatusForbidden, sw.code)
 }
+
+func TestStatusWriter_IgnoresSecondWriteHeader(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, code: 200}
+
+	sw.WriteHeader(http.StatusOK)
+	sw.WriteHeader(http.StatusGatewayTimeout)
+
+	assert.Equal(t, http.StatusOK, sw.code,
+		"a late 504 must not overwrite the status of a completed request")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestStatusWriter_ImplicitWriteLatchesStatus(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec, code: 200}
+
+	_, err := sw.Write([]byte("body"))
+	require.NoError(t, err)
+	sw.WriteHeader(http.StatusGatewayTimeout)
+
+	assert.Equal(t, http.StatusOK, sw.code,
+		"an implicit-200 body write must latch the status against a late WriteHeader")
+	assert.Equal(t, http.StatusOK, rec.Code)
+}

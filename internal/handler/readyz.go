@@ -59,6 +59,10 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 
+	if r.Context().Err() != nil {
+		return
+	}
+
 	switch {
 	case valkeyErr != nil:
 		page := h.readyzValkey.observe(true, true)

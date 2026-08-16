@@ -50,6 +50,10 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "site and sha are required")
 		return
 	}
+	if !shaPattern.MatchString(req.SHA) {
+		writeError(w, http.StatusBadRequest, "bad_request", "sha must match [A-Za-z0-9-]{1,64}")
+		return
+	}
 
 	telemetry.FromContext(r.Context()).SetResource(req.Site, "")
 	h.logAction(r.Context(), "deploy.init", "start", slog.String("sha", req.SHA))
@@ -108,7 +112,7 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	relPath := strings.TrimPrefix(r.URL.Query().Get("path"), "/")
+	relPath := r.URL.Query().Get("path")
 	if relPath == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "missing ?path=")
 		return
@@ -151,13 +155,6 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &maxErr) {
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large",
 				"upload body exceeds configured limit")
-			return
-		}
-		if errors.Is(err, context.Canceled) {
-			slog.WarnContext(r.Context(), "deploy.upload.canceled",
-				"op", "r2.put.upload",
-				"path", r.URL.Path,
-			)
 			return
 		}
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.upload", err)
@@ -265,9 +262,11 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	aliasKey := h.aliasKey(claims.Site, mode)
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(claims.Site), func() error {
-		telemetry.Breadcrumb(r.Context(), "lock", "site lock acquired")
-		if _, err := h.Registry.GetSite(r.Context(), claims.Site); err != nil {
+	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancelCommit()
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
+		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
+		if _, err := h.Registry.GetSite(commitCtx, claims.Site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
 				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be finalized")
 				return errAliasWriteHandled
@@ -275,21 +274,21 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.finalize", err)
 			return errAliasWriteHandled
 		}
-		if err := telemetry.WithSpan(r.Context(), "r2.put.alias.finalize", func(ctx context.Context) error {
+		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.finalize", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, aliasKey, deployID)
 		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := telemetry.WithSpan(r.Context(), "pg.finalize.index", func(ctx context.Context) error {
+			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
 				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
 			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
 			}
 		} else {
-			h.emitSiteChanged(r.Context(), claims.Site)
+			h.emitSiteChanged(commitCtx, claims.Site)
 		}
 		return nil
 	})
