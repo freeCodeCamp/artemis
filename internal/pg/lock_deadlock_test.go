@@ -18,7 +18,7 @@ func newMaxConns2Repo(t *testing.T) *Repo {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, "postgres:16-alpine",
+	container, err := postgres.Run(ctx, testPostgresImage,
 		postgres.WithDatabase("artemis_test"),
 		postgres.WithUsername("artemis"),
 		postgres.WithPassword("artemis"),

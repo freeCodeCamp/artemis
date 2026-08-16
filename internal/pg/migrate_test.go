@@ -14,7 +14,7 @@ func TestMigrations(t *testing.T) {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, "postgres:16-alpine",
+	container, err := postgres.Run(ctx, testPostgresImage,
 		postgres.WithDatabase("artemis_test"),
 		postgres.WithUsername("artemis"),
 		postgres.WithPassword("artemis"),
@@ -97,7 +97,7 @@ func TestReleaseAdvisoryLock_FreesLockOnCanceledCallerCtx(t *testing.T) {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, "postgres:16-alpine",
+	container, err := postgres.Run(ctx, testPostgresImage,
 		postgres.WithDatabase("artemis_test"),
 		postgres.WithUsername("artemis"),
 		postgres.WithPassword("artemis"),
@@ -175,7 +175,7 @@ func TestMigrateConcurrent_RecoversFromSameNameLeftoverIndex(t *testing.T) {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, "postgres:16-alpine",
+	container, err := postgres.Run(ctx, testPostgresImage,
 		postgres.WithDatabase("artemis_test"),
 		postgres.WithUsername("artemis"),
 		postgres.WithPassword("artemis"),

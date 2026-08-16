@@ -21,7 +21,7 @@ func TestBootMigrations(t *testing.T) {
 
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 
-	container, err := postgres.Run(ctx, "postgres:16-alpine",
+	container, err := postgres.Run(ctx, testPostgresImage,
 		postgres.WithDatabase("artemis_test"),
 		postgres.WithUsername("artemis"),
 		postgres.WithPassword("artemis"),
@@ -46,3 +46,5 @@ func TestBootMigrations(t *testing.T) {
 		require.Truef(t, exists, "table %q must exist after boot migrations", table)
 	}
 }
+
+const testPostgresImage = "postgres:16-alpine"

@@ -2,7 +2,7 @@ name: artemis-e2e
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: artemis
       POSTGRES_PASSWORD: artemis
@@ -16,7 +16,7 @@ services:
       retries: 30
 
   hatchet-postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: hatchet
       POSTGRES_PASSWORD: hatchet
@@ -28,7 +28,7 @@ services:
       retries: 30
 
   hatchet-lite:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.88.1
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.88.6
     depends_on:
       hatchet-postgres:
         condition: service_healthy

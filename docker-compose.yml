@@ -2,7 +2,7 @@ name: artemis-local
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: artemis
       POSTGRES_PASSWORD: artemis
