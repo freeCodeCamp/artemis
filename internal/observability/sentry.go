@@ -374,13 +374,18 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 	}.NewSentryHandler(context.Background())
 }
 
+var cronShapedOps = map[string]bool{
+	"reconcile.schedule": true,
+	"tombstone.purge":    true,
+}
+
 // CaptureBackground reports an error raised outside any HTTP request
 // (e.g. the registry refresh goroutine). op becomes a tag and the
 // fingerprint so the failures group on their own. No-op when disabled.
 func CaptureBackground(op string, err error) {
 	if IsTransient(err) {
 		slog.Warn("background.transient", "op", op, "err", err)
-		if backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
+		if cronShapedOps[op] || backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
 			sentry.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", op)
 				scope.SetTag("transient_sustained", "true")
@@ -405,7 +410,7 @@ func IsTransient(err error) bool {
 	case codes.Canceled, codes.DeadlineExceeded:
 		return true
 	}
-	return pg.IsInRecovery(err) || pg.IsLockTimeout(err)
+	return pg.IsInRecovery(err) || pg.IsLockTimeout(err) || pg.IsConnClosed(err)
 }
 
 func CaptureWorkflowPanic(recovered any) {

@@ -28,6 +28,8 @@ func TestIsTransient(t *testing.T) {
 		{"grpc unavailable is not transient", status.Error(codes.Unavailable, "backend down"), false},
 		{"lock timeout 55P03 is transient", &pgconn.PgError{Code: "55P03"}, true},
 		{"wrapped 55P03", fmt.Errorf("site lock x: %w", &pgconn.PgError{Code: "55P03"}), true},
+		{"bare conn closed", pgconn.ErrConnClosed, true},
+		{"wrapped conn closed", fmt.Errorf("relay: %w", pgconn.ErrConnClosed), true},
 		{"plain error", errors.New("boom"), false},
 		{"nil", nil, false},
 	}

@@ -103,11 +103,11 @@ func TestCaptureBackground_SuppressesTransient(t *testing.T) {
 
 	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
 	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
-	CaptureBackground("reconcile.schedule", fmt.Errorf("hatchet: publish site.reconcile: %w", status.Error(codes.DeadlineExceeded, "context deadline exceeded")))
+	CaptureBackground("registry.refresh", fmt.Errorf("hatchet: publish site.reconcile: %w", status.Error(codes.DeadlineExceeded, "context deadline exceeded")))
 	CaptureBackground("gc.site.run", fmt.Errorf("site lock x: %w", &pgconn.PgError{Code: "55P03"}))
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.Empty(t, rt.events, "canceled, 57P03, gRPC DeadlineExceeded, and 55P03 must not create Sentry issues")
+	require.Empty(t, rt.events, "canceled, 57P03, gRPC DeadlineExceeded, and 55P03 blips on tracker-gated ops must not create Sentry issues; cron-shaped ops escalate by design")
 }
 
 func withTransientClock(t *testing.T, now func() time.Time) {
@@ -170,7 +170,7 @@ func TestCaptureBackground_LowCadenceTransientStillEscalates(t *testing.T) {
 	CaptureBackground("reconcile.schedule", transientErr)
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.Len(t, rt.events, 1, "3 daily-cadence failures 24h apart must still escalate")
+	require.Len(t, rt.events, 3, "a cron-shaped op escalates every occurrence; the cron cadence is the rate limit")
 	require.Equal(t, []string{"reconcile.schedule", "sustained"}, rt.events[0].Fingerprint)
 }
 
@@ -179,12 +179,12 @@ func TestCaptureBackground_GapBeyondResetWindowRearms(t *testing.T) {
 	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	withTransientClock(t, func() time.Time { return cur })
 
-	transientErr := fmt.Errorf("tombstone-move: %w", context.Canceled)
-	CaptureBackground("tombstone.purge", transientErr)
+	transientErr := fmt.Errorf("outbox fetch: %w", context.Canceled)
+	CaptureBackground("relay.run", transientErr)
 	cur = cur.Add(time.Hour)
-	CaptureBackground("tombstone.purge", transientErr)
+	CaptureBackground("relay.run", transientErr)
 	cur = cur.Add(27 * time.Hour)
-	CaptureBackground("tombstone.purge", transientErr)
+	CaptureBackground("relay.run", transientErr)
 	sentry.CurrentHub().Flush(time.Second)
 
 	require.Empty(t, rt.events, "a gap beyond resetWindow must reset the streak, not escalate")
@@ -240,4 +240,25 @@ func TestCaptureWorkflowPanic_CapturesFatalWithTag(t *testing.T) {
 	require.Equal(t, sentry.LevelFatal, rt.events[0].Level)
 	require.Equal(t, "hatchet.task", rt.events[0].Tags["op"])
 	require.Equal(t, []string{"hatchet.panic"}, rt.events[0].Fingerprint)
+}
+
+func TestCaptureBackground_CronOpEscalatesEveryOccurrence(t *testing.T) {
+	rt := bindRecordingHub(t)
+	cur := time.Date(2026, 7, 15, 4, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return cur })
+
+	transientErr := fmt.Errorf("hatchet: publish site.reconcile: %w", context.DeadlineExceeded)
+	const days = 30
+	for range days {
+		CaptureBackground("reconcile.schedule", transientErr)
+		cur = cur.Add(24 * time.Hour)
+	}
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, days,
+		"a daily cron failing every day must escalate every day — the cron cadence IS the rate limit")
+	for _, ev := range rt.events {
+		require.Equal(t, []string{"reconcile.schedule", "sustained"}, ev.Fingerprint,
+			"all occurrences must group into one Sentry issue")
+	}
 }

@@ -70,3 +70,20 @@ func TestTransientRateTracker_DistinctOpsIndependent(t *testing.T) {
 		t.Fatal("a fresh op must start its own count")
 	}
 }
+
+func TestTransientRateTracker_ReescalatesAfterGap(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
+
+	tr.observe("op", base)
+	tr.observe("op", base.Add(time.Hour))
+	if !tr.observe("op", base.Add(2*time.Hour)) {
+		t.Fatal("3rd observe must escalate")
+	}
+	if tr.observe("op", base.Add(3*time.Hour)) {
+		t.Fatal("re-escalation inside the 24h gap must stay latched")
+	}
+	if !tr.observe("op", base.Add(2*time.Hour+24*time.Hour)) {
+		t.Fatal("a sustained failure must re-escalate once the 24h gap has passed")
+	}
+}
