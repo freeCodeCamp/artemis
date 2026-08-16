@@ -28,6 +28,9 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: go mod tidy check
+        run: go mod tidy -diff
+
       - name: go vet
         run: go vet ./...
 
