@@ -156,7 +156,7 @@ Safety rails on the repair path: the site lock, a **second read inside the lock*
 
 Every reaping path records the tombstone row **before** it moves the bytes — `gc-site` at `internal/gc/gcsite.go:135` then `:138`, `reconcile` at `internal/gc/reconcile.go:286` then `:290`.
 
-That order is forced by the purge being row-driven. Bytes moved into `_trash/` without a tombstone are invisible to `tombstone-purge` (which walks `tombstones`), invisible to the index, and invisible to `reconcile` (which lists the *site* prefix, not `_trash/`) — a permanent, undetectable leak. The inverse failure is benign: a row with its bytes still at the deploy prefix shows up as ordinary reindex drift, which the nightly sweep reports and `reconcile` repairs. Both paths log `tombstone_move_deferred` when they land in that state.
+That order is forced by the purge being row-driven. Bytes moved into `_trash/` without a tombstone are invisible to `tombstone-purge` (which walks `tombstones`), invisible to the index, and invisible to `reconcile` (which lists the *site* prefix, not `_trash/`) — a permanent, undetectable leak. The inverse failure is bounded: a row with its bytes still at the deploy prefix shows up as reindex drift, which the nightly sweep reports. `reconcile` cannot repair it immediately — `ReindexDeploy` refuses while a tombstone for that id stands (`internal/pg/repo.go:46`) — so the bytes clear once `tombstone-purge` drops the row after `CLEANUP_RECOVERY_DAYS`. Both paths log `tombstone_move_deferred` when they land in that state.
 
 `gc-site` carried the leaky order until the drift-at-source sprint; if you find a doc or comment claiming otherwise, it predates that change.
 

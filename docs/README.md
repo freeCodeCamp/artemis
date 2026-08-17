@@ -93,6 +93,8 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `ALIAS_PRODUCTION_KEY_FORMAT` | `<site>/production`          | R2 alias key for production env                                        |
 | `ALIAS_PREVIEW_KEY_FORMAT`    | `<site>/preview`             | R2 alias key for preview env                                           |
 | `DEPLOY_PREFIX_FORMAT`        | `<site>/deploys/<ts>-<sha>/` | R2 prefix per immutable deploy; must contain `<site>` and `<ts>-<sha>` |
+| `PUBLIC_URL_PRODUCTION_FORMAT` | `https://<site>.freecode.camp` | URL returned to the CLI on a production finalize; must contain `<site>` or boot fails |
+| `PUBLIC_URL_PREVIEW_FORMAT`   | `https://<site>.preview.freecode.camp` | URL returned to the CLI on a preview finalize; must contain `<site>` or boot fails |
 
 **Repo-creation (Apollo-11, feature-gated)**
 
@@ -129,7 +131,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `CLEANUP_RETENTION_DAYS`  | `7`                       | Days before a superseded deploy becomes GC-eligible                                          |
 | `CLEANUP_RECENT_KEEP`     | `3`                       | Newest N deploys per site kept regardless of age (rollback floor)                            |
 | `CLEANUP_GRACE`           | `72h`                     | Minimum deploy age before GC; must be ≥ `JWT_TTL_SECONDS` and ≥ the 15s serve-cache TTL      |
-| `CLEANUP_BLAST_CAP`       | `0` (disabled)            | Max deploys reclaimed per sweep; an over-cap sweep reaps only the oldest N this run          |
+| `CLEANUP_BLAST_CAP`       | `10`                      | Max deploys reclaimed per sweep, oldest first; `0` refuses every destructive repair          |
 | `CLEANUP_TRASH_PREFIX`    | `_trash/`                 | R2 prefix soft-deleted (tombstoned) objects move to before hard purge                        |
 | `CLEANUP_RECOVERY_DAYS`   | `7`                       | Days a tombstone survives before the purge pass hard-deletes it                              |
 | `CLEANUP_DRY_RUN`         | `false`                   | Plan-only GC: compute + log the delete set, execute nothing                                  |
