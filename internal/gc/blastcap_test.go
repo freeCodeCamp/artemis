@@ -40,3 +40,17 @@ func TestApplyBlastCap_LeavesAPlanWithinTheCapAlone(t *testing.T) {
 	assert.Len(t, plan.prune, 1)
 	assert.False(t, report.Capped)
 }
+
+func TestApplyBlastCap_ZeroLeavesReindexAlone(t *testing.T) {
+	t.Parallel()
+
+	rc := &Reconciler{BlastCap: 0}
+	plan := &repairPlan{reindex: []string{"a"}, tombstone: []string{"b"}}
+	report := &DriftReport{}
+
+	rc.applyBlastCap(context.Background(), "www", plan, report)
+
+	assert.Equal(t, []string{"a"}, plan.reindex,
+		"reindex re-adds a lost index row for bytes that already exist; it destroys nothing, so no ceiling "+
+			"on destruction should suppress it")
+}

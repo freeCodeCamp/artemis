@@ -391,7 +391,10 @@ func TestReconcile_DryRunPredictsTheCappedPlan(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, report.Capped, "a dry run must predict the cap the live run will hit")
-	assert.Equal(t, []string{oldest}, report.OrphanTombstoned)
+	assert.Equal(t, []string{oldest, newest}, report.OrphanTombstoned,
+		"the report names every drifted deploy and warns separately that a live run would be capped; "+
+			"truncating the report to the cap makes the nightly sweep under-report drift, and at cap 0 it "+
+			"would report a clean fleet")
 	assert.Empty(t, store.tombstoned, "a dry run mutates nothing")
 }
 

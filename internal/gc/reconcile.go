@@ -83,15 +83,16 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string, dryRun boo
 			site, len(snap.indexed), rc.SitePrefix(site))
 	}
 	plan := rc.classify(ctx, site, snap, &report)
-	rc.applyBlastCap(ctx, site, &plan, &report)
 
 	if dryRun {
 		report.Reindexed = plan.reindex
 		report.OrphanTombstoned = plan.tombstone
 		report.PGPruned = plan.prune
+		rc.predictBlastCap(ctx, plan, &report)
 		rc.logDone(ctx, report, true)
 		return report, nil
 	}
+	rc.applyBlastCap(ctx, site, &plan, &report)
 
 	if rc.Locker == nil {
 		return report, fmt.Errorf("reconcile %s: live run without site Locker (wiring bug)", site)
@@ -208,6 +209,11 @@ func (rc *Reconciler) classify(ctx context.Context, site string, snap siteSnapsh
 		plan.prune = append(plan.prune, id)
 	}
 	return plan
+}
+
+func (rc *Reconciler) predictBlastCap(ctx context.Context, plan repairPlan, report *DriftReport) {
+	capped := plan
+	rc.applyBlastCap(ctx, report.Site, &capped, report)
 }
 
 func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repairPlan, report *DriftReport) {
