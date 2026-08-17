@@ -8,7 +8,7 @@ The reconciler does not repair on a schedule. A read-only sweep finds drift and 
 
 ## Why
 
-The reconcile cron ran every day at 04:00 UTC and repaired nothing. Postgres holds zero `gc.reconcile` audit rows, against 39 `gc.tombstone` rows from the retention GC. The cause was a keyspace error: the scheduler listed registry slugs (`test`), but the bytes are under storage dirnames (`test.freecode.camp`). Every sweep looked at a prefix that does not exist.
+The reconcile cron ran every day at 04:00 UTC and repaired nothing. At retirement (2026-08-16) Postgres held zero `gc.reconcile` audit rows against 39 `gc.tombstone` rows from the retention GC; the first `gc.reconcile` rows (2, on 2026-08-17) came from the manual `artemis reconcile --apply` run that validated the human-run repair path. The cause was a keyspace error: the scheduler listed registry slugs (`test`), but the bytes are under storage dirnames (`test.freecode.camp`). Every sweep looked at a prefix that does not exist.
 
 A read-only sweep of production on 2026-08-16 measured the real drift:
 

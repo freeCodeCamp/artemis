@@ -170,8 +170,8 @@ Audited this plan against the Universe Architecture ADRs. Building blocks + plac
 
 Two latent gaps confirmed in code against the shipped v1.3.0 tag. Canonical record + full citations: Universe ADR-020 § "2026-07-05 — known limitations (v1.3.0)" (`~/DEV/fCC-U/Architecture/decisions/020-durable-execution.md`).
 
-- **Reconcile drift-audit backstop (E4) not wired** — `WorkflowReconcile` consumes `site.reconcile` (`cmd/artemis/gcworkflows.go:79-94`) but no producer emits it; the §5 E4 backstop has never run in prod.
-- **Outbox relay duplicate-publish** — `FetchUnpublished` (`internal/pg/outbox.go:41`) lacks `FOR UPDATE SKIP LOCKED`; `runRelayLoop` runs per-replica (`cmd/artemis/main.go:262`, `replicaCount: 3`), so duplicate publishes are possible (bounded by concurrency-key + idempotency).
+- **Reconcile drift-audit backstop (E4) not wired** — at v1.3.0 a `WorkflowReconcile` consumer existed with no producer; the §5 E4 backstop had never run in prod. Both sides are gone now: the producer was retired (next block) and the consumer plus its `WorkflowReconcile` constant were deleted in the drift-at-source wave.
+- **Outbox relay duplicate-publish** — at v1.3.0 the relay read via a plain `FetchUnpublished` with no `FOR UPDATE SKIP LOCKED` while running per-replica, so duplicate publishes were possible. Fixed since: the relay claims batches with `FOR UPDATE SKIP LOCKED` and a 5-minute claim TTL (`internal/pg/outbox.go` claimBatch), and `FetchUnpublished` itself is deleted.
 
 ### Update (2026-08-16)
 
