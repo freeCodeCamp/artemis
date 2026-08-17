@@ -57,9 +57,15 @@ func dispatchSubcommand(ctx context.Context, out io.Writer, args []string) (bool
 			return true, fmt.Errorf("%s takes no arguments, got %q: it always sweeps every registered site",
 				driftReportCommand, strings.Join(args[1:], " "))
 		}
-		return true, runDriftReport(ctx, out)
+		if err := runDriftReport(ctx, out); err != nil {
+			return true, fmt.Errorf("drift report failed: %w", err)
+		}
+		return true, nil
 	case reconcileCommand:
-		return true, runReconcileCLI(ctx, out, args[1:])
+		if err := runReconcileCLI(ctx, out, args[1:]); err != nil {
+			return true, fmt.Errorf("reconcile failed: %w", err)
+		}
+		return true, nil
 	default:
 		return true, fmt.Errorf("unknown subcommand %q: expected %s or %s",
 			args[0], driftReportCommand, reconcileCommand)
