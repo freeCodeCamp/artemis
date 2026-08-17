@@ -285,3 +285,11 @@ func TestGCPolicyFromConfig(t *testing.T) {
 	assert.Equal(t, 7*24*time.Hour, p.Retention)
 	assert.Equal(t, 15*time.Second, p.ServeCacheTTL)
 }
+
+func TestNewLiveAliasReader_RejectsASiteTokenOutsideTheSiteSegment(t *testing.T) {
+	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat,
+		"<site>.freecode.camp/aliases-<site>/production")
+	require.Error(t, err,
+		"the reader substitutes nothing after the site segment, so a surviving <site> is fetched literally "+
+			"and 404s for every site — the same silent-inert failure this constructor exists to refuse")
+}

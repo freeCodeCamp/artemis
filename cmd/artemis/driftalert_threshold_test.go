@@ -41,6 +41,8 @@ func TestClassifyDrift_AlertsOnceReclaimableDriftAccumulates(t *testing.T) {
 	assert.False(t, v.Fails, "reclaimable drift is storage cost, not an outage: alert, do not fail the run")
 	require.Error(t, v.Err)
 	assert.Contains(t, v.Err.Error(), "artemis reconcile")
+	assert.Contains(t, v.Err.Error(), "www.freecode.camp",
+		"a fleet-wide count with a literal <site> placeholder tells the operator nothing about where to look")
 }
 
 func TestClassifyDrift_AliasedMissingOutranksTheReclaimableThreshold(t *testing.T) {

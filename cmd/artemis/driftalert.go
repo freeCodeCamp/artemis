@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 )
 
@@ -42,12 +43,13 @@ func classifyDrift(res sweepResult) driftVerdict {
 		return driftVerdict{Op: opDriftUnreadable, Err: unread, Fails: true}
 	}
 	if reindex, tombstone, _, _ := res.totals(); reindex+tombstone >= reclaimableAlertThreshold {
+		sites := reclaimableSites(res.Reports)
 		return driftVerdict{
 			Op: opDriftReclaimable,
 			Err: fmt.Errorf(
-				"%d deploys are reclaimable across %d sites (>= %d): storage is accruing faster than it is "+
-					"collected; run `artemis reconcile <site> --apply` and find what stopped expiring",
-				reindex+tombstone, res.Stats.Sites, reclaimableAlertThreshold),
+				"%d deploys are reclaimable across %s (>= %d): storage is accruing faster than it is "+
+					"collected; run `artemis reconcile <site> --apply` for each and find what stopped expiring",
+				reindex+tombstone, strings.Join(sites, ", "), reclaimableAlertThreshold),
 		}
 	}
 	return driftVerdict{}
@@ -59,6 +61,30 @@ func unreadableErr(unreadable []string, sites int) error {
 	}
 	return fmt.Errorf("drift sweep could not read %d of %d sites (%s): unknown drift, not zero drift",
 		len(unreadable), sites, strings.Join(unreadable, ", "))
+}
+
+func reclaimableSites(reports []siteDrift) []string {
+	type sited struct {
+		site string
+		n    int
+	}
+	var ranked []sited
+	for _, r := range reports {
+		if n := len(r.Reindex) + len(r.Tombstone); n > 0 {
+			ranked = append(ranked, sited{r.Site, n})
+		}
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].n != ranked[j].n {
+			return ranked[i].n > ranked[j].n
+		}
+		return ranked[i].site < ranked[j].site
+	})
+	out := make([]string, 0, len(ranked))
+	for _, s := range ranked {
+		out = append(out, fmt.Sprintf("%s (%d)", s.site, s.n))
+	}
+	return out
 }
 
 func unreadableSites(reports []siteDrift) []string {

@@ -160,7 +160,14 @@ func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...stri
 					"key under a different site segment is unreachable and would 404 for every site",
 				f, seg, deployFormat, deploySeg)
 		}
-		tails = append(tails, f[len(seg)+1:])
+		tail := f[len(seg)+1:]
+		if strings.Contains(tail, "<site>") {
+			return nil, fmt.Errorf(
+				"alias key format %q keeps a <site> token after its site segment: only the segment is "+
+					"rendered from the dirname, so the rest is fetched literally and 404s for every site",
+				f)
+		}
+		tails = append(tails, tail)
 	}
 	return func(ctx context.Context, dirname string) (map[string]struct{}, error) {
 		out := map[string]struct{}{}
