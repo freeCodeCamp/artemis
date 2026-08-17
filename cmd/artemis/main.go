@@ -10,11 +10,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,17 +47,29 @@ var (
 
 const bootPhaseTimeout = 20 * time.Second
 
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == driftReportCommand {
-		if err := runDriftReport(context.Background(), os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "drift report failed:", err)
-			os.Exit(1)
-		}
-		return
+func dispatchSubcommand(ctx context.Context, out io.Writer, args []string) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
 	}
-	if len(os.Args) > 1 && os.Args[1] == reconcileCommand {
-		if err := runReconcileCLI(context.Background(), os.Stdout, os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "reconcile failed:", err)
+	switch args[0] {
+	case driftReportCommand:
+		if len(args) > 1 {
+			return true, fmt.Errorf("%s takes no arguments, got %q: it always sweeps every registered site",
+				driftReportCommand, strings.Join(args[1:], " "))
+		}
+		return true, runDriftReport(ctx, out)
+	case reconcileCommand:
+		return true, runReconcileCLI(ctx, out, args[1:])
+	default:
+		return true, fmt.Errorf("unknown subcommand %q: expected %s or %s",
+			args[0], driftReportCommand, reconcileCommand)
+	}
+}
+
+func main() {
+	if handled, err := dispatchSubcommand(context.Background(), os.Stdout, os.Args[1:]); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "artemis:", err)
 			os.Exit(1)
 		}
 		return
@@ -450,25 +464,28 @@ type handlerDeps struct {
 
 func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 	h := &handler.Handlers{
-		GH:                   d.gh,
-		JWT:                  d.jwt,
-		Sites:                d.sites,
-		Registry:             d.registry,
-		Health:               d.health,
-		R2:                   d.r2,
-		AliasProductionFmt:   cfg.Aliases.ProductionKeyFormat,
-		AliasPreviewFmt:      cfg.Aliases.PreviewKeyFormat,
-		DeployPrefix:         d.deployPrefix,
-		TrashPrefixBase:      cfg.Cleanup.TrashPrefix,
-		TrashRecovery:        time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
-		UploadMaxBytes:       cfg.UploadMaxBytes,
-		RegistryAuthzTeam:    cfg.Registry.AuthzTeam,
-		RepoOrg:              cfg.Repo.Org,
-		RepoCreateAuthzTeam:  cfg.Repo.CreateAuthzTeam,
-		RepoApproveAuthzTeam: cfg.Repo.ApproveAuthzTeam,
-		AuditReadAuthzTeam:   cfg.Repo.AuditReadAuthzTeam,
-		NewDeployID:          r2.NewDeployID,
-		Now:                  time.Now,
+		GH:                 d.gh,
+		JWT:                d.jwt,
+		Sites:              d.sites,
+		Registry:           d.registry,
+		Health:             d.health,
+		R2:                 d.r2,
+		AliasProductionFmt: cfg.Aliases.ProductionKeyFormat,
+		AliasPreviewFmt:    cfg.Aliases.PreviewKeyFormat,
+
+		PublicProductionURLFmt: cfg.Aliases.ProductionURLFormat,
+		PublicPreviewURLFmt:    cfg.Aliases.PreviewURLFormat,
+		DeployPrefix:           d.deployPrefix,
+		TrashPrefixBase:        cfg.Cleanup.TrashPrefix,
+		TrashRecovery:          time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
+		UploadMaxBytes:         cfg.UploadMaxBytes,
+		RegistryAuthzTeam:      cfg.Registry.AuthzTeam,
+		RepoOrg:                cfg.Repo.Org,
+		RepoCreateAuthzTeam:    cfg.Repo.CreateAuthzTeam,
+		RepoApproveAuthzTeam:   cfg.Repo.ApproveAuthzTeam,
+		AuditReadAuthzTeam:     cfg.Repo.AuditReadAuthzTeam,
+		NewDeployID:            r2.NewDeployID,
+		Now:                    time.Now,
 	}
 	h.RepoGH = d.repoGH
 	if cfg.Repo.Enabled() {
