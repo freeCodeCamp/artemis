@@ -1,6 +1,6 @@
 # 0005 — Drift at source: fixing the cause, not the cleanup
 
-Status: proposed Supersedes the framing of [0004](0004-drift-detection-and-alerting.md) §rationale.
+Status: P0/P2/P3 implemented on `fix/artemis-drift-at-source`; P1 deferred (see Sequencing) Supersedes the framing of [0004](0004-drift-detection-and-alerting.md) §rationale.
 
 ## Why 0004 needs superseding
 
@@ -196,12 +196,28 @@ Everything verified during this audit, with a decision against each. "Accept, do
 | 11  | `outbox` has no retention — unbounded growth                                                                                                                                                                                           | **Backlog.** Small table, slow growth, no correctness impact. Needs a purge job eventually; not part of this wave.                                                                                                                                                                                     |
 | 12  | Dead worker code paths                                                                                                                                                                                                                 | **Backlog**, cosmetic.                                                                                                                                                                                                                                                                                 |
 | 13  | `RequireScope` / latched rate limiter behaviours                                                                                                                                                                                       | **Accept, documented.** Both behave as designed; the surprise is documentation, not code. Already captured in ONBOARDING §10.                                                                                                                                                                          |
+| 15  | Every drift verdict op (`drift.selfcheck`, `drift.unreadable`, `drift.aliased_missing`) is absent from `cronShapedOps` (`internal/observability/sentry.go:377`), so `alertOnDrift`'s `captureBackground(v.Op, ...)` falls through to the transient-rate tracker: threshold 3 with a 26h reset window means a nightly alert is swallowed for two nights, and the in-memory counter resets on every pod restart, so with 3 replicas it may never escalate. **A live site serving nothing could page nobody.** | **Fixed** — all four verdict ops added, pinned by a test that fails if a new one is missed. |
 | 14  | `PublicURLForSite` (`internal/handler/handler.go:152`) is never assigned outside tests, so the hardcoded fallback at `deploy.go:377-382` always runs — the public URL returned to the CLI bakes `freecode.camp` and `.preview.` into the binary, while every other domain fact comes from config. There is no `ROOT_DOMAIN` setting. | **Fix with P0** (one-liner): derive the URL from the configured alias formats, or add the root domain to config. Cosmetic today, silently wrong the day the root domain or preview label changes. |
 
 ## Sequencing
 
-P0 is one commit-sized wave and should ship on its own — four defects, all small, all independently testable, with P0-1 landed RED first so the P0-2 fix has a failing test to turn green.
+Shipped together on `fix/artemis-drift-at-source` at the operator's direction — one sprint covering every bug, ten commits, each RED-first:
 
-P1 and P2 are each their own wave. P3 is a follow-up to P2, except for the interim `reclaimable > 50` branch, which rides with P0.
+| commit | phase |
+| --- | --- |
+| `fix(gc): read live aliases in the sweep keyspace` | P0-1 + P0-2 |
+| `fix(cli): reject unknown subcommands and stray args` | P0, finding 9 |
+| `fix(gc): record the tombstone row before moving bytes` | P0-4 |
+| `fix(gc): make a zero blast cap refuse, not unleash` | P0-3 |
+| `fix(handler): build public URLs from config` | finding 14 |
+| `feat(pg): record a pending row when a deploy starts` | P2 |
+| `feat(handler): register the deploy session at init` | P2 |
+| `feat(gc): expire abandoned deploy sessions` | P2 |
+| `fix(drift): alert on accruing reclaimable drift` | P3 + finding 15 |
+| `test(gc): pin both key renderers to one layout` | P1, partial |
+
+**P1 is deferred, deliberately.** The `Slug`/`Dirname` type split is prevention, not a bug, and a codebase-wide mechanical refactor landing alongside a behaviour change on the deploy hot path would make the review surface unreadable. What ships instead is the cheap structural half: boot validation that the alias formats and the deploy prefix share a site segment (so the dirname reconstruction is correct by construction, not by convention), plus a test that cross-checks all three rendered keys — site, deploy, trash — between the two renderers under the production FQDN format. The type split remains the right next wave.
+
+The `reclaimable` threshold shipped at **25**, not the 50 originally sketched: with P2 collecting abandoned sessions at source the steady-state baseline is zero, so a lower bar is signal rather than noise.
 
 This document is the seed artifact for a new dossier. It does not belong in `artemis-audit-fixes`, which is at 19/20 with a pending converge.
