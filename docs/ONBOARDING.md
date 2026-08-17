@@ -154,9 +154,9 @@ Safety rails on the repair path: the site lock, a **second read inside the lock*
 
 ### 7.4 Why both reaping paths write the row first
 
-Every reaping path records the tombstone row **before** it moves the bytes — `gc-site` at `internal/gc/gcsite.go:135` then `:138`, `reconcile` at `internal/gc/reconcile.go:286` then `:290`.
+Every reaping path records the tombstone row **before** it moves the bytes — `gc-site` at `internal/gc/gcsite.go:135` then `:138`, `reconcile` at `internal/gc/reconcile.go:284` then `:288`.
 
-That order is forced by the purge being row-driven. Bytes moved into `_trash/` without a tombstone are invisible to `tombstone-purge` (which walks `tombstones`), invisible to the index, and invisible to `reconcile` (which lists the *site* prefix, not `_trash/`) — a permanent, undetectable leak. The inverse failure is bounded: a row with its bytes still at the deploy prefix shows up as reindex drift, which the nightly sweep reports. `reconcile` cannot repair it immediately — `ReindexDeploy` refuses while a tombstone for that id stands (`internal/pg/repo.go:46`) — so the bytes clear once `tombstone-purge` drops the row after `CLEANUP_RECOVERY_DAYS`. Both paths log `tombstone_move_deferred` when they land in that state.
+That order is forced by the purge being row-driven. Bytes moved into `_trash/` without a tombstone are invisible to `tombstone-purge` (which walks `tombstones`), invisible to the index, and invisible to `reconcile` (which lists the *site* prefix, not `_trash/`) — a permanent, undetectable leak. The inverse failure is bounded and visible: a row with its bytes still at the deploy prefix shows up as reindex drift, which the nightly sweep reports. `ReindexDeploy` refuses while the tombstone stands (`internal/pg/repo.go:46`); once `tombstone-purge` drops the row after `CLEANUP_RECOVERY_DAYS`, an operator `artemis reconcile` re-indexes the bytes. The purge clears the row, not the bytes — reclaiming or restoring them is the reconcile's job. Both paths log `tombstone_move_deferred` when they land in that state.
 
 `gc-site` carried the leaky order until the drift-at-source sprint; if you find a doc or comment claiming otherwise, it predates that change.
 
@@ -205,7 +205,7 @@ Verified traps, each a real line of code. None of these are hypothetical.
 1. **There is no "already finalized" guard on upload.** A valid JWT can keep writing into a prefix that is already the live production target, for the rest of its TTL. Known and accepted; see design 0005.
 1. **A deploy row exists from `init`, not from `finalize`.** `deploy.init` writes `state = 'pending'` (`internal/pg/pending.go`); `FinalizeAtomic`'s existing `ON CONFLICT ... SET state = 'active'` promotes it with no extra write. Every read filters `state = 'active'`, so a pending row is invisible to retention planning, the drift denominator and the API — its only reader is `ExpiredPendingDeploys`, which `gc-site` uses to reap sessions abandoned past the grace window. The write is best-effort: a failure logs and raises to Sentry but never fails the deploy.
 1. **`site-purge` writes a sentinel tombstone with `id = ''`**, and that row now blocks reindexing of *every* deploy in that site until the recovery window clears it. That is deliberate, added this week, and easy to mistake for a bug.
-1. **Dead code that looks live.** `worker.RegisterDeployWorkflows` is never called outside tests — finalize, promote and rollback all run inline in the HTTP handlers.
+1. **Finalize, promote and rollback never touch the workflow engine.** All three run inline in the HTTP handlers; the only registered workflows are the three GC jobs. A `RegisterDeployWorkflows` shim once suggested otherwise and has been deleted.
 
 ______________________________________________________________________
 
