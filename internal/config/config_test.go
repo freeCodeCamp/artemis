@@ -210,7 +210,7 @@ func TestConfigLoad(t *testing.T) {
 	assert.Equal(t, 7, cfg.Cleanup.RetentionDays)
 	assert.Equal(t, 3, cfg.Cleanup.RecentKeep)
 	assert.Equal(t, 72*time.Hour, cfg.Cleanup.Grace)
-	assert.Equal(t, 0, cfg.Cleanup.BlastCap)
+	assert.Equal(t, 10, cfg.Cleanup.BlastCap)
 	assert.Equal(t, "_trash/", cfg.Cleanup.TrashPrefix)
 	assert.Equal(t, 7, cfg.Cleanup.RecoveryDays)
 	assert.False(t, cfg.Cleanup.DryRun)

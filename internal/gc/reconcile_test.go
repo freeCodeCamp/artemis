@@ -98,6 +98,7 @@ func newReconciler(lister ReconcileLister, store ReconcileStore, mover Mover) *R
 		Store:        store,
 		Mover:        mover,
 		Grace:        time.Hour,
+		BlastCap:     defaultTestBlastCap,
 		SitePrefix:   func(site string) string { return site + "/deploys/" },
 		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
 		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },

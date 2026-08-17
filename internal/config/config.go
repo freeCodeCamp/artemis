@@ -112,6 +112,8 @@ type JWTConfig struct {
 type AliasConfig struct {
 	ProductionKeyFormat string
 	PreviewKeyFormat    string
+	ProductionURLFormat string
+	PreviewURLFormat    string
 }
 
 // RegistryConfig holds the Valkey-backed registry settings: connection
@@ -179,6 +181,7 @@ const (
 	serveCacheTTL                 = 15 * time.Second
 	defaultCleanupRetentionDays   = 7
 	defaultCleanupRecentKeep      = 3
+	defaultCleanupBlastCap        = 10
 	defaultCleanupGrace           = 72 * time.Hour
 	defaultCleanupRecoveryDays    = 7
 	defaultCleanupTrashPrefix     = "_trash/"
@@ -222,6 +225,8 @@ func Load() (*Config, error) {
 		Aliases: AliasConfig{
 			ProductionKeyFormat: "<site>/production",
 			PreviewKeyFormat:    "<site>/preview",
+			ProductionURLFormat: "https://<site>.freecode.camp",
+			PreviewURLFormat:    "https://<site>.preview.freecode.camp",
 		},
 		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",
 		UploadMaxBytes:     100 * 1024 * 1024, // 100 MiB
@@ -242,6 +247,7 @@ func Load() (*Config, error) {
 		Cleanup: CleanupConfig{
 			RetentionDays: defaultCleanupRetentionDays,
 			RecentKeep:    defaultCleanupRecentKeep,
+			BlastCap:      defaultCleanupBlastCap,
 			Grace:         defaultCleanupGrace,
 			TrashPrefix:   defaultCleanupTrashPrefix,
 			RecoveryDays:  defaultCleanupRecoveryDays,
@@ -293,6 +299,12 @@ func Load() (*Config, error) {
 	}
 	if v, ok := os.LookupEnv("ALIAS_PREVIEW_KEY_FORMAT"); ok && v != "" {
 		cfg.Aliases.PreviewKeyFormat = v
+	}
+	if v, ok := os.LookupEnv("PUBLIC_URL_PRODUCTION_FORMAT"); ok && v != "" {
+		cfg.Aliases.ProductionURLFormat = v
+	}
+	if v, ok := os.LookupEnv("PUBLIC_URL_PREVIEW_FORMAT"); ok && v != "" {
+		cfg.Aliases.PreviewURLFormat = v
 	}
 	if v, ok := os.LookupEnv("DEPLOY_PREFIX_FORMAT"); ok && v != "" {
 		cfg.DeployPrefixFormat = v
@@ -420,6 +432,14 @@ func (c *Config) validate() error {
 	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
 		return err
 	}
+	for env, f := range map[string]string{
+		"PUBLIC_URL_PRODUCTION_FORMAT": c.Aliases.ProductionURLFormat,
+		"PUBLIC_URL_PREVIEW_FORMAT":    c.Aliases.PreviewURLFormat,
+	} {
+		if !strings.Contains(f, "<site>") {
+			return fmt.Errorf("invalid %s %q: must contain <site>", env, f)
+		}
+	}
 	if err := validateGitHubAPIBase(c.GitHub.APIBase); err != nil {
 		return err
 	}
@@ -545,7 +565,8 @@ func loadCleanup(c *CleanupConfig) error {
 	if v, ok := os.LookupEnv("CLEANUP_BLAST_CAP"); ok {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			return fmt.Errorf("invalid CLEANUP_BLAST_CAP %q: must be non-negative integer (0 disables)", v)
+			return fmt.Errorf("invalid CLEANUP_BLAST_CAP %q: must be non-negative integer "+
+				"(0 refuses every destructive repair)", v)
 		}
 		c.BlastCap = n
 	}
