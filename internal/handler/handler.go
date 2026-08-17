@@ -90,6 +90,10 @@ type DeployIndexWriter interface {
 	AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error
 }
 
+type PendingDeployWriter interface {
+	BeginDeploy(ctx context.Context, site, deployID string, mtime time.Time) error
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site string, fn func() error) error
 }
@@ -125,6 +129,7 @@ type Handlers struct {
 	TrashRecovery          time.Duration
 	Outbox                 SiteChangeEmitter
 	Index                  DeployIndexWriter
+	Pending                PendingDeployWriter
 	Locker                 SiteLocker
 	Audit                  AuditStore
 	// DeployPrefix is the parsed deploy-key template.
@@ -213,6 +218,26 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 			})
 		}
 		return
+	}
+}
+
+const pendingWriteTimeout = 5 * time.Second
+
+func (h *Handlers) beginPendingDeploy(ctx context.Context, site, deployID string) {
+	if h.Pending == nil {
+		return
+	}
+	beginCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pendingWriteTimeout)
+	defer cancel()
+	if err := h.Pending.BeginDeploy(beginCtx, site, deployID, h.Now().UTC()); err != nil {
+		slog.ErrorContext(ctx, "deploy.pending.write_failed", "site", site, "deploy_id", deployID, "err", err)
+		if hub := sentry.GetHubFromContext(ctx); hub != nil {
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("op", "deploy.pending")
+				scope.SetFingerprint([]string{"deploy.pending"})
+				hub.CaptureException(err)
+			})
+		}
 	}
 }
 

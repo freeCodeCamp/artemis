@@ -43,6 +43,7 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	h.Tombstones = repo
 	h.Trash = repo
 	h.Index = repo
+	h.Pending = repo
 	h.Locker = repo
 	h.Audit = repo
 }
@@ -212,6 +213,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			Mover:        r2c,
 			Locker:       repo,
 			LiveAliases:  liveAliases,
+			Pending:      repo,
 			Policy:       gcPolicy(cfg.Cleanup),
 			BlastCap:     cfg.Cleanup.BlastCap,
 			DeployPrefix: layout.deployPrefix,

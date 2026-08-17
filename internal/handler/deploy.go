@@ -86,6 +86,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	telemetry.FromContext(r.Context()).SetResource(req.Site, deployID)
+	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(req.Site), deployID)
 	h.logAction(r.Context(), "deploy.init", "success")
 	h.auditFromScope(r.Context(), "deploy.init", "success", map[string]any{"sha": req.SHA})
 
