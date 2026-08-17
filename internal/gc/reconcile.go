@@ -50,6 +50,8 @@ type DriftReport struct {
 	CapReason        string
 }
 
+const orphanBytesUnknown int64 = 0
+
 type r2Deploy struct {
 	hasMarker bool
 	mtime     time.Time
@@ -210,7 +212,16 @@ func (rc *Reconciler) classify(ctx context.Context, site string, snap siteSnapsh
 
 func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repairPlan, report *DriftReport) {
 	destructive := len(plan.tombstone) + len(plan.prune)
-	if rc.BlastCap <= 0 || destructive <= rc.BlastCap {
+	if destructive == 0 || (rc.BlastCap > 0 && destructive <= rc.BlastCap) {
+		return
+	}
+	if rc.BlastCap <= 0 {
+		report.Capped = true
+		report.CapReason = fmt.Sprintf(
+			"refusing %d destructive repairs: blast-cap 0 means no ceiling was configured", destructive)
+		plan.tombstone = nil
+		plan.prune = nil
+		slog.WarnContext(ctx, "reconcile.capped", "site", site, "reason", report.CapReason)
 		return
 	}
 	report.Capped = true
@@ -272,7 +283,7 @@ func (rc *Reconciler) repair(ctx context.Context, sess LockSession, site string,
 				return false, err
 			}
 			trash := rc.TrashPrefix(site, id)
-			if err := rc.Store.RecordTombstone(opCtx, site, id, 0); err != nil {
+			if err := rc.Store.RecordTombstone(opCtx, site, id, orphanBytesUnknown); err != nil {
 				return false, fmt.Errorf("record orphan %s: %w", id, err)
 			}
 			rowRecorded = true

@@ -108,11 +108,13 @@ func TestGC_TombstoneRecordFailurePropagates(t *testing.T) {
 	require.ErrorContains(t, err, "record tombstone")
 	assert.Empty(t, res.Tombstoned, "a failed PG tombstone is not reported as reclaimed")
 	assert.EqualValues(t, 0, res.BytesReclaimed, "no bytes accounted for an unrecorded tombstone")
-	require.Len(t, mover.moves, 1, "the R2 move ran before the PG write failed, leaving orphaned bytes the retry must reclaim")
+	assert.Empty(t, mover.moves,
+		"the row dates the bytes, so it lands first; moving bytes whose row is known to have failed strands "+
+			"them in _trash/ where neither tombstone-purge nor reconcile lists them")
 	assert.Empty(t, store.tombstoned)
 }
 
-func TestGC_MoveFailureAbortsBeforeTombstone(t *testing.T) {
+func TestGC_MoveFailureLeavesTheTombstoneRowForTheNextRun(t *testing.T) {
 	mover := &errMover{err: errors.New("r2 5xx")}
 	store := &fakeStore{
 		deploys:    map[string][]Deploy{"www": sixOld()},
@@ -122,8 +124,10 @@ func TestGC_MoveFailureAbortsBeforeTombstone(t *testing.T) {
 	res, err := newSiteGC(store, mover).Run(context.Background(), "www", false)
 
 	require.ErrorContains(t, err, "tombstone-move")
-	assert.Empty(t, store.tombstoned, "no PG tombstone when the R2 move failed (V1/V5)")
-	assert.Empty(t, res.Tombstoned)
+	assert.Equal(t, []string{"www/d-old"}, store.tombstoned,
+		"the row landed before the move, so the bytes stay at the deploy prefix and surface as reindex "+
+			"drift — visible to drift-detect and repairable by reconcile, unlike bytes stranded in _trash/")
+	assert.Empty(t, res.Tombstoned, "a deploy whose bytes never moved is not reported as reclaimed")
 	require.Len(t, mover.moves, 1, "aborts on the first failed move, never proceeding to the next deploy")
 }
 

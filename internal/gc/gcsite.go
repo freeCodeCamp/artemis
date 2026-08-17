@@ -114,11 +114,15 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 			}
 			src := g.DeployPrefix(site, d.ID)
 			dst := g.TrashPrefix(site, d.ID)
-			if _, err := g.Mover.MovePrefix(opCtx, src, dst); err != nil {
-				return fmt.Errorf("tombstone-move %s: %w", d.ID, err)
-			}
 			if err := g.Store.Tombstone(opCtx, site, d); err != nil {
 				return fmt.Errorf("record tombstone %s: %w", d.ID, err)
+			}
+			if _, err := g.Mover.MovePrefix(opCtx, src, dst); err != nil {
+				slog.WarnContext(opCtx, "gc.site.tombstone_move_deferred",
+					"site", site, "deploy_id", d.ID, "trash_prefix", dst, "err", err,
+					"detail", "the row landed before the move, so the bytes stay at the deploy prefix and "+
+						"surface as reindex drift for the next drift sweep")
+				return fmt.Errorf("tombstone-move %s: %w", d.ID, err)
 			}
 			res.Tombstoned = append(res.Tombstoned, d.ID)
 			res.BytesReclaimed += d.Bytes
