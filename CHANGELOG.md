@@ -2,6 +2,19 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.7.0](https://github.com/freeCodeCamp/artemis/compare/v1.6.4...v1.7.0) (2026-08-17)
+
+
+### Features
+
+* **gc:** retire the repair cron and harden repair ([ba0abad](https://github.com/freeCodeCamp/artemis/commit/ba0abad35997186f7e07d6cc36ccb4dfb057c401))
+* **worker:** let a workflow set its run budget ([a2bcdd1](https://github.com/freeCodeCamp/artemis/commit/a2bcdd10584de8ee933ce782886bb473a12a6d99))
+
+
+### Bug Fixes
+
+* **pg:** guard the index against purge races ([5bb294b](https://github.com/freeCodeCamp/artemis/commit/5bb294b10ebde53e6ff4c59457e41cfd564e2153))
+
 ## [1.6.4](https://github.com/freeCodeCamp/artemis/compare/v1.6.3...v1.6.4) (2026-08-16)
 
 
