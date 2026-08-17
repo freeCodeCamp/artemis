@@ -252,14 +252,14 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		success bool
 	)
 	lockErr := h.withSiteLock(opCtx, dirname, func() error {
+		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
+			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
+			return nil
+		}
 		var err error
 		moved, err = h.R2.MovePrefix(opCtx, dirname+"/", base+dirname+"/")
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
-			return nil
-		}
-		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 			return nil
 		}
 		if err := h.Registry.Delete(opCtx, slug); err != nil {

@@ -117,7 +117,11 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 		slugs[i] = r.Slug
 	}
 	assert.Contains(t, slugs, "example", "failed purge must not deregister the site (still retryable)")
-	assert.Empty(t, tomb.recorded, "no tombstone written when the move failed")
+	assert.Equal(t, []string{"example"}, tomb.purged,
+		"the site tombstone lands before the move, so a failed move leaves the row naming the bytes still "+
+			"in place; the retry re-records it, restarting the recovery clock exactly as "+
+			"TestRepo_RecordSitePurge_RestartsTheRecoveryWindow pins on the repo side")
+	assert.Empty(t, tomb.recorded, "no per-deploy tombstone rows from a site purge")
 
 	retryW := withChiRoute(http.MethodDelete, "/api/site/{slug}",
 		"/api/site/example?purge=true", nil,
@@ -133,7 +137,8 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 		assert.Truef(t, hasPrefix(k, "_trash/example/"), "retry cascaded every example/ object into _trash, found %q live", k)
 	}
 	store.mu.Unlock()
-	assert.Equal(t, []string{"example"}, tomb.purged, "retry records the site purge")
+	assert.Equal(t, []string{"example", "example"}, tomb.purged,
+		"each purge attempt records the site tombstone before moving; the second entry is the retry")
 
 	gone := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, gone.Code)
