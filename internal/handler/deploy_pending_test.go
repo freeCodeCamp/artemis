@@ -35,6 +35,7 @@ func newPendingHandlers(t *testing.T) *Handlers {
 		userTeams:   map[string]map[string]bool{"alice": {"team-eng": true}},
 	}
 	h, _ := newTestHandlers(t, gh, standardSites(), newFakeR2())
+	h.DeployPrefix = mustDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
 	return h
 }
 
@@ -59,7 +60,10 @@ func TestDeployInit_RecordsThePendingDeployInTheStorageKeyspace(t *testing.T) {
 	require.Len(t, beginner.calls, 1,
 		"an init that records nothing leaves any bytes the client then uploads unowned by every reaper, "+
 			"which is the whole orphan class reconcile exists to scan for")
-	assert.Equal(t, h.DeployPrefix.SiteDirname("www"), beginner.calls[0][0],
+	require.Equal(t, "www.freecode.camp", h.DeployPrefix.SiteDirname("www"),
+		"under the default format slug and dirname are the same string, which makes the assertion below "+
+			"vacuous; this fixture must run the production FQDN shape")
+	assert.Equal(t, "www.freecode.camp", beginner.calls[0][0],
 		"finalize upserts ON CONFLICT (site, id) using SiteDirname, so a pending row written under the slug "+
 			"would never be promoted and would be reaped while the deploy is live")
 }
