@@ -53,6 +53,7 @@ func newErrPurge(reaper TombstoneReaper, del Deleter) *TombstonePurge {
 		Recovery:  7 * 24 * time.Hour,
 		TrashBase: "_trash/",
 		Now:       func() time.Time { return testNow },
+		BlastCap:  defaultTestBlastCap,
 	}
 }
 

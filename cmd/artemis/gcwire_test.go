@@ -225,6 +225,8 @@ func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
 	assert.Equal(t, 5, w.SiteGC.BlastCap, "BlastCap=0 would disable the mass-delete safety cap")
 	assert.Equal(t, 7*24*time.Hour, w.SiteGC.Policy.Retention, "policy retention must derive from RetentionDays")
 	assert.Equal(t, "_trash/", w.Purge.TrashBase, "purge must scan the configured trash base")
+	assert.Equal(t, 5, w.Purge.BlastCap,
+		"the irreversible job shares the configured ceiling; an unwired cap defaults to 0 which refuses every hard delete")
 	assert.Equal(t, 3*24*time.Hour, w.Purge.Recovery, "recovery window must derive from RecoveryDays")
 
 	require.NotNil(t, w.SiteGC.DeployPrefix)

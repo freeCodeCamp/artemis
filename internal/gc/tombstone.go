@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -39,6 +40,7 @@ type TombstonePurge struct {
 	Now       func() time.Time
 	Locker    SiteLocker
 	Audit     PurgeAuditor
+	BlastCap  int
 }
 
 func (p *TombstonePurge) withLock(ctx context.Context, site string, fn func() error) error {
@@ -72,6 +74,18 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 	if err != nil {
 		return res, fmt.Errorf("tombstone-purge: list expired: %w", err)
 	}
+	if !dryRun && len(expired) > 0 {
+		if p.BlastCap <= 0 {
+			slog.WarnContext(ctx, "gc.tombstone-purge.capped", "expired", len(expired),
+				"reason", "refusing every hard delete: blast-cap 0 means no ceiling was configured")
+			expired = nil
+		} else if len(expired) > p.BlastCap {
+			slog.WarnContext(ctx, "gc.tombstone-purge.capped", "expired", len(expired), "cap", p.BlastCap,
+				"reason", "hard-deleting the most overdue trash first; the remainder waits for the next run")
+			expired = capOldest(expired, p.BlastCap, olderTombstone)
+		}
+	}
+	var runErrs []error
 	for _, t := range expired {
 		label := t.Site + "/" + t.ID
 		if dryRun {
@@ -91,7 +105,9 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 			return nil
 		})
 		if lockErr != nil {
-			return res, lockErr
+			slog.WarnContext(ctx, "gc.tombstone-purge.site_failed", "site", t.Site, "deploy_id", t.ID, "err", lockErr)
+			runErrs = append(runErrs, lockErr)
+			continue
 		}
 		if !cleared {
 			continue
@@ -106,5 +122,15 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 	}
 
 	slog.InfoContext(ctx, "gc.tombstone-purge.done", "purged", len(res.Purged), "bytes", res.BytesReclaimed, "dryRun", dryRun)
-	return res, nil
+	return res, errors.Join(runErrs...)
+}
+
+func olderTombstone(a, b Tombstone) bool {
+	if !a.TrashedAt.Equal(b.TrashedAt) {
+		return a.TrashedAt.Before(b.TrashedAt)
+	}
+	if a.Site != b.Site {
+		return a.Site < b.Site
+	}
+	return a.ID < b.ID
 }

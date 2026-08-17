@@ -78,6 +78,7 @@ func newPurge(reaper *fakeReaper, del *fakeDeleter) *TombstonePurge {
 		Recovery:  7 * 24 * time.Hour,
 		TrashBase: "_trash/",
 		Now:       func() time.Time { return testNow },
+		BlastCap:  defaultTestBlastCap,
 	}
 }
 
