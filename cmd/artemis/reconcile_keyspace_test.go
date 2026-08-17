@@ -59,3 +59,26 @@ func TestStorageSiteNames_BareFormatIsIdentity(t *testing.T) {
 	require.Equal(t, []string{"test", "www"}, names)
 	require.Equal(t, tmpl.SitePrefix("test"), layout.sitePrefix(names[0]))
 }
+
+func TestGCLayout_AgreesWithTheWritePathOnEveryRenderedKey(t *testing.T) {
+	t.Parallel()
+
+	tmpl, err := handler.NewDeployPrefixTemplate(domainFormat)
+	require.NoError(t, err)
+	layout, err := newGCLayout(domainFormat, "_trash/")
+	require.NoError(t, err)
+
+	for _, slug := range []string{"test", "hello-universe", "www"} {
+		dirname := tmpl.SiteDirname(slug)
+		const id = "20260101-000000-abc1234"
+
+		require.Equal(t, tmpl.SitePrefix(slug), layout.sitePrefix(dirname),
+			"slug %q: the sweep lists a prefix the write path never produces", slug)
+		require.Equal(t, tmpl.DeployPrefix(slug, id), layout.deployPrefix(dirname, id),
+			"slug %q: gc would move a prefix no deploy was written to, so the real bytes stay and the "+
+				"tombstone dates nothing", slug)
+		require.Equal(t, "_trash/"+dirname+"/"+id+"/", layout.trashPrefix(dirname, id),
+			"slug %q: tombstone-purge hard-deletes _trash/<dirname>/<id>/ by reconstructing it from the "+
+				"tombstone row, so any other shape leaks bytes forever", slug)
+	}
+}
