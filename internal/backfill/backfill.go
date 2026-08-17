@@ -26,9 +26,25 @@ type Indexer interface {
 }
 
 type Backfill struct {
-	Lister  Lister
-	Indexer Indexer
-	Now     func() time.Time
+	Lister     Lister
+	Indexer    Indexer
+	Now        func() time.Time
+	SitePrefix func(dirname string) string
+	AliasKey   func(dirname, mode string) string
+}
+
+func (b *Backfill) sitePrefix(dirname string) string {
+	if b.SitePrefix != nil {
+		return b.SitePrefix(dirname)
+	}
+	return dirname + "/deploys/"
+}
+
+func (b *Backfill) aliasKey(dirname, mode string) string {
+	if b.AliasKey != nil {
+		return b.AliasKey(dirname, mode)
+	}
+	return dirname + "/" + mode
 }
 
 type Result struct {
@@ -54,7 +70,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 
 	for _, site := range sites {
 		res.Sites++
-		deploysPrefix := site + "/deploys/"
+		deploysPrefix := b.sitePrefix(site)
 		keys, err := b.Lister.ListPrefix(ctx, deploysPrefix)
 		if err != nil {
 			return res, fmt.Errorf("backfill: list %s: %w", site, err)
@@ -100,7 +116,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 		}
 
 		for _, mode := range []string{"production", "preview"} {
-			v, err := b.Lister.GetAlias(ctx, site+"/"+mode)
+			v, err := b.Lister.GetAlias(ctx, b.aliasKey(site, mode))
 			if err != nil {
 				if r2.IsNotFound(err) {
 					continue

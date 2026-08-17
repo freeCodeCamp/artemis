@@ -139,7 +139,7 @@ func siteSegment(format string) (string, error) {
 	return format[:slash], nil
 }
 
-func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+func aliasTails(deployFormat string, formats ...string) ([]string, error) {
 	deploySeg, err := siteSegment(deployFormat)
 	if err != nil {
 		return nil, fmt.Errorf("DEPLOY_PREFIX_FORMAT: %w", err)
@@ -168,6 +168,14 @@ func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...stri
 				f)
 		}
 		tails = append(tails, tail)
+	}
+	return tails, nil
+}
+
+func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+	tails, err := aliasTails(deployFormat, formats...)
+	if err != nil {
+		return nil, err
 	}
 	return func(ctx context.Context, dirname string) (map[string]struct{}, error) {
 		out := map[string]struct{}{}

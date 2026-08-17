@@ -265,7 +265,25 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		if pgRepo == nil {
 			return fmt.Errorf("BACKFILL_ON_BOOT set but DATABASE_URL is unset")
 		}
-		res, err := (&backfill.Backfill{Lister: r2Client, Indexer: pgRepo, Now: time.Now}).Run(rootCtx)
+		layout, layoutErr := newGCLayout(cfg.DeployPrefixFormat, cfg.Cleanup.TrashPrefix)
+		if layoutErr != nil {
+			return fmt.Errorf("backfill layout: %w", layoutErr)
+		}
+		tails, tailErr := aliasTails(cfg.DeployPrefixFormat,
+			cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+		if tailErr != nil {
+			return fmt.Errorf("backfill alias formats: %w", tailErr)
+		}
+		res, err := (&backfill.Backfill{
+			Lister: r2Client, Indexer: pgRepo, Now: time.Now,
+			SitePrefix: layout.sitePrefix,
+			AliasKey: func(dirname, mode string) string {
+				if mode == "production" {
+					return dirname + "/" + tails[0]
+				}
+				return dirname + "/" + tails[1]
+			},
+		}).Run(rootCtx)
 		if err != nil {
 			return fmt.Errorf("backfill: %w", err)
 		}

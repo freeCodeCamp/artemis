@@ -310,3 +310,31 @@ func TestBackfill_AliasKeyIsR2DirRelative(t *testing.T) {
 	assert.Equal(t, 2, res.Aliases,
 		"alias key is the R2-dir-relative literal <dir>/<mode>; the dir from ListSites already carries the .freecode.camp suffix, so the slug-templated ALIAS_*_KEY_FORMAT must NOT be re-applied")
 }
+
+func TestBackfill_RendersPrefixesFromTheConfiguredLayout(t *testing.T) {
+	lister := &fakeLister{
+		sites: []string{"test.freecode.camp"},
+		byPfx: map[string][]string{
+			"test.freecode.camp/builds/": {
+				"test.freecode.camp/builds/20260101-000000-abc1234/index.html",
+			},
+		},
+		bytesByPfx: map[string]int64{"test.freecode.camp/builds/20260101-000000-abc1234/": 42},
+		aliases:    map[string]string{"test.freecode.camp/production": "20260101-000000-abc1234"},
+	}
+	idx := &fakeIndexer{}
+	b := &Backfill{
+		Lister: lister, Indexer: idx, Now: func() time.Time { return time.Unix(0, 0) },
+		SitePrefix: func(dirname string) string { return dirname + "/builds/" },
+		AliasKey:   func(dirname, mode string) string { return dirname + "/" + mode },
+	}
+
+	res, err := b.Run(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, res.Deploys,
+		"the old code hardcoded <site>/deploys/ and <site>/<mode>, ignoring DEPLOY_PREFIX_FORMAT and the "+
+			"alias key formats entirely; under any layout whose sub-path differs it indexed zero deploys "+
+			"and reported success")
+	assert.Equal(t, 1, res.Aliases)
+}
