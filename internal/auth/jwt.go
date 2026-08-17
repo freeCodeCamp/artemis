@@ -37,15 +37,11 @@ type DeploySessionClaims struct {
 	jwt.RegisteredClaims
 }
 
-// RequireScope verifies that the JWT was issued for exactly this
-// (login, site, deployId) triple. Returns an error otherwise.
-func (c DeploySessionClaims) RequireScope(login, site, deployID string) error {
-	if c.Subject != login {
-		return fmt.Errorf("auth: jwt sub %q != expected %q", c.Subject, login)
-	}
-	if c.Site != site {
-		return fmt.Errorf("auth: jwt site %q != expected %q", c.Site, site)
-	}
+// RequireDeployID verifies the JWT was minted for exactly this deploy.
+// It is the only request-supplied value to check: the upload/finalize
+// write target is rendered from c.Site and the subject is bound by the
+// signature, so neither has an independent request-side counterpart.
+func (c DeploySessionClaims) RequireDeployID(deployID string) error {
 	if c.DeployID != deployID {
 		return fmt.Errorf("auth: jwt deployId %q != expected %q", c.DeployID, deployID)
 	}

@@ -120,10 +120,11 @@ func TestRequireScope_RejectsWrongDeployID(t *testing.T) {
 	claims, err := s.Verify(tok)
 	require.NoError(t, err)
 
-	require.NoError(t, claims.RequireScope("alice", "www", "d-1"))
-	require.Error(t, claims.RequireScope("alice", "www", "d-2"))
-	require.Error(t, claims.RequireScope("alice", "learn", "d-1"))
-	require.Error(t, claims.RequireScope("bob", "www", "d-1"))
+	require.NoError(t, claims.RequireDeployID("d-1"))
+	require.Error(t, claims.RequireDeployID("d-2"),
+		"the old three-argument RequireScope was called with its own claims as the expected login and "+
+			"site, so those two checks could never fire; the honest signature checks the one value that "+
+			"actually arrives from the request")
 }
 
 func TestNewSigner_RejectsShortKey(t *testing.T) {

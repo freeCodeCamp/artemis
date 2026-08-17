@@ -132,3 +132,24 @@ func TestSiteDeployDelete_LeavesBytesInPlaceWhenTheRowWriteFails(t *testing.T) {
 		"a deploy whose tombstone could not be written keeps serving from its prefix and the delete is "+
 			"retryable; moving it first would orphan it in _trash/ with no row to date it")
 }
+
+func TestDeployFinalize_RejectsWrongDeployID(t *testing.T) {
+	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), newFakeR2())
+
+	tok, _, err := jwt.Sign("alice", "www", "20260420-141522-abc1234")
+	require.NoError(t, err)
+
+	body, _ := json.Marshal(DeployFinalizeRequest{Mode: "preview", Files: []string{"index.html"}})
+	w := withChiRoute(http.MethodPost, "/api/deploy/{deployId}/finalize",
+		"/api/deploy/wrong-deploy/finalize",
+		body,
+		map[string]string{"Authorization": "Bearer " + tok},
+		h.RequireDeployJWT(http.HandlerFunc(h.DeployFinalize)).ServeHTTP,
+		context.Background(),
+	)
+
+	assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "jwt_wrong_deploy",
+		"the deployId comparison is the only live check in the scope guard; the site is pinned by "+
+			"rendering the write target from claims.Site, and the subject by the signature itself")
+}

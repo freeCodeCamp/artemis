@@ -108,7 +108,7 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deployID := chi.URLParam(r, "deployId")
-	if err := claims.RequireScope(claims.Subject, claims.Site, deployID); err != nil {
+	if err := claims.RequireDeployID(deployID); err != nil {
 		writeError(w, http.StatusForbidden, "jwt_wrong_deploy", "deploy-session jwt does not match url deploy id")
 		return
 	}
@@ -191,7 +191,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deployID := chi.URLParam(r, "deployId")
-	if err := claims.RequireScope(claims.Subject, claims.Site, deployID); err != nil {
+	if err := claims.RequireDeployID(deployID); err != nil {
 		writeError(w, http.StatusForbidden, "jwt_wrong_deploy", "deploy-session jwt does not match url deploy id")
 		return
 	}
