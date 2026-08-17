@@ -14,12 +14,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
 
-type failingLister struct{ err error }
-
-func (l *failingLister) ListPrefix(context.Context, string) ([]string, error) {
-	return nil, l.err
-}
-
 func defByName(t *testing.T, defs []worker.WorkflowDef, name string) worker.WorkflowDef {
 	t.Helper()
 	for _, d := range defs {
