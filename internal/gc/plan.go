@@ -1,6 +1,9 @@
 package gc
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 type Plan struct {
 	Site       string
@@ -10,9 +13,19 @@ type Plan struct {
 	Reason     string
 }
 
+func sortNewestFirst(ds []Deploy) {
+	sort.SliceStable(ds, func(i, j int) bool {
+		if !ds[i].Mtime.Equal(ds[j].Mtime) {
+			return ds[i].Mtime.After(ds[j].Mtime)
+		}
+		return ds[i].ID > ds[j].ID
+	})
+}
+
 func PlanSite(site string, in RetainInput, p Policy, blastCap int) Plan {
 	_, del := Retain(in, p)
 	del = append(del, in.Expired...)
+	sortNewestFirst(del)
 
 	plan := Plan{Site: site}
 	if len(del) > 0 && blastCap <= 0 {

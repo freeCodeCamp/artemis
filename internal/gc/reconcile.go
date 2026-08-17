@@ -88,7 +88,8 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string, dryRun boo
 		report.Reindexed = plan.reindex
 		report.OrphanTombstoned = plan.tombstone
 		report.PGPruned = plan.prune
-		rc.predictBlastCap(ctx, plan, &report)
+		capped := plan
+		rc.applyBlastCap(ctx, site, &capped, &report)
 		rc.logDone(ctx, report, true)
 		return report, nil
 	}
@@ -209,11 +210,6 @@ func (rc *Reconciler) classify(ctx context.Context, site string, snap siteSnapsh
 		plan.prune = append(plan.prune, id)
 	}
 	return plan
-}
-
-func (rc *Reconciler) predictBlastCap(ctx context.Context, plan repairPlan, report *DriftReport) {
-	capped := plan
-	rc.applyBlastCap(ctx, report.Site, &capped, report)
 }
 
 func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repairPlan, report *DriftReport) {

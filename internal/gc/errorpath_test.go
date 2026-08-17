@@ -125,8 +125,10 @@ func TestGC_MoveFailureLeavesTheTombstoneRowForTheNextRun(t *testing.T) {
 
 	require.ErrorContains(t, err, "tombstone-move")
 	assert.Equal(t, []string{"www/d-old"}, store.tombstoned,
-		"the row landed before the move, so the bytes stay at the deploy prefix and surface as reindex "+
-			"drift — visible to drift-detect and repairable by reconcile, unlike bytes stranded in _trash/")
+		"the row landed before the move, so the bytes stay at the deploy prefix where the sweep still "+
+			"reports them; reindex is refused while the tombstone stands (repo.go:46), so they clear only "+
+			"after tombstone-purge drops the row at CLEANUP_RECOVERY_DAYS — bounded and visible, unlike "+
+			"bytes moved to _trash/ with no row, which nothing lists at all")
 	assert.Empty(t, res.Tombstoned, "a deploy whose bytes never moved is not reported as reclaimed")
 	require.Len(t, mover.moves, 1, "aborts on the first failed move, never proceeding to the next deploy")
 }
