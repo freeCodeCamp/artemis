@@ -152,14 +152,13 @@ The first two are *reclaimable*: unreferenced bytes and forgotten rows. The last
 
 Safety rails on the repair path: the site lock, a **second read inside the lock** before acting, a grace window so young deploys are never touched, and a blast cap.
 
-### 7.4 The ordering inconsistency you will trip over
+### 7.4 Why both reaping paths write the row first
 
-The two reaping paths write their two side effects in **opposite orders**:
+Every reaping path records the tombstone row **before** it moves the bytes — `gc-site` at `internal/gc/gcsite.go:135` then `:138`, `reconcile` at `internal/gc/reconcile.go:286` then `:290`.
 
-- `gc-site` moves the bytes, then records the tombstone row (`internal/gc/gcsite.go:117` then `:120`)
-- `reconcile` records the row, then moves the bytes (`internal/gc/reconcile.go:275` then `:279`)
+That order is forced by the purge being row-driven. Bytes moved into `_trash/` without a tombstone are invisible to `tombstone-purge` (which walks `tombstones`), invisible to the index, and invisible to `reconcile` (which lists the *site* prefix, not `_trash/`) — a permanent, undetectable leak. The inverse failure is benign: a row with its bytes still at the deploy prefix shows up as ordinary reindex drift, which the nightly sweep reports and `reconcile` repairs. Both paths log `tombstone_move_deferred` when they land in that state.
 
-Reconcile's order is the correct one: the purge is row-driven, so bytes moved without a row are a permanent leak. `gc-site` still has the leaky order — it is a known follow-up, not a fixed thing.
+`gc-site` carried the leaky order until the drift-at-source sprint; if you find a doc or comment claiming otherwise, it predates that change.
 
 ______________________________________________________________________
 
@@ -196,15 +195,15 @@ ______________________________________________________________________
 
 Verified traps, each a real line of code. None of these are hypothetical.
 
-1. **`CLEANUP_BLAST_CAP` has no default.** It is absent from the defaults block (`internal/config/config.go:242-249`), so it is `0`, and both consumers treat `<= 0` as *disabled*. Production sets it to `10` explicitly; a fresh environment runs uncapped.
+1. **`CLEANUP_BLAST_CAP` of `0` refuses every destructive repair.** It used to mean *unlimited*, and the code default was `0` — a safety valve that defaulted to off. It now defaults to `10` and a literal `0` is a refusal, reported as `Aborted` with a reason. Both consumers agree: `PlanSite` (`internal/gc/plan.go`) and `Reconciler.applyBlastCap` (`internal/gc/reconcile.go`).
 1. **A deploy's mtime is parsed out of its ID string**, not read from R2 metadata (`internal/gc/reconcile.go:494`). An ID whose first 15 characters are not `20060102-150405` gets a zero time.
 1. **The marker extends a deploy's life, it does not shorten it.** A marked deploy is kept for the full retention window; an unmarked one only for the grace window.
 1. **Reconcile records `bytes = 0`** on the tombstones it creates (`internal/gc/reconcile.go:275`), so purge's "bytes reclaimed" figure under-reports.
-1. **Unknown `argv` silently boots the server.** `main.go:49` and `:56` compare against two exact strings with no default case and no usage text. `artemis --help` starts a web server.
-1. **`driftreport` ignores its arguments** — `main.go:50` forwards nothing, unlike `main.go:57`. `artemis driftreport --site www` sweeps the whole fleet, silently.
+1. **Subcommand dispatch is closed.** `dispatchSubcommand` (`cmd/artemis/main.go:50`) returns `handled=false` only for an empty argv; anything unrecognised is an error, and `driftreport` rejects arguments outright rather than sweeping the fleet while appearing scoped. Both used to fall through — `artemis --help` once started a web server.
 1. **`BACKFILL_ON_BOOT` is a different program.** `runWith` does the backfill and returns before any listener starts, so the process exits 0 having served nothing.
 1. **Bare `DELETE /api/site/{slug}` removes only the registry row.** Bytes, index rows and live alias objects all survive; the site just becomes unmanaged. `?purge=true` is the destructive one.
-1. **There is no "already finalized" guard on upload.** A valid JWT can keep writing into a prefix that is already the live production target, for the rest of its TTL.
+1. **There is no "already finalized" guard on upload.** A valid JWT can keep writing into a prefix that is already the live production target, for the rest of its TTL. Known and accepted; see design 0005.
+1. **A deploy row exists from `init`, not from `finalize`.** `deploy.init` writes `state = 'pending'` (`internal/pg/pending.go`); `FinalizeAtomic`'s existing `ON CONFLICT ... SET state = 'active'` promotes it with no extra write. Every read filters `state = 'active'`, so a pending row is invisible to retention planning, the drift denominator and the API — its only reader is `ExpiredPendingDeploys`, which `gc-site` uses to reap sessions abandoned past the grace window. The write is best-effort: a failure logs and raises to Sentry but never fails the deploy.
 1. **`site-purge` writes a sentinel tombstone with `id = ''`**, and that row now blocks reindexing of *every* deploy in that site until the recovery window clears it. That is deliberate, added this week, and easy to mistake for a bug.
 1. **Dead code that looks live.** `worker.RegisterDeployWorkflows` is never called outside tests — finalize, promote and rollback all run inline in the HTTP handlers.
 
