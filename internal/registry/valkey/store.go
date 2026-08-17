@@ -358,8 +358,9 @@ func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (S
 
 // Delete removes the slug's hash row + index-set member and
 // publishes a registry.changed event. Returns ErrNotFound if the
-// slug is absent. R2 deploy bytes are NOT touched — those age out
-// via the post-GA cleanup cron.
+// slug is absent. R2 deploy bytes are NOT touched, and no job
+// collects them afterwards — see registry.Writer.Delete for the
+// retention consequences.
 func (s *Store) Delete(ctx context.Context, slug string) error {
 	if slug == "" {
 		return errors.New("registry: empty slug")

@@ -60,7 +60,10 @@ type Writer interface {
 	// Delete removes a slug from the registry (hash row + index set
 	// member) and publishes a registry.changed event. Returns
 	// ErrNotFound if the slug is absent. The deletion does NOT
-	// touch any deploy bytes in R2 — those age out via the
-	// post-GA cleanup cron.
+	// touch any deploy bytes in R2, and nothing collects them
+	// afterwards: registry.changed only invalidates caches, so
+	// gc-site never fires for the site again. The bytes and index
+	// rows stay until an operator runs `artemis reconcile` or the
+	// slug is re-registered (which resumes normal retention).
 	Delete(ctx context.Context, slug string) error
 }
