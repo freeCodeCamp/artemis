@@ -62,7 +62,7 @@ A deploy has three calls. Artemis makes the deploy id, and the client never choo
 1. Artemis makes the deploy id. The shape is `<yyyymmdd-hhmmss>-<sha7>`, in UTC.
 1. Artemis signs a **deploy-session JWT**. The token holds the login, the site, and the deploy id. The default life is 15 minutes.
 
-Init writes nothing to R2, and the deploy prefix does not exist yet. Init does write one `audit_log` row in Postgres. That write is best effort, and a failure does not fail the request.
+Init writes nothing to R2, and the deploy prefix does not exist yet. Init does write to Postgres, twice: one `audit_log` row, and one `deploys` row with the state `pending`. The pending row is what lets the cleanup job collect a deploy that uploads bytes and never finalizes — every read path filters on the state `active`, so the pending row is invisible until finalize promotes it. Both writes are best effort, and a failure does not fail the request.
 
 ### Step 2 — upload
 
@@ -82,14 +82,17 @@ There is no staging area. Each object lands at its final key immediately. The de
 
 Artemis runs these gates in order, and it stops at the first failure:
 
-| Order | Gate                                           | Failure                    |
-| ----- | ---------------------------------------------- | -------------------------- |
-| 1     | The mode must be `preview` or `production`     | 400                        |
-| 2     | The file manifest must not be empty            | 400                        |
-| 3     | The manifest must hold a root `index.html`     | 422                        |
-| 4     | R2 must hold every file in the manifest        | 422, with the missing list |
-| 5     | Artemis writes the `_artemis_meta.json` marker | 502                        |
-| 6     | Artemis measures the deploy size               | not fatal                  |
+| Order | Gate                                            | Failure                    |
+| ----- | ----------------------------------------------- | -------------------------- |
+| 1     | The JWT claims must be present on the request   | 401                        |
+| 2     | The URL deploy id must equal the JWT deploy id  | 403                        |
+| 3     | The mode must be `preview` or `production`      | 400                        |
+| 4     | The file manifest must not be empty             | 400                        |
+| 5     | The manifest must hold a root `index.html`      | 422                        |
+| 6     | R2 must hold every file in the manifest         | 422, with the missing list |
+| 7     | Artemis writes the `_artemis_meta.json` marker  | 502                        |
+
+Artemis then measures the deploy size. That step is not a gate: a failed measurement records zero bytes and the finalize continues.
 
 Artemis then takes a **per-site lock** in Postgres, and it does the last steps inside that lock:
 
@@ -155,7 +158,7 @@ The move is a copy and then a delete, for each object. It has no rollback. A fai
 `DELETE /api/site/{slug}` has two behaviours:
 
 - **Without `?purge=true`** — artemis removes the registry row only. It touches no R2 bytes. It returns 204.
-- **With `?purge=true`** — artemis moves the full `<slug>/` prefix into `_trash/<slug>/`, writes a whole-site tombstone, and then removes the registry row. It returns 200.
+- **With `?purge=true`** — artemis writes a whole-site tombstone, moves the full `<dirname>/` prefix into `_trash/<dirname>/`, and then removes the registry row. It returns 200. The prefix is the storage dirname (section 9), not the slug, and the tombstone row lands before the move — the order every removal in artemis follows.
 
 The purge moves the alias objects too, because they are under the same `<slug>/` prefix.
 
@@ -213,7 +216,7 @@ Postgres refuses a drift 1 or a drift 3 repair for a deploy that holds a tombsto
 
 The reconciler stops the run for a site if Postgres holds deploys for that site and the R2 listing returns no deploy prefix at all. An empty listing looks the same as total drift, and total drift would delete every index row for the site. The reconciler treats it as a fault instead, and it reports the fault. This is the shape the name defect in section 10 had, and it is also the shape of a wrong bucket or a wrong prefix.
 
-The blast cap limits how many deploys one run can move to the trash or remove from the index. A run that plans more repairs than the cap repairs the oldest deploys first, reports the cap, and leaves the remainder for the next run. The cap does not limit the repairs that write an index row, because those repairs remove nothing.
+The blast cap limits how many deploys one run can move to the trash or remove from the index. A run that plans more repairs than the cap repairs the oldest deploys first, reports the cap, and leaves the remainder for the next run. A cap of zero refuses every destructive repair — it is a refusal, not an absence of limit. The cap does not limit the repairs that write an index row, because those repairs remove nothing, and it does not shorten a dry-run report: the report always names every drifted deploy and warns separately that a live run would be capped. One selection function owns "the oldest N" for every capped path, so the retention job, the reconciler and the purge cannot disagree about which deploys survive a ceiling.
 
 Two limits are important:
 
@@ -260,7 +263,16 @@ Condition 5 is important. The retention window applies only to a deploy that hol
 
 Before it moves a deploy, `gc-site` takes the per-site lock and reads the **live R2 aliases** again. The plan uses the Postgres alias rows, but the execution uses the R2 objects. A deploy that became live in the interval is skipped.
 
-The `gc-site` workflow deletes no bytes. It only moves a prefix into the trash. The `drift-detect` cron writes nothing at all: its store and its mover are read-only types, and every write method returns an error. The `tombstone-purge` workflow is the only hard delete in the service.
+The `gc-site` workflow deletes no bytes. It only moves a prefix into the trash. The `drift-detect` cron writes nothing at all: its store and its mover are read-only types, and every write method returns an error. The `tombstone-purge` workflow is the only hard delete in the service. It is bounded by the same blast cap as the other destructive paths, it deletes the most overdue trash first, and one site's failure defers only that site — the rest of the run continues and the workflow still reports red.
+
+### The write-ordering rule
+
+Every removal writes its two side effects in a fixed order, and the two orders are opposites for a reason.
+
+- **Moving bytes to the trash** (`gc-site`, the reconciler, deploy delete, site purge): the tombstone row first, the byte move second. Bytes in `_trash/` with no tombstone are invisible to every job forever — the purge walks the `tombstones` table, and the drift sweep lists the site prefix, not the trash. The benign failure is the inverse: a row whose bytes never moved surfaces as drift, and clears when the purge drops the row after the recovery window.
+- **Hard-deleting the trash** (`tombstone-purge`): the byte delete first, the row clear second. A surviving row keeps the idempotent delete retryable on the next run; clearing the row first would drop the only record that bytes remain.
+
+Each background job also carries an explicit execution budget, so the engine default never decides when a half-finished run is killed.
 
 ## 8. How identity and authorization work
 
@@ -322,6 +334,8 @@ The default `DEPLOY_PREFIX_FORMAT` is `<site>/deploys/<ts>-<sha>/`. With this fo
 
 R2 keys always come from the raw slug, rendered through the template. The `deploys` table, the `aliases` table, the `tombstones` table, and the `site.changed` outbox payload always hold the storage dirname, never the slug. Each write path converts the slug to a dirname before it touches one of these stores.
 
+The `audit_log` table is the one exception, and it holds **both** names: the HTTP handlers write the slug (via the request-scoped telemetry), while the GC auditors write the dirname the sweep enumerates. No single query over `audit_log.site` returns a site's complete history under a format where the two names differ. The table is append-only at the database level (triggers reject UPDATE, DELETE and TRUNCATE), so the split cannot be repaired by rewriting history — only by converging the writers and dating the cutover.
+
 A caller that reads the registry and skips this conversion sends the bare slug to a store that expects the dirname. The query or the R2 prefix then matches nothing, even though the site is real. Section 10 describes one case where this happened.
 
 ### The registry, in detail
@@ -341,15 +355,3 @@ Team revocation is therefore eventually consistent, and not immediate.
 1. **One Postgres advisory lock, keyed by the site, serializes each mutation of that site.** Finalize, promote, rollback, delete, restore, purge, the cleanup job, and each reconciler repair all take the same key. The timeout is 30 seconds, and a contended request gets 409.
 
 The second invariant has one dangerous limit. With no Postgres, the lock becomes a silent no-op, and concurrent alias writes race with no error.
-
-## 10. Divergence between this code and the deployed release
-
-This document describes what the code at HEAD does. The deployed release still runs a nightly repair cron. HEAD removes it.
-
-The deployed `reconcile-scheduler` workflow reads the registry slugs and publishes each one straight into a `site.reconcile` event, with no conversion to a storage dirname (section 9 defines both names). Every other write path converts the slug first. The deployed reconciler therefore builds an R2 prefix and a Postgres query from a name that no store recognizes. With the default `DEPLOY_PREFIX_FORMAT`, the slug and the dirname are the same string, so the reconciler still works. With a format that adds a suffix, such as the deployed `<site>.freecode.camp/deploys/<ts>-<sha>/`, the slug and the dirname differ, and the reconciler finds nothing on either side. It reports zero drift and completes without error, on every site, every night. This is why the split must stay documented even though the default format hides it.
-
-A read-only sweep at HEAD replaces that scheduler. The sweep converts each registry slug to its storage dirname, and it also reads the site names that only the index knows. It writes nothing.
-
-The deployed reconciler also carries a second hazard. It reads the two sides one time and then repairs from that first read, with no lock and no second read. It has no blast cap, and it removes an index row of any age. The retirement removes the hazard, because no scheduled job repairs anything. The repair path at HEAD takes the site lock and reads the state again inside that lock, and only an operator can start it.
-
-Until the release carrying this change is deployed, the running service still shows the old behaviour: the nightly reconcile workflow completes and repairs nothing.
