@@ -497,10 +497,15 @@ func IsGitHubUnavailable(err error) bool { return errors.Is(err, ErrGitHubUnavai
 // (non-rate-limited) response.
 func IsGitHubUnauthenticated(err error) bool { return errors.Is(err, ErrGitHubUnauthenticated) }
 
-// isRateLimited reports whether resp is a GitHub primary-rate-limit
-// response. Authoritative signal is the `X-RateLimit-Remaining: 0`
-// header (RFC 6585 §4 + GitHub REST docs). Body-substring detection
-// (pre-B16) was fragile against changes to GitHub's error wording.
+// isRateLimited reports whether resp is a GitHub rate-limit response.
+// Primary limits signal `X-RateLimit-Remaining: 0` (RFC 6585 §4 +
+// GitHub REST docs). Secondary (abuse) limits return 403 with a
+// Retry-After header while Remaining is typically non-zero; before
+// this check they fell through to the plain-403 branch and were
+// negative-cached as unauthenticated for up to negCacheCap.
 func isRateLimited(resp *http.Response) bool {
-	return resp.Header.Get("X-RateLimit-Remaining") == "0"
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		return true
+	}
+	return resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != ""
 }
