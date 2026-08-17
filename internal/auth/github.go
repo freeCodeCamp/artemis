@@ -170,7 +170,7 @@ func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (s
 	case resp.StatusCode == http.StatusUnauthorized:
 		c.cacheNegative(cacheKey, ErrGitHubUnauthenticated)
 		return "", ErrGitHubUnauthenticated
-	case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
+	case isRateLimited(resp):
 		// transient — DO NOT cache.
 		return "", ErrGitHubRateLimited
 	case resp.StatusCode == http.StatusForbidden:
@@ -335,7 +335,7 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 		member = m.State == "active"
 	case resp.StatusCode == http.StatusNotFound:
 		member = false
-	case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
+	case isRateLimited(resp):
 		return false, ErrGitHubRateLimited
 	case resp.StatusCode >= 500:
 		return false, ErrGitHubUnavailable
@@ -445,7 +445,7 @@ func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token strin
 			// fall through
 		case resp.StatusCode == http.StatusUnauthorized:
 			return nil, ErrGitHubUnauthenticated
-		case resp.StatusCode == http.StatusForbidden && isRateLimited(resp):
+		case isRateLimited(resp):
 			return nil, ErrGitHubRateLimited
 		case resp.StatusCode == http.StatusForbidden:
 			return nil, ErrGitHubUnauthenticated
@@ -529,6 +529,9 @@ func IsGitHubUnauthenticated(err error) bool { return errors.Is(err, ErrGitHubUn
 // this check they fell through to the plain-403 branch and were
 // negative-cached as unauthenticated for up to negCacheCap.
 func isRateLimited(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
 	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
 		return true
 	}

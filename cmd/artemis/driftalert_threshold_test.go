@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,4 +56,15 @@ func TestClassifyDrift_AliasedMissingOutranksTheReclaimableThreshold(t *testing.
 
 	assert.Equal(t, opDriftAliasedMissing, v.Op,
 		"a live site serving nothing must not be masked by a large but harmless reclaimable count")
+}
+
+func TestEveryDriftVerdictOpIsCronShaped(t *testing.T) {
+	t.Parallel()
+
+	for _, op := range []string{opDriftSweep, opDriftSelfCheck, opDriftUnreadable, opDriftAliasedMissing, opDriftReclaimable} {
+		assert.True(t, observability.IsCronShaped(op),
+			"op %s bypasses the transient-rate tracker only if cronShapedOps lists it; this test lives "+
+				"beside the op constants so adding a sixth verdict here fails until the map learns it — "+
+				"the observability-side test could only restate the map against itself", op)
+	}
 }

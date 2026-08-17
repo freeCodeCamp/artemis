@@ -62,7 +62,7 @@ A deploy has three calls. Artemis makes the deploy id, and the client never choo
 1. Artemis makes the deploy id. The shape is `<yyyymmdd-hhmmss>-<sha7>`, in UTC.
 1. Artemis signs a **deploy-session JWT**. The token holds the login, the site, and the deploy id. The default life is 15 minutes.
 
-Init writes nothing to R2, and the deploy prefix does not exist yet. Init does write to Postgres, twice: one `audit_log` row, and one `deploys` row with the state `pending`. The pending row is what lets the cleanup job collect a deploy that uploads bytes and never finalizes — every read path filters on the state `active`, so the pending row is invisible until finalize promotes it. Both writes are best effort, and a failure does not fail the request.
+Init writes nothing to R2, and the deploy prefix does not exist yet. Init does write to Postgres, twice: one `audit_log` row, and one `deploys` row with the state `pending`. The pending row is what lets the cleanup job collect a deploy that uploads bytes and never finalizes — every read that lists deploys filters on the state `active`, so the pending row is invisible to retention planning, the drift denominator and the API until finalize promotes it. Its only readers are the expiry query the cleanup job runs, and the site enumerator, which does not filter by state. Both writes are best effort, and a failure does not fail the request.
 
 ### Step 2 — upload
 
@@ -269,7 +269,7 @@ The `gc-site` workflow deletes no bytes. It only moves a prefix into the trash. 
 
 Every removal writes its two side effects in a fixed order, and the two orders are opposites for a reason.
 
-- **Moving bytes to the trash** (`gc-site`, the reconciler, deploy delete, site purge): the tombstone row first, the byte move second. Bytes in `_trash/` with no tombstone are invisible to every job forever — the purge walks the `tombstones` table, and the drift sweep lists the site prefix, not the trash. The benign failure is the inverse: a row whose bytes never moved surfaces as drift, and clears when the purge drops the row after the recovery window.
+- **Moving bytes to the trash** (`gc-site`, the reconciler, deploy delete, site purge): the tombstone row first, the byte move second. Bytes in `_trash/` with no tombstone are invisible to every job forever — the purge walks the `tombstones` table, and the drift sweep lists the site prefix, not the trash. The benign failure is the inverse: a row whose bytes never moved leaves the deploy out of the index while its bytes sit at the live prefix. The nightly sweep reports it, the purge eventually drops the tombstone (which is what un-blocks reindexing), and an operator `artemis reconcile` restores the row — the bytes are visible and recoverable at every step, never silently gone.
 - **Hard-deleting the trash** (`tombstone-purge`): the byte delete first, the row clear second. A surviving row keeps the idempotent delete retryable on the next run; clearing the row first would drop the only record that bytes remain.
 
 Each background job also carries an explicit execution budget, so the engine default never decides when a half-finished run is killed.

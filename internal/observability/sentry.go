@@ -374,6 +374,8 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 	}.NewSentryHandler(context.Background())
 }
 
+func IsCronShaped(op string) bool { return cronShapedOps[op] }
+
 var cronShapedOps = map[string]bool{
 	"drift.sweep":           true,
 	"drift.selfcheck":       true,

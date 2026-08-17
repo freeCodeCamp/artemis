@@ -36,6 +36,7 @@ func TestValidateToken_SecondaryRateLimitIsNotAnAuthFailure(t *testing.T) {
 		"a secondary-limit 403 carries Retry-After with non-zero X-RateLimit-Remaining; classifying it as "+
 			"unauthenticated tells the operator a working credential is bad")
 	assert.False(t, IsGitHubUnauthenticated(err))
+	assert.EqualValues(t, 1, calls.Load(), "one upstream probe, no retry loop inside the client")
 }
 
 func TestValidateToken_SecondaryRateLimitIsNeverNegativeCached(t *testing.T) {
@@ -59,6 +60,50 @@ func TestIsTeamMember_SecondaryRateLimitSurfacesAsRateLimited(t *testing.T) {
 	c := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL, Org: "freeCodeCamp"})
 
 	_, err := c.IsTeamMember(context.Background(), "tok", "alice", "team-eng")
+
+	require.Error(t, err)
+	assert.True(t, IsGitHubRateLimited(err))
+	assert.EqualValues(t, 1, calls.Load(), "one upstream probe, no retry loop inside the client")
+}
+
+func TestValidateToken_429IsRateLimitedNotUnauthenticated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL})
+
+	_, err := c.ValidateToken(context.Background(), "tok-429")
+
+	require.Error(t, err)
+	assert.True(t, IsGitHubRateLimited(err),
+		"GitHub documents 403 OR 429 for both limit classes; a 429 fell through to the default branch "+
+			"and reached the operator as 401 invalid-token")
+	assert.False(t, IsGitHubUnauthenticated(err))
+}
+
+func TestIsTeamMember_429IsRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL, Org: "freeCodeCamp"})
+
+	_, err := c.IsTeamMember(context.Background(), "tok", "alice", "team-eng")
+
+	require.Error(t, err)
+	assert.True(t, IsGitHubRateLimited(err))
+}
+
+func TestUserTeams_429IsRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL})
+
+	_, err := c.UserTeams(context.Background(), "tok")
 
 	require.Error(t, err)
 	assert.True(t, IsGitHubRateLimited(err))

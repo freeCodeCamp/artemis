@@ -1,11 +1,15 @@
 package auth
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGitHubClient_CachesAreBoundedAcrossTokenChurn(t *testing.T) {
@@ -20,14 +24,20 @@ func TestGitHubClient_CachesAreBoundedAcrossTokenChurn(t *testing.T) {
 		"every distinct bearer ever presented used to leave a permanent map entry; CI tokens rotate and "+
 			"pods live for weeks, so the maps grew monotonically for the life of the process")
 
-	c.mu.Lock()
-	for i := 0; i < maxCacheEntries*2; i++ {
-		key := teamCacheKey{user: fmt.Sprintf("u-%d", i), team: "t"}
-		pruneMap(c.teamCache, func(e teamCacheEntry) bool { return !e.expires.After(c.now()) }, maxCacheEntries)
-		c.teamCache[key] = teamCacheEntry{member: true, expires: clock.Add(time.Minute)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"state":"active"}`))
+	}))
+	t.Cleanup(srv.Close)
+	tc := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL, Org: "freeCodeCamp",
+		Now: func() time.Time { return clock }})
+	for i := 0; i < maxCacheEntries+64; i++ {
+		_, err := tc.IsTeamMember(context.Background(), "tok", fmt.Sprintf("u-%d", i), "t")
+		require.NoError(t, err)
 	}
-	c.mu.Unlock()
-	assert.LessOrEqual(t, len(c.teamCache), maxCacheEntries+1)
+	assert.LessOrEqual(t, len(tc.teamCache), maxCacheEntries,
+		"driven through IsTeamMember so the assertion fails if fetchTeamMembership stops pruning; the "+
+			"first version of this test called pruneMap from its own loop and measured its own bookkeeping")
 }
 
 func TestPruneMap_DropsExpiredBeforeLive(t *testing.T) {
