@@ -13,7 +13,10 @@ const (
 	opDriftSelfCheck      = "drift.selfcheck"
 	opDriftUnreadable     = "drift.unreadable"
 	opDriftAliasedMissing = "drift.aliased_missing"
+	opDriftReclaimable    = "drift.reclaimable"
 )
+
+const reclaimableAlertThreshold = 25
 
 type driftVerdict struct {
 	Op    string
@@ -37,6 +40,15 @@ func classifyDrift(res sweepResult) driftVerdict {
 	}
 	if unread != nil {
 		return driftVerdict{Op: opDriftUnreadable, Err: unread, Fails: true}
+	}
+	if reindex, tombstone, _, _ := res.totals(); reindex+tombstone >= reclaimableAlertThreshold {
+		return driftVerdict{
+			Op: opDriftReclaimable,
+			Err: fmt.Errorf(
+				"%d deploys are reclaimable across %d sites (>= %d): storage is accruing faster than it is "+
+					"collected; run `artemis reconcile <site> --apply` and find what stopped expiring",
+				reindex+tombstone, res.Stats.Sites, reclaimableAlertThreshold),
+		}
 	}
 	return driftVerdict{}
 }

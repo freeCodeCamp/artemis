@@ -375,8 +375,12 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 }
 
 var cronShapedOps = map[string]bool{
-	"drift.sweep":     true,
-	"tombstone.purge": true,
+	"drift.sweep":           true,
+	"drift.selfcheck":       true,
+	"drift.unreadable":      true,
+	"drift.aliased_missing": true,
+	"drift.reclaimable":     true,
+	"tombstone.purge":       true,
 }
 
 // CaptureBackground reports an error raised outside any HTTP request
