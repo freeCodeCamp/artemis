@@ -15,6 +15,10 @@ type Store interface {
 	Tombstone(ctx context.Context, site string, d Deploy) error
 }
 
+type PendingSource interface {
+	ExpiredPendingDeploys(ctx context.Context, site string, before time.Time) ([]Deploy, error)
+}
+
 type Mover interface {
 	MovePrefix(ctx context.Context, src, dst string) (int, error)
 }
@@ -43,6 +47,7 @@ type SiteGC struct {
 	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
 	Now          func() time.Time
 	Audit        GCAuditor
+	Pending      PendingSource
 }
 
 type GCResult struct {
@@ -54,6 +59,13 @@ type GCResult struct {
 	Aborted        bool
 	AbortReason    string
 	DryRun         bool
+}
+
+func (g *SiteGC) expiredPending(ctx context.Context, site string) ([]Deploy, error) {
+	if g.Pending == nil {
+		return nil, nil
+	}
+	return g.Pending.ExpiredPendingDeploys(ctx, site, g.Now().Add(-g.Policy.Grace))
 }
 
 func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, error) {
@@ -68,8 +80,14 @@ func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, e
 		return res, fmt.Errorf("gc %s: load aliases: %w", site, err)
 	}
 
+	expired, err := g.expiredPending(ctx, site)
+	if err != nil {
+		return res, fmt.Errorf("gc %s: load pending deploys: %w", site, err)
+	}
+
 	plan := PlanSite(site, RetainInput{
 		Deploys:         deploys,
+		Expired:         expired,
 		AliasTargets:    targets,
 		LastAliasChange: lastChange,
 		Now:             g.Now(),

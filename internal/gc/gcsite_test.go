@@ -78,7 +78,7 @@ func newSiteGC(store Store, mover Mover) *SiteGC {
 		Store:        store,
 		Mover:        mover,
 		Policy:       testPolicy(),
-		BlastCap:     0,
+		BlastCap:     defaultTestBlastCap,
 		Locker:       &fakeLocker{},
 		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
 		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },

@@ -22,6 +22,7 @@ type Policy struct {
 
 type RetainInput struct {
 	Deploys         []Deploy
+	Expired         []Deploy
 	AliasTargets    map[string]struct{}
 	LastAliasChange time.Time
 	Now             time.Time

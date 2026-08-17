@@ -21,7 +21,7 @@ func oldDeploys(n int, eachBytes int64) []Deploy {
 }
 
 func TestPlanSite_KeepN(t *testing.T) {
-	plan := PlanSite("www", RetainInput{Deploys: oldDeploys(6, 100), Now: testNow}, testPolicy(), 0)
+	plan := PlanSite("www", RetainInput{Deploys: oldDeploys(6, 100), Now: testNow}, testPolicy(), defaultTestBlastCap)
 
 	assert.Len(t, plan.Delete, 3, "6 old deploys, keepN=3 -> 3 deletable (V2)")
 	assert.False(t, plan.Aborted)
@@ -47,8 +47,25 @@ func TestGC_BlastCap(t *testing.T) {
 	assert.False(t, ids["d-old"], "newest deletable deploy is spared until a later run")
 }
 
-func TestPlanSite_BlastCapDisabled(t *testing.T) {
+func TestPlanSite_BlastCapZeroRefusesEveryDelete(t *testing.T) {
 	plan := PlanSite("www", RetainInput{Deploys: oldDeploys(20, 1), Now: testNow}, testPolicy(), 0)
-	assert.False(t, plan.Aborted, "blastCap=0 disables the cap")
-	assert.Len(t, plan.Delete, 17)
+	assert.True(t, plan.Aborted,
+		"an unset cap once meant unlimited, so an environment that forgot CLEANUP_BLAST_CAP reaped a whole "+
+			"site in one run")
+	assert.Empty(t, plan.Delete)
+	assert.Contains(t, plan.Reason, "blast-cap 0")
+}
+
+func TestPlanSite_ExpiredPendingJoinsTheDeleteSetUnderTheSameCap(t *testing.T) {
+	in := RetainInput{
+		Deploys: oldDeploys(6, 100),
+		Expired: []Deploy{{ID: "abandoned", Mtime: testNow.Add(-96 * time.Hour)}},
+		Now:     testNow,
+	}
+
+	plan := PlanSite("www", in, testPolicy(), 2)
+
+	assert.True(t, plan.Aborted, "3 retention deletes plus 1 expired pending exceeds a cap of 2")
+	assert.Len(t, plan.Delete, 2,
+		"abandoned sessions must be bounded by the same ceiling as retention, not appended past it")
 }
