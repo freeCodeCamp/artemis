@@ -92,7 +92,7 @@ func TestPlanSite_CapReapsTheOldestAcrossBothDeleteSources(t *testing.T) {
 	plan := PlanSite("www", in, testPolicy(), 2)
 
 	require.True(t, plan.Aborted)
-	assert.Equal(t, []string{"pend-oldest", "d-old"}, planIDs(plan),
+	assert.Equal(t, []string{"d-old", "pend-oldest"}, planIDs(plan),
 		"Retain returns newest-first while ExpiredPendingDeploys returns oldest-first, and the cap slices "+
 			"the tail; concatenating them unsorted makes the tail the NEWEST abandoned sessions while the "+
 			"reason string still claims it reaped the oldest, starving retention on any site over the cap")

@@ -229,12 +229,8 @@ func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repa
 	report.Capped = true
 	report.CapReason = fmt.Sprintf("destructive plan of %d exceeds blast-cap %d; attempting %d this run",
 		destructive, rc.BlastCap, rc.BlastCap)
-	if len(plan.tombstone) >= rc.BlastCap {
-		plan.tombstone = plan.tombstone[:rc.BlastCap]
-		plan.prune = nil
-	} else {
-		plan.prune = plan.prune[:rc.BlastCap-len(plan.tombstone)]
-	}
+	plan.tombstone = capOldest(plan.tombstone, rc.BlastCap, olderID)
+	plan.prune = capOldest(plan.prune, rc.BlastCap-len(plan.tombstone), olderID)
 	slog.WarnContext(ctx, "reconcile.capped", "site", site, "reason", report.CapReason)
 }
 

@@ -13,19 +13,31 @@ type Plan struct {
 	Reason     string
 }
 
-func sortNewestFirst(ds []Deploy) {
-	sort.SliceStable(ds, func(i, j int) bool {
-		if !ds[i].Mtime.Equal(ds[j].Mtime) {
-			return ds[i].Mtime.After(ds[j].Mtime)
-		}
-		return ds[i].ID > ds[j].ID
-	})
+func capOldest[T any](items []T, n int, older func(a, b T) bool) []T {
+	if n <= 0 {
+		return nil
+	}
+	if len(items) <= n {
+		return items
+	}
+	out := make([]T, len(items))
+	copy(out, items)
+	sort.SliceStable(out, func(i, j int) bool { return older(out[i], out[j]) })
+	return out[:n]
 }
+
+func olderDeploy(a, b Deploy) bool {
+	if !a.Mtime.Equal(b.Mtime) {
+		return a.Mtime.Before(b.Mtime)
+	}
+	return a.ID < b.ID
+}
+
+func olderID(a, b string) bool { return a < b }
 
 func PlanSite(site string, in RetainInput, p Policy, blastCap int) Plan {
 	_, del := Retain(in, p)
 	del = append(del, in.Expired...)
-	sortNewestFirst(del)
 
 	plan := Plan{Site: site}
 	if len(del) > 0 && blastCap <= 0 {
@@ -37,7 +49,7 @@ func PlanSite(site string, in RetainInput, p Policy, blastCap int) Plan {
 	if blastCap > 0 && len(del) > blastCap {
 		plan.Aborted = true
 		plan.Reason = fmt.Sprintf("delete plan of %d exceeds blast-cap %d; reaping oldest %d this run", len(del), blastCap, blastCap)
-		del = del[len(del)-blastCap:]
+		del = capOldest(del, blastCap, olderDeploy)
 	}
 	plan.Delete = del
 	for _, d := range del {
