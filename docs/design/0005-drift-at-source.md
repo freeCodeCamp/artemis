@@ -31,6 +31,23 @@ Between those two calls the client PUTs files into `<site-dirname>/deploys/<id>/
 
 That is the entire reason `reconcile` exists. It is a scanner built to find what a missing write should have recorded.
 
+## Not a problem: the domain layout
+
+Raised during review, and worth recording so it is not re-litigated. The doubled string `test.freecode.camp.freecode.camp` **is not a hostname**. It is the malformed R2 object-key prefix that the P0-2 bug renders. Nothing resolves it, nothing requests a certificate for it; it 404s inside R2 and that is the whole of its blast radius.
+
+The real subdomain layout is coherent and verified:
+
+| host                         | R2 alias key                    | labels under root |
+| ---------------------------- | ------------------------------- | ----------------- |
+| `test.freecode.camp`         | `test.freecode.camp/production` | 1                 |
+| `test.preview.freecode.camp` | `test.freecode.camp/preview`    | 2                 |
+
+The edge derives the key from the Host header — `parseSiteAndAlias` (`infra-backup/docker/images/caddy-s3/modules/r2alias/host.go:17-40`) strips the root domain, and if the last remaining label is the preview subdomain it returns `site = <sitePrefix>.<rootDomain>`, `alias = "preview"`. So both hosts collapse to the *same* single-label site dirname and differ only by alias name. That is why `ALIAS_*_KEY_FORMAT` carry the FQDN (`values.production.yaml:53-55`) — the key must match what the edge computes.
+
+Two-label preview hosts are covered by TLS: the live certificate SAN is `*.freecode.camp, *.preview.freecode.camp, freecode.camp` (probed 2026-08-17 against both hosts). A single `*.freecode.camp` wildcard would **not** match `test.preview.freecode.camp` — RFC 6125 wildcards span exactly one label — but a second explicit wildcard is present, so preview is correctly served. This is load-bearing: production holds **70 preview aliases across 70 sites** versus 57 production aliases, most recent 2026-08-16.
+
+No change proposed here.
+
 ## Design
 
 Four phases, in dependency order. P0 and P1 are independent of each other; P2 depends on neither but is the one that removes the drift class; P3 depends on P2.
@@ -69,6 +86,8 @@ The minimal principled fix, no slug plumbing required:
 The boot check is what makes step 2 correct rather than merely usually-correct, and it makes any future misconfiguration a startup failure instead of a silent 404.
 
 #### P0-3. `CLEANUP_BLAST_CAP` defaults to unlimited
+
+**Severity corrected after probing infra: production is _not_ at risk.** `values.production.yaml:73` sets `CLEANUP_BLAST_CAP: "10"`, so the live service is capped. The defect is that both fallbacks are `0` = uncapped — the chart default (`charts/artemis/values.yaml:141`, commented "0 = uncapped") and the code default below. Any new environment, or a values file that forgets the override, runs destructive cleanup with no ceiling. A footgun, not a live fire.
 
 `config.go:545` reads the variable only `if ok` — there is no default, so `BlastCap` is `0`. Both consumers read `0` as *no cap*:
 
@@ -177,6 +196,7 @@ Everything verified during this audit, with a decision against each. "Accept, do
 | 11  | `outbox` has no retention — unbounded growth                                                                                                                                                                                           | **Backlog.** Small table, slow growth, no correctness impact. Needs a purge job eventually; not part of this wave.                                                                                                                                                                                     |
 | 12  | Dead worker code paths                                                                                                                                                                                                                 | **Backlog**, cosmetic.                                                                                                                                                                                                                                                                                 |
 | 13  | `RequireScope` / latched rate limiter behaviours                                                                                                                                                                                       | **Accept, documented.** Both behave as designed; the surprise is documentation, not code. Already captured in ONBOARDING §10.                                                                                                                                                                          |
+| 14  | `PublicURLForSite` (`internal/handler/handler.go:152`) is never assigned outside tests, so the hardcoded fallback at `deploy.go:377-382` always runs — the public URL returned to the CLI bakes `freecode.camp` and `.preview.` into the binary, while every other domain fact comes from config. There is no `ROOT_DOMAIN` setting. | **Fix with P0** (one-liner): derive the URL from the configured alias formats, or add the root domain to config. Cosmetic today, silently wrong the day the root domain or preview label changes. |
 
 ## Sequencing
 
