@@ -12,6 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func fetchUnpublished(ctx context.Context, t *testing.T, repo *Repo, limit int) []OutboxEvent {
+	t.Helper()
+	rows, err := repo.pool.Query(ctx,
+		`SELECT id, topic, payload FROM outbox
+		 WHERE published_at IS NULL
+		 ORDER BY id
+		 LIMIT $1`, limit)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var out []OutboxEvent
+	for rows.Next() {
+		var e OutboxEvent
+		require.NoError(t, rows.Scan(&e.ID, &e.Topic, &e.Payload))
+		out = append(out, e)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
 func TestOutbox_AtomicWithMetadataAndRelay(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -44,8 +64,7 @@ func TestOutbox_AtomicWithMetadataAndRelay(t *testing.T) {
 	assert.True(t, ids["d1"], "committed metadata present")
 	assert.False(t, ids["d2"], "rolled-back metadata absent (dual-write closed)")
 
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 1, "only the committed tx produced an outbox row")
 	assert.Equal(t, TopicSiteChanged, events[0].Topic)
 	var p map[string]string
@@ -53,8 +72,7 @@ func TestOutbox_AtomicWithMetadataAndRelay(t *testing.T) {
 	assert.Equal(t, "www", p["site"])
 
 	require.NoError(t, repo.MarkPublished(ctx, []int64{events[0].ID}, time.Now()))
-	again, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	again := fetchUnpublished(ctx, t, repo, 10)
 	assert.Empty(t, again, "published events are not re-fetched")
 }
 
@@ -63,8 +81,7 @@ func TestRelayBatch_CommitsClaimBeforePublish(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.EnqueueSiteChanged(ctx, "www"))
 
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 1)
 	id := events[0].ID
 
@@ -95,8 +112,7 @@ func TestOutbox_EnqueueSiteChanged(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, repo.EnqueueSiteChanged(ctx, "learn"))
 
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 1)
 	var p map[string]string
 	require.NoError(t, json.Unmarshal(events[0].Payload, &p))

@@ -66,7 +66,7 @@ func TestMigrations(t *testing.T) {
 	var indexDef string
 	require.NoError(t, db.Pool.QueryRow(ctx,
 		"SELECT indexdef FROM pg_indexes WHERE indexname = 'outbox_unpublished_idx'").Scan(&indexDef))
-	require.Contains(t, indexDef, "(id)", "0004 rebuilt outbox_unpublished_idx on id to match FetchUnpublished ORDER BY id")
+	require.Contains(t, indexDef, "(id)", "0004 rebuilt outbox_unpublished_idx on id to match the relay claim ORDER BY id")
 	require.NotContains(t, indexDef, "created_at", "stale created_at index dropped by 0004")
 
 	var occurredIDIdx string
@@ -87,10 +87,9 @@ func TestMigrations(t *testing.T) {
 	repo := NewRepo(db)
 	require.NoError(t, repo.EnqueueSiteChanged(ctx, "second"))
 	require.NoError(t, repo.EnqueueSiteChanged(ctx, "third"))
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 2, "both enqueued events unpublished")
-	require.Less(t, events[0].ID, events[1].ID, "FetchUnpublished returns oldest-first by id")
+	require.Less(t, events[0].ID, events[1].ID, "unpublished events come back oldest-first by id")
 }
 
 func TestReleaseAdvisoryLock_FreesLockOnCanceledCallerCtx(t *testing.T) {

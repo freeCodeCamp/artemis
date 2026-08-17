@@ -40,28 +40,6 @@ func (r *Repo) EnqueueSiteChanged(ctx context.Context, site string) error {
 	})
 }
 
-func (r *Repo) FetchUnpublished(ctx context.Context, limit int) ([]OutboxEvent, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, topic, payload FROM outbox
-		 WHERE published_at IS NULL
-		 ORDER BY id
-		 LIMIT $1`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("pg outbox fetch: %w", err)
-	}
-	defer rows.Close()
-
-	var out []OutboxEvent
-	for rows.Next() {
-		var e OutboxEvent
-		if err := rows.Scan(&e.ID, &e.Topic, &e.Payload); err != nil {
-			return nil, fmt.Errorf("pg outbox scan: %w", err)
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
 const claimTTL = 5 * time.Minute
 
 func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error) {

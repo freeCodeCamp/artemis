@@ -155,8 +155,6 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
 				return errAliasWriteHandled
 			}
-		} else {
-			h.emitSiteChanged(commitCtx, site)
 		}
 		return nil
 	})
@@ -274,8 +272,6 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
 				return errAliasWriteHandled
 			}
-		} else {
-			h.emitSiteChanged(commitCtx, site)
 		}
 		return nil
 	})

@@ -33,7 +33,7 @@ func TestWorkerBoot(t *testing.T) {
 	eng := &fakeEngine{}
 	rt := NewRuntime(eng)
 
-	perSite := []string{WorkflowGCSite, WorkflowManualDelete, WorkflowSitePurge}
+	perSite := []string{WorkflowGCSite, "manual-delete", "site-purge"}
 	for _, name := range perSite {
 		require.NoError(t, rt.Register(WorkflowDef{Name: name, ConcurrencyKey: ConcurrencyKeySite, Handler: noop}))
 	}

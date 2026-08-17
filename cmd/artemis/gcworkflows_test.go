@@ -53,12 +53,12 @@ func TestCronCheckIn_DriftDetectAndPurge(t *testing.T) {
 		byName[d.Name] = d
 	}
 
-	require.NoError(t, byName[workflowDriftDetect].Handler(context.Background(), nil))
+	require.NoError(t, byName[worker.WorkflowDriftDetect].Handler(context.Background(), nil))
 	require.NoError(t, byName[worker.WorkflowTombstonePurge].Handler(context.Background(), nil))
 
 	require.Len(t, got, 4, "two check-ins (in_progress+ok) per cron workflow")
-	assert.Equal(t, ci{workflowDriftDetect, cronDriftDetect, sentry.CheckInStatusInProgress}, got[0])
-	assert.Equal(t, workflowDriftDetect, got[1].slug)
+	assert.Equal(t, ci{worker.WorkflowDriftDetect, cronDriftDetect, sentry.CheckInStatusInProgress}, got[0])
+	assert.Equal(t, worker.WorkflowDriftDetect, got[1].slug)
 	assert.Equal(t, sentry.CheckInStatusOK, got[1].status)
 	assert.Equal(t, ci{worker.WorkflowTombstonePurge, cronTombstonePurge, sentry.CheckInStatusInProgress}, got[2])
 	assert.Equal(t, worker.WorkflowTombstonePurge, got[3].slug)
@@ -204,7 +204,7 @@ func TestGCWorkflowDefs(t *testing.T) {
 	assert.GreaterOrEqual(t, purge.ExecutionTimeout, 10*time.Minute,
 		"same gap as gc-site: the only hard-deleting job had no explicit budget either")
 
-	drift := byName[workflowDriftDetect]
+	drift := byName[worker.WorkflowDriftDetect]
 	assert.NotEmpty(t, drift.Cron, "drift-detect is cron-triggered")
 	assert.GreaterOrEqual(t, drift.ExecutionTimeout, 10*time.Minute,
 		"the sweep lists every object of every site — 22745 objects across 76 sites in production, "+
@@ -219,7 +219,7 @@ func TestGCWorkflowDefs_NoWorkflowCanRepairOnASchedule(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 
 	for _, d := range gcWorkflowDefs(gcw, true, cleanSweep) {
-		assert.NotEqual(t, worker.WorkflowReconcile, d.Name,
+		assert.NotEqual(t, "reconcile", d.Name,
 			"reconcile repairs bytes and is human-invoked only; a schedule must never reach it")
 	}
 }

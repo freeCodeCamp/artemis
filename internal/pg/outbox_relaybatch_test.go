@@ -61,8 +61,7 @@ func TestRelayBatch_ExclusiveAcrossReplicas(t *testing.T) {
 		assert.Equal(t, 1, c, "event %d must publish exactly once across %d replicas while its claim marker holds (B3); duplicates mean the claim is not exclusive", id, replicas)
 	}
 
-	remaining, err := repo.FetchUnpublished(ctx, total)
-	require.NoError(t, err)
+	remaining := fetchUnpublished(ctx, t, repo, total)
 	assert.Empty(t, remaining, "every claimed event eventually marked published")
 }
 
@@ -86,8 +85,7 @@ func TestRelayBatch_PublishFailureLeavesEventUnpublished(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 1, n, "only the pre-failure event marked")
 
-	remaining, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	remaining := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, remaining, 1, "the failed event stays unpublished for retry (at-least-once)")
 	assert.Equal(t, "b", payloadSite(t, remaining[0]))
 }
@@ -121,8 +119,7 @@ func TestRelayBatch_MarkSurvivesContextDeath(t *testing.T) {
 	require.Error(t, err, "the publish failure must surface, not be swallowed by the mark")
 	assert.Equal(t, 1, n, "the pre-failure publish must be marked even though the batch ctx died")
 
-	remaining, ferr := repo.FetchUnpublished(context.Background(), 10)
-	require.NoError(t, ferr)
+	remaining := fetchUnpublished(context.Background(), t, repo, 10)
 	assert.Len(t, remaining, 2, "only the published event may be marked; the rest stay for retry")
 }
 

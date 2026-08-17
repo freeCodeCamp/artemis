@@ -81,10 +81,6 @@ type TrashStore interface {
 	RestoreDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64) error
 }
 
-type SiteChangeEmitter interface {
-	EnqueueSiteChanged(ctx context.Context, site string) error
-}
-
 type DeployIndexWriter interface {
 	FinalizeAtomic(ctx context.Context, site, deployID, mode string, mtime time.Time, bytes int64) error
 	AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error
@@ -127,7 +123,6 @@ type Handlers struct {
 	TrashPrefixBase        string // e.g. "_trash/"
 	Trash                  TrashStore
 	TrashRecovery          time.Duration
-	Outbox                 SiteChangeEmitter
 	Index                  DeployIndexWriter
 	Pending                PendingDeployWriter
 	Locker                 SiteLocker
@@ -169,24 +164,6 @@ func (h *Handlers) withSiteLock(ctx context.Context, dirname string, fn func() e
 		return fn()
 	}
 	return h.Locker.WithSiteLock(ctx, dirname, fn)
-}
-
-func (h *Handlers) emitSiteChanged(ctx context.Context, site string) {
-	if h.Outbox == nil {
-		return
-	}
-	site = h.DeployPrefix.SiteDirname(site)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := h.Outbox.EnqueueSiteChanged(ctx, site); err != nil {
-		slog.ErrorContext(ctx, "outbox.enqueue.failed", "site", site, "err", err)
-		sentry.WithScope(func(scope *sentry.Scope) {
-			scope.SetTag("op", "outbox.enqueue")
-			scope.SetTag("site", site)
-			scope.SetFingerprint([]string{"outbox.enqueue"})
-			sentry.CaptureException(err)
-		})
-	}
 }
 
 func (h *Handlers) auditFromScope(ctx context.Context, action, outcome string, detail map[string]any) {

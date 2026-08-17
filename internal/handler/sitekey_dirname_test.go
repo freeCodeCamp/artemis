@@ -12,18 +12,6 @@ import (
 
 const prodShapedFormat = "<site>.freecode.camp/deploys/<ts>-<sha>/"
 
-func TestEmitSiteChanged_CanonicalDirname(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
-	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
-	ob := &fakeOutbox{}
-	h.Outbox = ob
-
-	h.emitSiteChanged(context.Background(), "www")
-
-	assert.Equal(t, []string{"www.freecode.camp"}, ob.sites,
-		"site.changed payload must carry the R2 dirname (GC index key), not the registry slug")
-}
-
 func TestSitePurge_DirnameKeyedBytesAndTombstone(t *testing.T) {
 	store := newFakeR2()
 	store.objects["example.freecode.camp/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")

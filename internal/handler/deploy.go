@@ -288,8 +288,6 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
 			}
-		} else {
-			h.emitSiteChanged(commitCtx, claims.Site)
 		}
 		return nil
 	})

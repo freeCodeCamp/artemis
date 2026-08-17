@@ -11,10 +11,8 @@ const ConcurrencyKeySite = "site"
 
 const (
 	WorkflowGCSite         = "gc-site"
-	WorkflowManualDelete   = "manual-delete"
-	WorkflowSitePurge      = "site-purge"
 	WorkflowTombstonePurge = "tombstone-purge"
-	WorkflowReconcile      = "reconcile"
+	WorkflowDriftDetect    = "drift-detect"
 )
 
 type Handler func(ctx context.Context, input map[string]any) error

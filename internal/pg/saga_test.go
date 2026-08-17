@@ -26,8 +26,7 @@ func TestDeploySaga(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, targets, "20260420-141522-abc1234", "production alias points at the finalized deploy")
 
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 1, "exactly one site.changed emitted in the same tx")
 	assert.Equal(t, TopicSiteChanged, events[0].Topic)
 

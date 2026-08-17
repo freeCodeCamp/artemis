@@ -51,19 +51,3 @@ func (c *Cache) Set(ctx context.Context, login string, teams []string) error {
 	}
 	return nil
 }
-
-func (c *Cache) GetOrFetch(ctx context.Context, login string, fetch func(ctx context.Context) ([]string, error)) ([]string, error) {
-	if teams, hit, err := c.Get(ctx, login); err != nil {
-		return nil, err
-	} else if hit {
-		return teams, nil
-	}
-	teams, err := fetch(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.Set(ctx, login, teams); err != nil {
-		return nil, err
-	}
-	return teams, nil
-}

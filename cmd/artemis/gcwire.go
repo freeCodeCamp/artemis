@@ -23,7 +23,6 @@ type auditRecorder interface {
 var captureAuditFailure = observability.CaptureBackground
 
 var (
-	_ handler.SiteChangeEmitter = (*pg.Repo)(nil)
 	_ handler.TombstoneStore    = (*pg.Repo)(nil)
 	_ handler.TrashStore        = (*pg.Repo)(nil)
 	_ handler.DeployIndexWriter = (*pg.Repo)(nil)
@@ -39,7 +38,6 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	if repo == nil {
 		return
 	}
-	h.Outbox = repo
 	h.Tombstones = repo
 	h.Trash = repo
 	h.Index = repo

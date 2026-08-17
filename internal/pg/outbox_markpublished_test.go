@@ -18,19 +18,16 @@ func TestMarkPublished_EmptyBatchMarksNothing(t *testing.T) {
 	require.NoError(t, repo.MarkPublished(ctx, []int64{}, now), "empty id slice is a guarded no-op")
 
 	require.NoError(t, repo.EnqueueSiteChanged(ctx, "www"))
-	events, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	events := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, events, 1)
 
 	require.NoError(t, repo.MarkPublished(ctx, nil, now),
 		"a nil batch must not touch existing unpublished rows")
-	still, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	still := fetchUnpublished(ctx, t, repo, 10)
 	require.Len(t, still, 1, "the empty-batch no-op left the real event unpublished")
 
 	ids := []int64{events[0].ID}
 	require.NoError(t, repo.MarkPublished(ctx, ids, now))
-	after, err := repo.FetchUnpublished(ctx, 10)
-	require.NoError(t, err)
+	after := fetchUnpublished(ctx, t, repo, 10)
 	assert.Empty(t, after, "a non-empty batch marks the event published")
 }

@@ -15,7 +15,7 @@ func TestWirePGRepo_WiresAuditAndAllPGDeps(t *testing.T) {
 
 	wirePGRepo(h, &pg.Repo{})
 	require.NotNil(t, h.Audit, "Audit MUST be wired or audit_log silently never persists for HTTP actions")
-	require.NotNil(t, h.Outbox)
+	require.NotNil(t, h.Pending)
 	require.NotNil(t, h.Tombstones)
 	require.NotNil(t, h.Trash)
 	require.NotNil(t, h.Index)

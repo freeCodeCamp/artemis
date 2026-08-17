@@ -39,7 +39,7 @@ func TestDriftDetectWorkflow_PropagatesASweepFailure(t *testing.T) {
 
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	failing := func(context.Context) (sweepResult, error) { return sweepResult{}, errors.New("list r2: down") }
-	def := defByName(t, gcWorkflowDefs(gcw, true, failing), workflowDriftDetect)
+	def := defByName(t, gcWorkflowDefs(gcw, true, failing), worker.WorkflowDriftDetect)
 
 	err := def.Handler(context.Background(), nil)
 
@@ -50,7 +50,7 @@ func TestDriftDetectWorkflow_PropagatesASweepFailure(t *testing.T) {
 
 func TestDriftDetectWorkflow_NeedsNoInput(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
-	def := defByName(t, gcWorkflowDefs(gcw, true, cleanSweep), workflowDriftDetect)
+	def := defByName(t, gcWorkflowDefs(gcw, true, cleanSweep), worker.WorkflowDriftDetect)
 
 	require.NoError(t, def.Handler(context.Background(), map[string]any{}),
 		"the sweep enumerates the fleet itself, so no producer has to name a site for it")

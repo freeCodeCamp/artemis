@@ -26,6 +26,7 @@
 //	GET    /api/repo/{id}                                 — GitHub bearer                       (feature-gated)
 //	POST   /api/repo/{id}/approve                         — GitHub bearer + repo-approve team   (feature-gated)
 //	POST   /api/repo/{id}/reject                          — GitHub bearer + repo-approve team   (feature-gated)
+//	DELETE /api/repo/{id}                                 — GitHub bearer + repo-approve team   (feature-gated)
 package server
 
 import (

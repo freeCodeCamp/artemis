@@ -64,7 +64,6 @@ func newRunID() string {
 }
 
 const (
-	workflowDriftDetect  = "drift-detect"
 	cronTombstonePurge   = "0 3 * * *"
 	cronDriftDetect      = "0 4 * * *"
 	driftDetectRunBudget = 30 * time.Minute
@@ -108,10 +107,10 @@ func observeWorkflow(name string, fn worker.Handler) worker.Handler {
 func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worker.WorkflowDef {
 	return []worker.WorkflowDef{
 		{
-			Name:             workflowDriftDetect,
+			Name:             worker.WorkflowDriftDetect,
 			Cron:             []string{cronDriftDetect},
 			ExecutionTimeout: driftDetectRunBudget,
-			Handler: withCheckIn(workflowDriftDetect, cronDriftDetect, observeWorkflow(workflowDriftDetect, func(ctx context.Context, _ map[string]any) error {
+			Handler: withCheckIn(worker.WorkflowDriftDetect, cronDriftDetect, observeWorkflow(worker.WorkflowDriftDetect, func(ctx context.Context, _ map[string]any) error {
 				res, err := sweepDrift(ctx)
 				if err != nil {
 					captureBackground(opDriftSweep, err)

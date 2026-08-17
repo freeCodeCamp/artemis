@@ -2,7 +2,6 @@ package teamcache
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -54,49 +53,6 @@ func TestTeamCache(t *testing.T) {
 	assert.Equal(t, []string{"staff", "team-eng"}, teams)
 }
 
-func TestTeamCache_GetOrFetch_FetchesOnceThenCaches(t *testing.T) {
-	ctx := context.Background()
-	c, _ := newTestCache(t, 5*time.Minute)
-
-	calls := 0
-	fetch := func(context.Context) ([]string, error) {
-		calls++
-		return []string{"staff"}, nil
-	}
-
-	teams, err := c.GetOrFetch(ctx, "bob", fetch)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"staff"}, teams)
-	assert.Equal(t, 1, calls, "miss triggers exactly one upstream fetch")
-
-	teams, err = c.GetOrFetch(ctx, "bob", fetch)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"staff"}, teams)
-	assert.Equal(t, 1, calls, "second call served from Valkey cache; GitHub App quota protected")
-}
-
-func TestTeamCache_CachesEmptyMembership(t *testing.T) {
-	ctx := context.Background()
-	c, _ := newTestCache(t, 5*time.Minute)
-
-	calls := 0
-	fetch := func(context.Context) ([]string, error) {
-		calls++
-		return nil, nil
-	}
-	_, err := c.GetOrFetch(ctx, "outsider", fetch)
-	require.NoError(t, err)
-
-	teams, hit, err := c.Get(ctx, "outsider")
-	require.NoError(t, err)
-	assert.True(t, hit, "an empty team list is cached, not treated as a miss")
-	assert.Empty(t, teams)
-
-	_, err = c.GetOrFetch(ctx, "outsider", fetch)
-	require.NoError(t, err)
-	assert.Equal(t, 1, calls, "non-member result is cached too — no re-fetch storm")
-}
-
 func TestTeamCache_TTLExpiry(t *testing.T) {
 	ctx := context.Background()
 	c, mr := newTestCache(t, time.Minute)
@@ -107,20 +63,6 @@ func TestTeamCache_TTLExpiry(t *testing.T) {
 	_, hit, err := c.Get(ctx, "alice")
 	require.NoError(t, err)
 	assert.False(t, hit, "entry expires after TTL -> miss")
-}
-
-func TestTeamCache_FetchErrorNotCached(t *testing.T) {
-	ctx := context.Background()
-	c, _ := newTestCache(t, time.Minute)
-
-	_, err := c.GetOrFetch(ctx, "carol", func(context.Context) ([]string, error) {
-		return nil, errors.New("github 503")
-	})
-	require.Error(t, err)
-
-	_, hit, err := c.Get(ctx, "carol")
-	require.NoError(t, err)
-	assert.False(t, hit, "a failed upstream fetch is never cached")
 }
 
 func TestTeamCache_Get_MalformedJSONIsAnError(t *testing.T) {
@@ -145,20 +87,4 @@ func TestTeamCache_Get_RedisErrorPropagates(t *testing.T) {
 	assert.False(t, hit, "a backend error must not read as a hit")
 	assert.Nil(t, teams)
 	assert.ErrorContains(t, err, "teamcache get")
-}
-
-func TestTeamCache_GetOrFetch_SetFailurePropagates(t *testing.T) {
-	ctx := context.Background()
-	c, mr := newTestCache(t, time.Minute)
-	failCommands(t, mr, "READONLY You can't write against a read only replica.", "SET")
-
-	calls := 0
-	teams, err := c.GetOrFetch(ctx, "bob", func(context.Context) ([]string, error) {
-		calls++
-		return []string{"staff"}, nil
-	})
-	require.Error(t, err, "an unpersisted fetch must surface the write error, not pose as cached")
-	assert.Nil(t, teams)
-	assert.Equal(t, 1, calls, "the miss path runs fetch before the failing Set")
-	assert.ErrorContains(t, err, "teamcache set")
 }

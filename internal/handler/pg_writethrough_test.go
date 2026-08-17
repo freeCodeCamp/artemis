@@ -43,8 +43,6 @@ func TestDeployFinalize_PGWriteThrough(t *testing.T) {
 	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
 	idx := &fakeIndex{}
 	h.Index = idx
-	ob := &fakeOutbox{}
-	h.Outbox = ob
 
 	deployID := "20260420-141522-abc1234"
 	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("hi")
@@ -63,7 +61,6 @@ func TestDeployFinalize_PGWriteThrough(t *testing.T) {
 
 	assert.Equal(t, []string{"www.freecode.camp/" + deployID + "/preview"}, idx.finalized,
 		"finalize must index deploy+alias+event transactionally under the dirname key")
-	assert.Empty(t, ob.sites, "tx path owns the outbox event; no duplicate direct emit")
 
 	var wantBytes int64
 	for k, v := range store.objects {
@@ -129,8 +126,6 @@ func TestSitePromote_PGWriteThrough(t *testing.T) {
 	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
 	idx := &fakeIndex{}
 	h.Index = idx
-	ob := &fakeOutbox{}
-	h.Outbox = ob
 
 	deployID := "20260420-141522-abc1234"
 	store.objects["www.freecode.camp/deploys/"+deployID+"/index.html"] = []byte("hi")
@@ -145,7 +140,6 @@ func TestSitePromote_PGWriteThrough(t *testing.T) {
 
 	assert.Equal(t, []string{"www.freecode.camp/production/" + deployID}, idx.aliased,
 		"promote must upsert the PG alias row so the GC planner sees the new pin")
-	assert.Empty(t, ob.sites)
 }
 
 func TestSiteRollback_PGWriteThrough(t *testing.T) {
