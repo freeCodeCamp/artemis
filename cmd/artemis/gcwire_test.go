@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/stretchr/testify/assert"
@@ -89,21 +91,52 @@ func TestNewLiveAliasReader_KeyMatchesWritePath(t *testing.T) {
 	getter := &recordingAliasGetter{values: map[string]string{
 		"www.freecode.camp/production": "20260101-000000-abc1234",
 	}}
-	read, err := newLiveAliasReader(getter, prodFmt)
+	read, err := newLiveAliasReader(getter, domainFormat, prodFmt)
 	require.NoError(t, err)
 
-	live, err := read(context.Background(), "www")
+	live, err := read(context.Background(), "www.freecode.camp")
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"www.freecode.camp/production"}, getter.keys,
-		"GC live re-read must query the write-path key (ReplaceAll <site>), not a slash-derived tail")
+		"both call sites pass the storage dirname the sweep enumerates, so substituting it into "+
+			"<site> renders www.freecode.camp.freecode.camp/production and 404s forever")
 	_, ok := live["20260101-000000-abc1234"]
 	assert.True(t, ok, "the live deploy behind the prod alias must be detected by the pre-delete safety net")
 }
 
+func TestNewLiveAliasReader_ReadsTheSameKeyspaceTheSweepEnumerates(t *testing.T) {
+	tmpl, err := handler.NewDeployPrefixTemplate(domainFormat)
+	require.NoError(t, err)
+	layout, err := newGCLayout(domainFormat, "_trash/")
+	require.NoError(t, err)
+
+	getter := &recordingAliasGetter{}
+	read, err := newLiveAliasReader(getter, domainFormat,
+		"<site>.freecode.camp/production", "<site>.freecode.camp/preview")
+	require.NoError(t, err)
+
+	dirname := tmpl.SiteDirname("test")
+	_, err = read(context.Background(), dirname)
+	require.NoError(t, err)
+
+	require.Len(t, getter.keys, 2)
+	for _, k := range getter.keys {
+		assert.True(t, strings.HasPrefix(k, layout.sitePrefix(dirname)[:len(dirname)+1]),
+			"alias key %q must sit under the same site directory the sweep lists, or the "+
+				"pre-delete safety net reads a prefix no alias was ever written to", k)
+	}
+}
+
 func TestNewLiveAliasReader_RequiresSiteToken(t *testing.T) {
-	_, err := newLiveAliasReader(&recordingAliasGetter{}, "production/only")
+	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat, "production/only")
 	require.Error(t, err, "an alias format missing <site> must fail boot, not silently mis-derive keys")
+}
+
+func TestNewLiveAliasReader_RejectsASiteSegmentTheDeployPrefixDoesNotShare(t *testing.T) {
+	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat, "<site>.preview.freecode.camp/production")
+	require.Error(t, err,
+		"an alias format whose site segment differs from the deploy prefix's cannot be reached from a "+
+			"dirname; boot must refuse rather than 404 silently for every site")
 }
 
 func TestOpenRepoQueue_RequiresDatabase(t *testing.T) {

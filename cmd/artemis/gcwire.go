@@ -130,18 +130,41 @@ type aliasGetter interface {
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 }
 
-func newLiveAliasReader(getter aliasGetter, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
-	fmts := make([]string, 0, len(formats))
+func siteSegment(format string) (string, error) {
+	slash := strings.IndexByte(format, '/')
+	if slash < 0 {
+		return "", fmt.Errorf("key format %q must contain '/' after the site segment", format)
+	}
+	return format[:slash], nil
+}
+
+func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+	deploySeg, err := siteSegment(deployFormat)
+	if err != nil {
+		return nil, fmt.Errorf("DEPLOY_PREFIX_FORMAT: %w", err)
+	}
+	tails := make([]string, 0, len(formats))
 	for _, f := range formats {
 		if !strings.Contains(f, "<site>") {
 			return nil, fmt.Errorf("alias key format %q must contain <site>", f)
 		}
-		fmts = append(fmts, f)
+		seg, err := siteSegment(f)
+		if err != nil {
+			return nil, err
+		}
+		if seg != deploySeg {
+			return nil, fmt.Errorf(
+				"alias key format %q has site segment %q but DEPLOY_PREFIX_FORMAT %q has %q: "+
+					"the GC sweep enumerates storage dirnames rendered from the deploy prefix, so an alias "+
+					"key under a different site segment is unreachable and would 404 for every site",
+				f, seg, deployFormat, deploySeg)
+		}
+		tails = append(tails, f[len(seg)+1:])
 	}
-	return func(ctx context.Context, site string) (map[string]struct{}, error) {
+	return func(ctx context.Context, dirname string) (map[string]struct{}, error) {
 		out := map[string]struct{}{}
-		for _, f := range fmts {
-			v, err := getter.GetAlias(ctx, strings.ReplaceAll(f, "<site>", site))
+		for _, tail := range tails {
+			v, err := getter.GetAlias(ctx, dirname+"/"+tail)
 			if err != nil {
 				if r2.IsNotFound(err) {
 					continue
@@ -177,7 +200,8 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 	if err != nil {
 		return nil, err
 	}
-	liveAliases, err := newLiveAliasReader(r2c, cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+	liveAliases, err := newLiveAliasReader(r2c, cfg.DeployPrefixFormat,
+		cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
 	if err != nil {
 		return nil, err
 	}
