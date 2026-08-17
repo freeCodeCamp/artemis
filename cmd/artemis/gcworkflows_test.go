@@ -193,10 +193,16 @@ func TestGCWorkflowDefs(t *testing.T) {
 	gcSite := byName[worker.WorkflowGCSite]
 	assert.Equal(t, worker.ConcurrencyKeySite, gcSite.ConcurrencyKey, "gc-site serialized per site (V3)")
 	assert.Equal(t, []string{pg.TopicSiteChanged}, gcSite.EventTriggers, "gc-site triggered by the outbox topic")
+	assert.GreaterOrEqual(t, gcSite.ExecutionTimeout, 10*time.Minute,
+		"probed live: gc-site's Step.timeout is EMPTY while drift-detect carries 1800s, so gc-site runs "+
+			"on the engine default; a blast-cap-sized run moves bytes object-by-object and a mid-run kill "+
+			"strands tombstoned deploys at their prefixes until the next site.changed event")
 
 	purge := byName[worker.WorkflowTombstonePurge]
 	assert.Empty(t, purge.ConcurrencyKey, "tombstone-purge is global")
 	assert.NotEmpty(t, purge.Cron, "tombstone-purge is scheduled")
+	assert.GreaterOrEqual(t, purge.ExecutionTimeout, 10*time.Minute,
+		"same gap as gc-site: the only hard-deleting job had no explicit budget either")
 
 	drift := byName[workflowDriftDetect]
 	assert.NotEmpty(t, drift.Cron, "drift-detect is cron-triggered")

@@ -68,6 +68,7 @@ const (
 	cronTombstonePurge   = "0 3 * * *"
 	cronDriftDetect      = "0 4 * * *"
 	driftDetectRunBudget = 30 * time.Minute
+	gcRunBudget          = 30 * time.Minute
 	relayInterval        = 5 * time.Second
 )
 
@@ -120,9 +121,10 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			})),
 		},
 		{
-			Name:           worker.WorkflowGCSite,
-			ConcurrencyKey: worker.ConcurrencyKeySite,
-			EventTriggers:  []string{pg.TopicSiteChanged},
+			Name:             worker.WorkflowGCSite,
+			ConcurrencyKey:   worker.ConcurrencyKeySite,
+			EventTriggers:    []string{pg.TopicSiteChanged},
+			ExecutionTimeout: gcRunBudget,
 			Handler: observeWorkflow(worker.WorkflowGCSite, func(ctx context.Context, input map[string]any) error {
 				site, err := siteFromInput(input)
 				if err != nil {
@@ -136,8 +138,9 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			}),
 		},
 		{
-			Name: worker.WorkflowTombstonePurge,
-			Cron: []string{cronTombstonePurge},
+			Name:             worker.WorkflowTombstonePurge,
+			Cron:             []string{cronTombstonePurge},
+			ExecutionTimeout: gcRunBudget,
 			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
 				if _, err := gcw.Purge.Run(ctx, dryRun); err != nil {
 					observability.CaptureBackground("tombstone.purge", err)
