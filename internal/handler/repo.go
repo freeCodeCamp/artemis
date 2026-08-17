@@ -182,7 +182,7 @@ func (h *Handlers) RepoCreate(w http.ResponseWriter, r *http.Request) {
 				"a request for this repo name is already pending or active")
 			return
 		}
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.create", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.create", err)
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.create.queued", "id", created.ID, "name", req.Name, "owner", h.RepoOrg, "visibility", string(vis))
@@ -244,7 +244,7 @@ func (h *Handlers) ReposList(w http.ResponseWriter, r *http.Request) {
 
 	all, err := h.Repos.List(r.Context())
 	if err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.list", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.list", err)
 		return
 	}
 	seesActors := h.callerSeesActors(r)
@@ -278,7 +278,7 @@ func (h *Handlers) RepoGet(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
 			return
 		}
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.get", err)
 		return
 	}
 	row := toRepoRow(req)
@@ -323,7 +323,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		// reconcile; otherwise it is genuinely resolved (PR freeCodeCamp/artemis#3, #7).
 		cur, gErr := h.Repos.Get(r.Context(), id)
 		if gErr != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", gErr)
+			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.get", gErr)
 			return
 		}
 		if cur.Status != reporequest.StatusApproved {
@@ -334,7 +334,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		approved, resume = cur, true
 		slog.WarnContext(r.Context(), "repo.approve.resume_stranded_approved", "id", id)
 	default:
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.approve", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.approve", err)
 		return
 	}
 
@@ -390,7 +390,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 		}
 		failed, mErr := h.Repos.MarkFailed(durCtx, id, msg)
 		if mErr != nil {
-			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markfailed", mErr)
+			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.markfailed", mErr)
 			return
 		}
 		h.auditFromScope(durCtx, "repo.approve", "approved_failed", map[string]any{"id": id, "name": approved.Name})
@@ -400,7 +400,7 @@ func (h *Handlers) RepoApprove(w http.ResponseWriter, r *http.Request) {
 
 	active, mErr := h.Repos.MarkActive(durCtx, id, created.URL)
 	if mErr != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.markactive", mErr)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.markactive", mErr)
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.approve.created", "id", id, "name", active.Name, "url", created.URL)
@@ -445,7 +445,7 @@ func (h *Handlers) RepoReject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "already_resolved",
 				"request was already resolved by another admin")
 		default:
-			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.reject", err)
+			writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.reject", err)
 		}
 		return
 	}
@@ -465,7 +465,7 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
 			return
 		}
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.get", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.get", err)
 		return
 	}
 	if err := h.Repos.Delete(r.Context(), id); err != nil {
@@ -473,7 +473,7 @@ func (h *Handlers) RepoDelete(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "repo request not found")
 			return
 		}
-		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "valkey.repo.delete", err)
+		writeUpstreamError(w, r, http.StatusBadGateway, "repo_store_failed", "pg.repo.delete", err)
 		return
 	}
 	slog.InfoContext(r.Context(), "repo.delete.removed", "id", id, "name", row.Name)
