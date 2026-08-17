@@ -52,8 +52,8 @@ func bootCfg(t *testing.T, dsn, valkeyAddr string, port int) *config.Config {
 	cfg.GitHub.MembershipCacheTTL = time.Minute
 	cfg.JWT.SigningKey = "0123456789abcdef0123456789abcdef"
 	cfg.JWT.TTL = 15 * time.Minute
-	cfg.Aliases.ProductionKeyFormat = "<site>/production"
-	cfg.Aliases.PreviewKeyFormat = "<site>/preview"
+	cfg.Aliases.ProductionKeyFormat = "<site>.example.test/production"
+	cfg.Aliases.PreviewKeyFormat = "<site>.example.test/preview"
 	cfg.Cleanup.TrashPrefix = "_trash/"
 	cfg.Cleanup.RecoveryDays = 7
 	cfg.Cleanup.Grace = 72 * time.Hour
@@ -332,6 +332,8 @@ func TestRun_BootsFromEnvAndExitsOnSigterm(t *testing.T) {
 	t.Setenv("GH_CLIENT_ID", "cid")
 	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>.example.test/deploys/<ts>-<sha>/")
+	t.Setenv("ALIAS_PRODUCTION_KEY_FORMAT", "<site>.example.test/production")
+	t.Setenv("ALIAS_PREVIEW_KEY_FORMAT", "<site>.example.test/preview")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("SENTRY_DSN", "https://publickey@o0.ingest.sentry.io/0")
 	t.Setenv("ENVIRONMENT", "test")
