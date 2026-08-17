@@ -41,10 +41,20 @@ import (
 
 const apiRequestTimeout = 60 * time.Second
 
+// uploadRequestTimeout bounds the JWT-guarded upload/finalize routes,
+// which previously ran with no deadline at all. Sized for the 100 MiB
+// default body cap over a slow residential uplink, not for the 60s
+// interactive budget the bearer routes get.
+const uploadRequestTimeout = 10 * time.Minute
+
 // New returns a chi router fully wired with the Handlers' endpoints +
 // the standard middleware chain (Sentry → RequestID → AccessLog →
 // Recoverer).
 func New(h *handler.Handlers) http.Handler {
+	return newWithUploadTimeout(h, uploadRequestTimeout)
+}
+
+func newWithUploadTimeout(h *handler.Handlers, uploadTimeout time.Duration) http.Handler {
 	r := chi.NewRouter()
 	// Mount the Sentry request middleware only when a client is actually
 	// configured (Init ran with a DSN). When Sentry is disabled this adds
@@ -101,6 +111,7 @@ func New(h *handler.Handlers) http.Handler {
 		// Deploy-session JWT branch — scoped to (login, site, deployId).
 		r.Group(func(r chi.Router) {
 			r.Use(h.RequireDeployJWT)
+			r.Use(middleware.Timeout(uploadTimeout))
 			r.Put("/deploy/{deployId}/upload", h.DeployUpload)
 			r.Post("/deploy/{deployId}/finalize", h.DeployFinalize)
 		})
