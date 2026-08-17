@@ -116,14 +116,17 @@ type Handlers struct {
 	R2                 R2Store
 	AliasProductionFmt string // e.g. "<site>/production"
 	AliasPreviewFmt    string // e.g. "<site>/preview"
-	Tombstones         TombstoneStore
-	TrashPrefixBase    string // e.g. "_trash/"
-	Trash              TrashStore
-	TrashRecovery      time.Duration
-	Outbox             SiteChangeEmitter
-	Index              DeployIndexWriter
-	Locker             SiteLocker
-	Audit              AuditStore
+
+	PublicProductionURLFmt string // e.g. "https://<site>.freecode.camp"
+	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
+	Tombstones             TombstoneStore
+	TrashPrefixBase        string // e.g. "_trash/"
+	Trash                  TrashStore
+	TrashRecovery          time.Duration
+	Outbox                 SiteChangeEmitter
+	Index                  DeployIndexWriter
+	Locker                 SiteLocker
+	Audit                  AuditStore
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate
 	// UploadMaxBytes caps a single PUT /upload body size. 0 or
@@ -149,7 +152,6 @@ type Handlers struct {
 	AuditReadAuthzTeam   string
 	NewDeployID          func(sha string) string
 	Now                  func() time.Time
-	PublicURLForSite     func(site, mode string) string // e.g. preview → "https://www.preview.freecode.camp"
 
 	readyzValkey probeState
 	readyzR2     probeState

@@ -372,13 +372,10 @@ func (h *Handlers) aliasKey(site, mode string) string {
 
 // publicURL returns the user-visible URL for a finalized deploy.
 func (h *Handlers) publicURL(site, mode string) string {
-	if h.PublicURLForSite != nil {
-		return h.PublicURLForSite(site, mode)
-	}
 	if mode == "production" {
-		return "https://" + site + ".freecode.camp"
+		return strings.ReplaceAll(h.PublicProductionURLFmt, "<site>", site)
 	}
-	return "https://" + site + ".preview.freecode.camp"
+	return strings.ReplaceAll(h.PublicPreviewURLFmt, "<site>", site)
 }
 
 // normalizeMode validates and normalizes finalize/promote/rollback `mode` arg.

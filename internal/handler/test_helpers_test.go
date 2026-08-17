@@ -501,13 +501,9 @@ func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store R2Store) (*H
 		NewDeployID: func(sha string) string {
 			return "20260420-141522-" + sha[:min(7, len(sha))]
 		},
-		Now: time.Now,
-		PublicURLForSite: func(site, mode string) string {
-			if mode == "production" {
-				return "https://" + site + ".freecode.camp"
-			}
-			return "https://" + site + ".preview.freecode.camp"
-		},
+		Now:                    time.Now,
+		PublicProductionURLFmt: "https://<site>.freecode.camp",
+		PublicPreviewURLFmt:    "https://<site>.preview.freecode.camp",
 	}
 	return h, jwt
 }
