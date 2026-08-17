@@ -200,6 +200,7 @@ func (c *GitHubClient) fetchUser(ctx context.Context, cacheKey, token string) (s
 	}
 
 	c.mu.Lock()
+	pruneMap(c.userCache, func(e userCacheEntry) bool { return c.expiredEntry(e.expires) }, maxCacheEntries)
 	c.userCache[cacheKey] = userCacheEntry{
 		login:   u.Login,
 		expires: c.now().Add(c.cfg.CacheTTL),
@@ -222,12 +223,39 @@ func hashToken(token string) string {
 // configured TTL and 30s.
 const negCacheCap = 30 * time.Second
 
+// maxCacheEntries bounds each in-process cache map. Entries were only
+// ever logically expired, never deleted, so every distinct token and
+// (user, team) pair accumulated for the life of the process.
+const maxCacheEntries = 4096
+
+func pruneMap[K comparable, V any](m map[K]V, expired func(V) bool, limit int) {
+	if len(m) < limit {
+		return
+	}
+	for k, v := range m {
+		if expired(v) {
+			delete(m, k)
+		}
+	}
+	for k := range m {
+		if len(m) < limit {
+			break
+		}
+		delete(m, k)
+	}
+}
+
+func (c *GitHubClient) expiredEntry(expires time.Time) bool {
+	return !expires.After(c.now())
+}
+
 func (c *GitHubClient) cacheNegative(key string, err error) {
 	ttl := c.cfg.CacheTTL
 	if ttl > negCacheCap {
 		ttl = negCacheCap
 	}
 	c.mu.Lock()
+	pruneMap(c.userCache, func(e userCacheEntry) bool { return c.expiredEntry(e.expires) }, maxCacheEntries)
 	c.userCache[key] = userCacheEntry{
 		err:     err,
 		expires: c.now().Add(ttl),
@@ -316,6 +344,7 @@ func (c *GitHubClient) fetchTeamMembership(ctx context.Context, token, user, tea
 	}
 
 	c.mu.Lock()
+	pruneMap(c.teamCache, func(e teamCacheEntry) bool { return c.expiredEntry(e.expires) }, maxCacheEntries)
 	c.teamCache[key] = teamCacheEntry{
 		member:  member,
 		expires: c.now().Add(c.cfg.CacheTTL),
@@ -383,6 +412,7 @@ func (c *GitHubClient) userTeamsThroughDurableCache(ctx context.Context, cacheKe
 
 func (c *GitHubClient) storeUserTeams(cacheKey string, teams []string) {
 	c.mu.Lock()
+	pruneMap(c.userTeamsCache, func(e userTeamsCacheEntry) bool { return c.expiredEntry(e.expires) }, maxCacheEntries)
 	c.userTeamsCache[cacheKey] = userTeamsCacheEntry{
 		teams:   append([]string(nil), teams...),
 		expires: c.now().Add(c.cfg.CacheTTL),
@@ -453,12 +483,7 @@ func (c *GitHubClient) fetchUserTeams(ctx context.Context, cacheKey, token strin
 		page++
 	}
 
-	c.mu.Lock()
-	c.userTeamsCache[cacheKey] = userTeamsCacheEntry{
-		teams:   append([]string(nil), teams...),
-		expires: c.now().Add(c.cfg.CacheTTL),
-	}
-	c.mu.Unlock()
+	c.storeUserTeams(cacheKey, teams)
 
 	return teams, nil
 }
