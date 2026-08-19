@@ -3,10 +3,12 @@ package gc
 import (
 	"fmt"
 	"sort"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type Plan struct {
-	Site       string
+	Site       sitekey.Dirname
 	Delete     []Deploy
 	TotalBytes int64
 	Aborted    bool
@@ -35,7 +37,7 @@ func olderDeploy(a, b Deploy) bool {
 
 func olderID(a, b string) bool { return a < b }
 
-func PlanSite(site string, in RetainInput, p Policy, blastCap int) Plan {
+func PlanSite(site sitekey.Dirname, in RetainInput, p Policy, blastCap int) Plan {
 	_, del := Retain(in, p)
 	del = append(del, in.Expired...)
 

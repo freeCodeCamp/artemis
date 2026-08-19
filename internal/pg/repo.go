@@ -11,6 +11,8 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type Repo struct {
@@ -21,7 +23,7 @@ func NewRepo(db *DB) *Repo {
 	return &Repo{pool: db.Pool}
 }
 
-func (r *Repo) UpsertDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64, hasMarker bool, state string) error {
+func (r *Repo) UpsertDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time, bytes int64, hasMarker bool, state string) error {
 	if state == "" {
 		state = "active"
 	}
@@ -39,7 +41,7 @@ func (r *Repo) UpsertDeploy(ctx context.Context, site, id string, mtime time.Tim
 	return nil
 }
 
-func (r *Repo) ReindexDeploy(ctx context.Context, site, id string, mtime time.Time, hasMarker bool) (bool, error) {
+func (r *Repo) ReindexDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time, hasMarker bool) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
 		SELECT $1, $2, $3, 0, $4, 'active'
@@ -54,7 +56,7 @@ func (r *Repo) ReindexDeploy(ctx context.Context, site, id string, mtime time.Ti
 	return tag.RowsAffected() > 0, nil
 }
 
-func (r *Repo) UpsertAlias(ctx context.Context, site, name, deployID string, updatedAt time.Time) error {
+func (r *Repo) UpsertAlias(ctx context.Context, site sitekey.Dirname, name, deployID string, updatedAt time.Time) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO aliases (site, name, deploy_id, updated_at)
 		VALUES ($1, $2, $3, $4)
@@ -67,7 +69,7 @@ func (r *Repo) UpsertAlias(ctx context.Context, site, name, deployID string, upd
 	return nil
 }
 
-func (r *Repo) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, error) {
+func (r *Repo) DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]gc.Deploy, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, mtime, bytes, has_marker, alias_released_at FROM deploys WHERE site = $1 AND state = 'active'`, site)
 	if err != nil {
@@ -99,7 +101,7 @@ func (r *Repo) CountDeploys(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func (r *Repo) KnownSiteDirnames(ctx context.Context) ([]string, error) {
+func (r *Repo) KnownSiteDirnames(ctx context.Context) ([]sitekey.Dirname, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT site FROM deploys
 		UNION SELECT site FROM aliases
@@ -110,9 +112,9 @@ func (r *Repo) KnownSiteDirnames(ctx context.Context) ([]string, error) {
 	}
 	defer rows.Close()
 
-	var out []string
+	var out []sitekey.Dirname
 	for rows.Next() {
-		var site string
+		var site sitekey.Dirname
 		if err := rows.Scan(&site); err != nil {
 			return nil, fmt.Errorf("pg scan site dirname: %w", err)
 		}
@@ -121,7 +123,7 @@ func (r *Repo) KnownSiteDirnames(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-func (r *Repo) AliasTargets(ctx context.Context, site string) (map[string]struct{}, time.Time, error) {
+func (r *Repo) AliasTargets(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT deploy_id, updated_at FROM aliases WHERE site = $1`, site)
 	if err != nil {
@@ -145,7 +147,7 @@ func (r *Repo) AliasTargets(ctx context.Context, site string) (map[string]struct
 	return targets, last, rows.Err()
 }
 
-func (r *Repo) Tombstone(ctx context.Context, site string, d gc.Deploy) error {
+func (r *Repo) Tombstone(ctx context.Context, site sitekey.Dirname, d gc.Deploy) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO tombstones (site, id, bytes) VALUES ($1, $2, $3)
@@ -160,7 +162,7 @@ func (r *Repo) Tombstone(ctx context.Context, site string, d gc.Deploy) error {
 	})
 }
 
-func (r *Repo) RecordTombstone(ctx context.Context, site, id string, bytes int64) error {
+func (r *Repo) RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO tombstones (site, id, bytes) VALUES ($1, $2, $3)
@@ -175,7 +177,7 @@ func (r *Repo) RecordTombstone(ctx context.Context, site, id string, bytes int64
 	})
 }
 
-func (r *Repo) RecordSitePurge(ctx context.Context, site string) error {
+func (r *Repo) RecordSitePurge(ctx context.Context, site sitekey.Dirname) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO tombstones (site, id, bytes) VALUES ($1, '', 0)
@@ -211,14 +213,14 @@ func (r *Repo) ExpiredTombstones(ctx context.Context, before time.Time) ([]gc.To
 	return out, rows.Err()
 }
 
-func (r *Repo) PruneDeploy(ctx context.Context, site, id string) error {
+func (r *Repo) PruneDeploy(ctx context.Context, site sitekey.Dirname, id string) error {
 	if _, err := r.pool.Exec(ctx, `DELETE FROM deploys WHERE site = $1 AND id = $2`, site, id); err != nil {
 		return fmt.Errorf("pg prune deploy %s/%s: %w", site, id, err)
 	}
 	return nil
 }
 
-func (r *Repo) ClearTombstone(ctx context.Context, site, id string) (bool, error) {
+func (r *Repo) ClearTombstone(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM tombstones WHERE site = $1 AND id = $2`, site, id)
 	if err != nil {
@@ -227,7 +229,7 @@ func (r *Repo) ClearTombstone(ctx context.Context, site, id string) (bool, error
 	return tag.RowsAffected() > 0, nil
 }
 
-func (r *Repo) TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error) {
+func (r *Repo) TombstonesForSite(ctx context.Context, site sitekey.Dirname) ([]gc.Tombstone, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT site, id, trashed_at, bytes FROM tombstones WHERE site = $1 ORDER BY trashed_at DESC`, site)
 	if err != nil {
@@ -246,7 +248,7 @@ func (r *Repo) TombstonesForSite(ctx context.Context, site string) ([]gc.Tombsto
 	return out, rows.Err()
 }
 
-func (r *Repo) RestoreDeploy(ctx context.Context, site, id string, restoredMtime time.Time, bytes int64) error {
+func (r *Repo) RestoreDeploy(ctx context.Context, site sitekey.Dirname, id string, restoredMtime time.Time, bytes int64) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		var existed string
 		scanErr := tx.QueryRow(ctx,

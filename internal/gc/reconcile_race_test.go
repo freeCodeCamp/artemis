@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type racingLister struct {
@@ -42,7 +44,7 @@ type racingStore struct {
 	pruned           []string
 }
 
-func (s *racingStore) DeploysForSite(context.Context, string) ([]Deploy, error) {
+func (s *racingStore) DeploysForSite(context.Context, sitekey.Dirname) ([]Deploy, error) {
 	s.deploysCalls++
 	if s.deploysCalls == s.deploysErrOnCall {
 		return nil, errRacingPG
@@ -54,7 +56,7 @@ func (s *racingStore) DeploysForSite(context.Context, string) ([]Deploy, error) 
 	return out, nil
 }
 
-func (s *racingStore) AliasTargets(context.Context, string) (map[string]struct{}, time.Time, error) {
+func (s *racingStore) AliasTargets(context.Context, sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	s.aliasCalls++
 	if s.aliasCalls == s.aliasErrOnCall {
 		return nil, time.Time{}, errRacingPG
@@ -62,7 +64,7 @@ func (s *racingStore) AliasTargets(context.Context, string) (map[string]struct{}
 	return s.aliases, time.Time{}, nil
 }
 
-func (s *racingStore) ReindexDeploy(_ context.Context, _, id string, mtime time.Time, hasMarker bool) (bool, error) {
+func (s *racingStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, id string, mtime time.Time, hasMarker bool) (bool, error) {
 	if s.tombstones[id] {
 		return false, nil
 	}
@@ -71,14 +73,14 @@ func (s *racingStore) ReindexDeploy(_ context.Context, _, id string, mtime time.
 	return true, nil
 }
 
-func (s *racingStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
+func (s *racingStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	s.tombstones[id] = true
 	delete(s.deploys, id)
 	s.tombstoned = append(s.tombstoned, id)
 	return nil
 }
 
-func (s *racingStore) PruneDeploy(_ context.Context, _, id string) error {
+func (s *racingStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, id string) error {
 	delete(s.deploys, id)
 	s.pruned = append(s.pruned, id)
 	return nil
@@ -89,7 +91,7 @@ type racingSession struct {
 	locks  int
 }
 
-func (s *racingSession) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+func (s *racingSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
 	s.locks++
 	if s.inject != nil {
 		run := s.inject
@@ -551,7 +553,7 @@ func (m *ctxProbeMover) MovePrefix(ctx context.Context, src, dst string) (int, e
 
 type ctxProbeAuditor struct{ seenErrs []error }
 
-func (a *ctxProbeAuditor) AuditTombstone(ctx context.Context, _, _ string) error {
+func (a *ctxProbeAuditor) AuditTombstone(ctx context.Context, _ sitekey.Dirname, _ string) error {
 	a.seenErrs = append(a.seenErrs, ctx.Err())
 	return nil
 }
@@ -621,7 +623,7 @@ func TestReconcile_DeferredMoveIsRetriedByTheNextRun(t *testing.T) {
 
 type tombstoneFailStore struct{ *racingStore }
 
-func (s *tombstoneFailStore) RecordTombstone(context.Context, string, string, int64) error {
+func (s *tombstoneFailStore) RecordTombstone(context.Context, sitekey.Dirname, string, int64) error {
 	return errRacingPG
 }
 
@@ -630,7 +632,7 @@ func withLiveAliases(rc *Reconciler, ids ...string) *Reconciler {
 	for _, id := range ids {
 		live[id] = struct{}{}
 	}
-	rc.LiveAliases = func(context.Context, string) (map[string]struct{}, error) { return live, nil }
+	rc.LiveAliases = func(context.Context, sitekey.Dirname) (map[string]struct{}, error) { return live, nil }
 	return rc
 }
 
@@ -670,7 +672,7 @@ func TestReconcile_LiveAliasReadFailureAbortsBeforeTombstone(t *testing.T) {
 	mover := &fakeMover{}
 
 	rc := racingReconciler(lister, store, mover, &racingSession{})
-	rc.LiveAliases = func(context.Context, string) (map[string]struct{}, error) { return nil, errRacingR2 }
+	rc.LiveAliases = func(context.Context, sitekey.Dirname) (map[string]struct{}, error) { return nil, errRacingR2 }
 
 	_, err := rc.ReconcileSite(context.Background(), "www", false)
 
@@ -684,7 +686,7 @@ func TestReconcile_LiveAliasReadFailureAbortsBeforePrune(t *testing.T) {
 	lister := keepAlive(store, &racingLister{perID: map[string][]string{"www/deploys/ghost/": {}}})
 
 	rc := racingReconciler(lister, store, &fakeMover{}, &racingSession{})
-	rc.LiveAliases = func(context.Context, string) (map[string]struct{}, error) { return nil, errRacingR2 }
+	rc.LiveAliases = func(context.Context, sitekey.Dirname) (map[string]struct{}, error) { return nil, errRacingR2 }
 
 	_, err := rc.ReconcileSite(context.Background(), "www", false)
 
@@ -752,7 +754,7 @@ func (l sessionLocker) NewLockSession(context.Context) (LockSession, error) { re
 
 type unlockFailSession struct{ err error }
 
-func (s *unlockFailSession) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+func (s *unlockFailSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
 	if err := fn(); err != nil {
 		return err
 	}
@@ -783,7 +785,7 @@ func TestReconcile_UnlockFailureStillRecordsTheCompletedRepair(t *testing.T) {
 
 type pruneRecordingAuditor struct{ ids []string }
 
-func (a *pruneRecordingAuditor) AuditTombstone(_ context.Context, _, id string) error {
+func (a *pruneRecordingAuditor) AuditTombstone(_ context.Context, _ sitekey.Dirname, id string) error {
 	a.ids = append(a.ids, id)
 	return nil
 }

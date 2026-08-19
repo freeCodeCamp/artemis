@@ -101,5 +101,5 @@ func (h *Handlers) trashPrefix(site, id string) string {
 	if base == "" {
 		base = "_trash/"
 	}
-	return base + h.DeployPrefix.SiteDirname(site) + "/" + id + "/"
+	return base + string(h.DeployPrefix.SiteDirname(site)) + "/" + id + "/"
 }

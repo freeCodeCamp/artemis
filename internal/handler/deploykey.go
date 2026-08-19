@@ -3,6 +3,8 @@ package handler
 import (
 	"fmt"
 	"strings"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // DeployPrefixTemplate is the parsed form of `DEPLOY_PREFIX_FORMAT`.
@@ -55,32 +57,33 @@ func (t DeployPrefixTemplate) SitePrefix(site string) string {
 	return p
 }
 
-func (t DeployPrefixTemplate) SiteDirname(site string) string {
+func (t DeployPrefixTemplate) SiteDirname(site string) sitekey.Dirname {
 	p := t.SitePrefix(site)
 	if i := strings.IndexByte(p, '/'); i >= 0 {
-		return p[:i]
+		return sitekey.Dirname(p[:i])
 	}
-	return p
+	return sitekey.Dirname(p)
 }
 
 // SiteSlug inverts SiteDirname: it recovers the registry slug from the
 // storage dirname that this template renders for it. ok is false when
 // dirname carries neither the prefix nor the suffix the site segment
 // adds, i.e. nothing this template could have produced.
-func (t DeployPrefixTemplate) SiteSlug(dirname string) (string, bool) {
-	pattern := t.SiteDirname(siteToken)
+func (t DeployPrefixTemplate) SiteSlug(dirname sitekey.Dirname) (string, bool) {
+	pattern := string(t.SiteDirname(siteToken))
 	i := strings.Index(pattern, siteToken)
 	if i < 0 {
 		return "", false
 	}
 	prefix, suffix := pattern[:i], pattern[i+len(siteToken):]
-	if len(dirname) <= len(prefix)+len(suffix) {
+	raw := string(dirname)
+	if len(raw) <= len(prefix)+len(suffix) {
 		return "", false
 	}
-	if !strings.HasPrefix(dirname, prefix) || !strings.HasSuffix(dirname, suffix) {
+	if !strings.HasPrefix(raw, prefix) || !strings.HasSuffix(raw, suffix) {
 		return "", false
 	}
-	return dirname[len(prefix) : len(dirname)-len(suffix)], true
+	return raw[len(prefix) : len(raw)-len(suffix)], true
 }
 
 // DeployPrefix returns the R2 key prefix for one deploy, e.g.

@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type levelCapture struct {
@@ -66,28 +68,28 @@ type fakeReconcileStore struct {
 	pruned        []string
 }
 
-func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
-	return s.deploys[site], nil
+func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
+	return s.deploys[string(site)], nil
 }
-func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ string) (map[string]struct{}, time.Time, error) {
+func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	s.aliasCalls++
 	if s.aliasesAfter != nil && s.aliasCalls >= 2 {
 		return s.aliasesAfter, time.Time{}, nil
 	}
 	return s.aliases, time.Time{}, nil
 }
-func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _, id string, _ time.Time, _ bool) (bool, error) {
+func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, id string, _ time.Time, _ bool) (bool, error) {
 	if s.tombstonedIDs[id] {
 		return false, nil
 	}
 	s.reindexed = append(s.reindexed, id)
 	return true, nil
 }
-func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
+func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	s.tombstoned = append(s.tombstoned, id)
 	return nil
 }
-func (s *fakeReconcileStore) PruneDeploy(_ context.Context, _, id string) error {
+func (s *fakeReconcileStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, id string) error {
 	s.pruned = append(s.pruned, id)
 	return nil
 }
@@ -99,10 +101,10 @@ func newReconciler(lister ReconcileLister, store ReconcileStore, mover Mover) *R
 		Mover:        mover,
 		Grace:        time.Hour,
 		BlastCap:     defaultTestBlastCap,
-		SitePrefix:   func(site string) string { return site + "/deploys/" },
-		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
-		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
-		LiveAliases:  func(context.Context, string) (map[string]struct{}, error) { return nil, nil },
+		SitePrefix:   func(site sitekey.Dirname) string { return string(site) + "/deploys/" },
+		DeployPrefix: func(site sitekey.Dirname, id string) string { return string(site) + "/deploys/" + id + "/" },
+		TrashPrefix:  func(site sitekey.Dirname, id string) string { return "_trash/" + string(site) + "/" + id + "/" },
+		LiveAliases:  func(context.Context, sitekey.Dirname) (map[string]struct{}, error) { return nil, nil },
 		Now:          func() time.Time { return testNow },
 		Locker:       passthroughLocker{},
 	}
@@ -110,7 +112,7 @@ func newReconciler(lister ReconcileLister, store ReconcileStore, mover Mover) *R
 
 type passthroughSession struct{}
 
-func (passthroughSession) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+func (passthroughSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
 	return fn()
 }
 func (passthroughSession) Close(context.Context) {}

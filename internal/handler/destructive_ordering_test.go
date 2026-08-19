@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type orderLog struct{ ops []string }
@@ -29,12 +31,12 @@ type orderTombstones struct {
 	log *orderLog
 }
 
-func (o *orderTombstones) RecordSitePurge(ctx context.Context, site string) error {
+func (o *orderTombstones) RecordSitePurge(ctx context.Context, site sitekey.Dirname) error {
 	o.log.ops = append(o.log.ops, "row")
 	return o.fakeTombstones.RecordSitePurge(ctx, site)
 }
 
-func (o *orderTombstones) RecordTombstone(ctx context.Context, site, id string, bytes int64) error {
+func (o *orderTombstones) RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error {
 	o.log.ops = append(o.log.ops, "row")
 	return o.fakeTombstones.RecordTombstone(ctx, site, id, bytes)
 }

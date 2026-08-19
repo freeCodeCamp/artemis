@@ -12,6 +12,8 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func fqdnTemplate(t *testing.T) handler.DeployPrefixTemplate {
@@ -22,27 +24,27 @@ func fqdnTemplate(t *testing.T) handler.DeployPrefixTemplate {
 }
 
 func TestResolveSweepSite_AcceptsTheStorageDirnameAsGiven(t *testing.T) {
-	known := []string{"www.freecode.camp", "test.freecode.camp"}
+	known := []sitekey.Dirname{"www.freecode.camp", "test.freecode.camp"}
 
 	got, err := resolveSweepSite(known, fqdnTemplate(t), "test.freecode.camp")
 
 	require.NoError(t, err)
-	assert.Equal(t, "test.freecode.camp", got)
+	assert.Equal(t, sitekey.Dirname("test.freecode.camp"), got)
 }
 
 func TestResolveSweepSite_MapsARegistrySlugToItsStorageDirname(t *testing.T) {
-	known := []string{"www.freecode.camp", "test.freecode.camp"}
+	known := []sitekey.Dirname{"www.freecode.camp", "test.freecode.camp"}
 
 	got, err := resolveSweepSite(known, fqdnTemplate(t), "test")
 
 	require.NoError(t, err)
-	assert.Equal(t, "test.freecode.camp", got,
+	assert.Equal(t, sitekey.Dirname("test.freecode.camp"), got,
 		"the registry slug and the storage dirname are different keyspaces, and confusing them is the "+
 			"bug that made the reconciler a no-op for months")
 }
 
 func TestResolveSweepSite_RefusesANameNeitherKeyspaceKnows(t *testing.T) {
-	known := []string{"www.freecode.camp"}
+	known := []sitekey.Dirname{"www.freecode.camp"}
 
 	_, err := resolveSweepSite(known, fqdnTemplate(t), "nope")
 
@@ -53,7 +55,7 @@ func TestResolveSweepSite_RefusesANameNeitherKeyspaceKnows(t *testing.T) {
 }
 
 func TestResolveSweepSite_RefusesAnEmptyName(t *testing.T) {
-	_, err := resolveSweepSite([]string{"www.freecode.camp"}, fqdnTemplate(t), "")
+	_, err := resolveSweepSite([]sitekey.Dirname{"www.freecode.camp"}, fqdnTemplate(t), "")
 
 	require.Error(t, err)
 }
@@ -121,8 +123,8 @@ func TestRunReconcileCLI_DryRunReportsOneSiteAndWritesNothing(t *testing.T) {
 	const site, indexed = "www", "20260101-000000-abc1234"
 	seedDriftFixture(t, dsn, site, indexed)
 
-	live := site + "/deploys/" + indexed + "/"
-	abandoned := site + "/deploys/20260102-000000-dead999/"
+	live := string(site) + "/deploys/" + indexed + "/"
+	abandoned := string(site) + "/deploys/20260102-000000-dead999/"
 	bucket := newFakeBucket(t, "artemis-test",
 		live+"index.html", live+"_artemis_meta.json", abandoned+"index.html")
 	driftReportEnv(t, dsn, bucket.server.URL)
@@ -144,8 +146,8 @@ func TestRunReconcileCLI_ApplyTrashesTheOrphanAndRecordsItsTombstone(t *testing.
 	const orphan = "20260102-000000-dead999"
 	seedDriftFixture(t, dsn, site, indexed)
 
-	live := site + "/deploys/" + indexed + "/"
-	abandoned := site + "/deploys/" + orphan + "/"
+	live := string(site) + "/deploys/" + indexed + "/"
+	abandoned := string(site) + "/deploys/" + orphan + "/"
 	bucket := newFakeBucket(t, "artemis-test",
 		live+"index.html", live+"_artemis_meta.json", abandoned+"index.html")
 	driftReportEnv(t, dsn, bucket.server.URL)
@@ -158,7 +160,7 @@ func TestRunReconcileCLI_ApplyTrashesTheOrphanAndRecordsItsTombstone(t *testing.
 	keys := bucket.snapshot()
 	assert.NotContains(t, keys, abandoned+"index.html",
 		"--apply is the destructive half: the orphan bytes must actually leave the live prefix")
-	assert.Contains(t, keys, "_trash/"+site+"/"+orphan+"/index.html",
+	assert.Contains(t, keys, "_trash/"+string(site)+"/"+orphan+"/index.html",
 		"the bytes move to trash rather than vanish, so a wrong call stays recoverable for the grace window")
 	assert.Contains(t, keys, live+"index.html",
 		"the indexed deploy is not drift and must survive a repair of its neighbour")

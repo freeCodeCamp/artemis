@@ -11,6 +11,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type Lister interface {
@@ -21,21 +23,21 @@ type Lister interface {
 }
 
 type Indexer interface {
-	UpsertDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64, hasMarker bool, state string) error
-	UpsertAlias(ctx context.Context, site, name, deployID string, updatedAt time.Time) error
+	UpsertDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time, bytes int64, hasMarker bool, state string) error
+	UpsertAlias(ctx context.Context, site sitekey.Dirname, name, deployID string, updatedAt time.Time) error
 }
 
 type Backfill struct {
 	Lister     Lister
 	Indexer    Indexer
 	Now        func() time.Time
-	SitePrefix func(dirname string) string
+	SitePrefix func(dirname sitekey.Dirname) string
 	AliasKey   func(dirname, mode string) string
 }
 
 func (b *Backfill) sitePrefix(dirname string) string {
 	if b.SitePrefix != nil {
-		return b.SitePrefix(dirname)
+		return b.SitePrefix(sitekey.Dirname(dirname))
 	}
 	return dirname + "/deploys/"
 }
@@ -109,7 +111,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 					}
 				}
 			}
-			if err := b.Indexer.UpsertDeploy(ctx, site, id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {
+			if err := b.Indexer.UpsertDeploy(ctx, sitekey.Dirname(site), id, parseDeployMtime(id, b.Now()), deployBytes, markers[id], "active"); err != nil {
 				return res, fmt.Errorf("backfill: index deploy %s/%s: %w", site, id, err)
 			}
 			res.Deploys++
@@ -127,7 +129,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 			if v == "" {
 				continue
 			}
-			if err := b.Indexer.UpsertAlias(ctx, site, mode, v, b.Now()); err != nil {
+			if err := b.Indexer.UpsertAlias(ctx, sitekey.Dirname(site), mode, v, b.Now()); err != nil {
 				return res, fmt.Errorf("backfill: index alias %s/%s: %w", site, mode, err)
 			}
 			res.Aliases++

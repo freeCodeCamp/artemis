@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type errLister struct {
@@ -30,15 +32,15 @@ type deepErrStore struct {
 	reindexed    []string
 }
 
-func (s *deepErrStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
-	return s.deploys[site], s.deploysErr
+func (s *deepErrStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
+	return s.deploys[string(site)], s.deploysErr
 }
 
-func (s *deepErrStore) AliasTargets(_ context.Context, _ string) (map[string]struct{}, time.Time, error) {
+func (s *deepErrStore) AliasTargets(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	return s.aliases, time.Time{}, s.aliasErr
 }
 
-func (s *deepErrStore) ReindexDeploy(_ context.Context, _, id string, _ time.Time, _ bool) (bool, error) {
+func (s *deepErrStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, id string, _ time.Time, _ bool) (bool, error) {
 	if s.reindexErr != nil {
 		return false, s.reindexErr
 	}
@@ -46,7 +48,7 @@ func (s *deepErrStore) ReindexDeploy(_ context.Context, _, id string, _ time.Tim
 	return true, nil
 }
 
-func (s *deepErrStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
+func (s *deepErrStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	if s.tombstoneErr != nil {
 		return s.tombstoneErr
 	}
@@ -54,7 +56,7 @@ func (s *deepErrStore) RecordTombstone(_ context.Context, _, id string, _ int64)
 	return nil
 }
 
-func (s *deepErrStore) PruneDeploy(_ context.Context, _, _ string) error { return nil }
+func (s *deepErrStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, _ string) error { return nil }
 
 func TestReconcile_ListFailureAborts(t *testing.T) {
 	lister := &errLister{err: errors.New("r2 down")}

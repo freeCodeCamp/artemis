@@ -71,7 +71,7 @@ func reclaimableSites(reports []siteDrift) []string {
 	var ranked []sited
 	for _, r := range reports {
 		if n := len(r.Reindex) + len(r.Tombstone); n > 0 {
-			ranked = append(ranked, sited{r.Site, n})
+			ranked = append(ranked, sited{string(r.Site), n})
 		}
 	}
 	sort.Slice(ranked, func(i, j int) bool {
@@ -91,7 +91,7 @@ func unreadableSites(reports []siteDrift) []string {
 	var out []string
 	for _, r := range reports {
 		if r.FailedWith != nil {
-			out = append(out, r.Site)
+			out = append(out, string(r.Site))
 		}
 	}
 	return out
@@ -102,7 +102,7 @@ func aliasedMissingSites(reports []siteDrift) ([]string, int) {
 	total := 0
 	for _, r := range reports {
 		if len(r.Aliased) > 0 {
-			sites = append(sites, r.Site)
+			sites = append(sites, string(r.Site))
 			total += len(r.Aliased)
 		}
 	}

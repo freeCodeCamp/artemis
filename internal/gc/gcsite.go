@@ -5,18 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const destructiveMoveTimeout = 10 * time.Minute
 
 type Store interface {
-	DeploysForSite(ctx context.Context, site string) ([]Deploy, error)
-	AliasTargets(ctx context.Context, site string) (targets map[string]struct{}, lastChange time.Time, err error)
-	Tombstone(ctx context.Context, site string, d Deploy) error
+	DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]Deploy, error)
+	AliasTargets(ctx context.Context, site sitekey.Dirname) (targets map[string]struct{}, lastChange time.Time, err error)
+	Tombstone(ctx context.Context, site sitekey.Dirname, d Deploy) error
 }
 
 type PendingSource interface {
-	ExpiredPendingDeploys(ctx context.Context, site string, before time.Time) ([]Deploy, error)
+	ExpiredPendingDeploys(ctx context.Context, site sitekey.Dirname, before time.Time) ([]Deploy, error)
 }
 
 type Mover interface {
@@ -28,11 +30,11 @@ type Locker interface {
 }
 
 type GCAuditor interface {
-	AuditTombstone(ctx context.Context, site, id string) error
+	AuditTombstone(ctx context.Context, site sitekey.Dirname, id string) error
 }
 
 type LockSession interface {
-	WithSiteLock(ctx context.Context, site string, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
 	Close(ctx context.Context)
 }
 
@@ -42,16 +44,16 @@ type SiteGC struct {
 	Locker       Locker
 	Policy       Policy
 	BlastCap     int
-	DeployPrefix func(site, id string) string
-	TrashPrefix  func(site, id string) string
-	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
+	DeployPrefix func(site sitekey.Dirname, id string) string
+	TrashPrefix  func(site sitekey.Dirname, id string) string
+	LiveAliases  func(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, error)
 	Now          func() time.Time
 	Audit        GCAuditor
 	Pending      PendingSource
 }
 
 type GCResult struct {
-	Site           string
+	Site           sitekey.Dirname
 	Planned        []string
 	Tombstoned     []string
 	SkippedAliased []string
@@ -61,14 +63,14 @@ type GCResult struct {
 	DryRun         bool
 }
 
-func (g *SiteGC) expiredPending(ctx context.Context, site string) ([]Deploy, error) {
+func (g *SiteGC) expiredPending(ctx context.Context, site sitekey.Dirname) ([]Deploy, error) {
 	if g.Pending == nil {
 		return nil, nil
 	}
 	return g.Pending.ExpiredPendingDeploys(ctx, site, g.Now().Add(-g.Policy.Grace))
 }
 
-func (g *SiteGC) Run(ctx context.Context, site string, dryRun bool) (GCResult, error) {
+func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GCResult, error) {
 	res := GCResult{Site: site, DryRun: dryRun}
 
 	deploys, err := g.Store.DeploysForSite(ctx, site)

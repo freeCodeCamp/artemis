@@ -14,6 +14,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type auditRecorder interface {
@@ -46,20 +47,20 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	h.Audit = repo
 }
 
-type siteSlugFn func(dirname string) (string, bool)
+type siteSlugFn func(dirname sitekey.Dirname) (string, bool)
 
 // auditSite converts the gc keyspace (storage dirname) to the registry
 // slug every audit_log reader queries by. An unmappable dirname keeps
 // its raw value and flags the row, because audit_log is append-only:
 // a dropped row can never be repaired, an odd one can be read around.
-func auditSite(toSlug siteSlugFn, site string) (string, map[string]any) {
+func auditSite(toSlug siteSlugFn, site sitekey.Dirname) (string, map[string]any) {
 	if toSlug == nil {
-		return site, nil
+		return string(site), nil
 	}
 	slug, ok := toSlug(site)
 	if !ok {
 		captureAuditFailure("audit.site_unmapped", fmt.Errorf("audit: site %q renders from no slug", site))
-		return site, map[string]any{"site_unmapped": true}
+		return string(site), map[string]any{"site_unmapped": true}
 	}
 	return slug, nil
 }
@@ -69,7 +70,7 @@ type gcPurgeAuditor struct {
 	toSlug siteSlugFn
 }
 
-func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site, deployID string) error {
+func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site sitekey.Dirname, deployID string) error {
 	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    "system:gc",
@@ -92,7 +93,7 @@ type gcTombstoneAuditor struct {
 	toSlug siteSlugFn
 }
 
-func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site, id string) error {
+func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site sitekey.Dirname, id string) error {
 	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    a.actor,
@@ -118,9 +119,9 @@ func openRepoQueue(pgDB *pg.DB) (handler.RepoStore, error) {
 const deployIDToken = "<ts>-<sha>"
 
 type gcLayout struct {
-	sitePrefix   func(site string) string
-	deployPrefix func(site, id string) string
-	trashPrefix  func(site, id string) string
+	sitePrefix   func(site sitekey.Dirname) string
+	deployPrefix func(site sitekey.Dirname, id string) string
+	trashPrefix  func(site sitekey.Dirname, id string) string
 }
 
 func newGCLayout(format, trashBase string) (gcLayout, error) {
@@ -139,15 +140,17 @@ func newGCLayout(format, trashBase string) (gcLayout, error) {
 		trashBase = "_trash/"
 	}
 	return gcLayout{
-		sitePrefix: func(site string) string { return site + "/" + subPath },
-		deployPrefix: func(site, id string) string {
-			p := site + "/" + subPath + id + tail
+		sitePrefix: func(site sitekey.Dirname) string { return string(site) + "/" + subPath },
+		deployPrefix: func(site sitekey.Dirname, id string) string {
+			p := string(site) + "/" + subPath + id + tail
 			if !strings.HasSuffix(p, "/") {
 				p += "/"
 			}
 			return p
 		},
-		trashPrefix: func(site, id string) string { return trashBase + site + "/" + id + "/" },
+		trashPrefix: func(site sitekey.Dirname, id string) string {
+			return trashBase + string(site) + "/" + id + "/"
+		},
 	}, nil
 }
 
@@ -196,15 +199,15 @@ func aliasTails(deployFormat string, formats ...string) ([]string, error) {
 	return tails, nil
 }
 
-func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, string) (map[string]struct{}, error), error) {
+func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, sitekey.Dirname) (map[string]struct{}, error), error) {
 	tails, err := aliasTails(deployFormat, formats...)
 	if err != nil {
 		return nil, err
 	}
-	return func(ctx context.Context, dirname string) (map[string]struct{}, error) {
+	return func(ctx context.Context, dirname sitekey.Dirname) (map[string]struct{}, error) {
 		out := map[string]struct{}{}
 		for _, tail := range tails {
-			v, err := getter.GetAlias(ctx, dirname+"/"+tail)
+			v, err := getter.GetAlias(ctx, string(dirname)+"/"+tail)
 			if err != nil {
 				if r2.IsNotFound(err) {
 					continue

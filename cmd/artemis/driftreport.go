@@ -15,6 +15,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const driftReportCommand = "driftreport"
@@ -23,23 +24,23 @@ var errReadOnlyViolation = errors.New("drift report attempted a write: this bina
 
 type readOnlyStore struct{ inner gc.ReconcileStore }
 
-func (s readOnlyStore) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, error) {
+func (s readOnlyStore) DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]gc.Deploy, error) {
 	return s.inner.DeploysForSite(ctx, site)
 }
 
-func (s readOnlyStore) AliasTargets(ctx context.Context, site string) (map[string]struct{}, time.Time, error) {
+func (s readOnlyStore) AliasTargets(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	return s.inner.AliasTargets(ctx, site)
 }
 
-func (readOnlyStore) ReindexDeploy(context.Context, string, string, time.Time, bool) (bool, error) {
+func (readOnlyStore) ReindexDeploy(context.Context, sitekey.Dirname, string, time.Time, bool) (bool, error) {
 	return false, errReadOnlyViolation
 }
 
-func (readOnlyStore) RecordTombstone(context.Context, string, string, int64) error {
+func (readOnlyStore) RecordTombstone(context.Context, sitekey.Dirname, string, int64) error {
 	return errReadOnlyViolation
 }
 
-func (readOnlyStore) PruneDeploy(context.Context, string, string) error {
+func (readOnlyStore) PruneDeploy(context.Context, sitekey.Dirname, string) error {
 	return errReadOnlyViolation
 }
 
@@ -65,7 +66,7 @@ type countingStore struct {
 	deploys int
 }
 
-func (s *countingStore) DeploysForSite(ctx context.Context, site string) ([]gc.Deploy, error) {
+func (s *countingStore) DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]gc.Deploy, error) {
 	out, err := s.ReconcileStore.DeploysForSite(ctx, site)
 	s.deploys += len(out)
 	return out, err
@@ -109,7 +110,7 @@ func (s sweepStats) validate() error {
 }
 
 type siteDrift struct {
-	Site       string
+	Site       sitekey.Dirname
 	Reindex    []string
 	Tombstone  []string
 	Prune      []string
@@ -123,7 +124,7 @@ func (d siteDrift) total() int {
 }
 
 type siteDirnameReader interface {
-	KnownSiteDirnames(ctx context.Context) ([]string, error)
+	KnownSiteDirnames(ctx context.Context) ([]sitekey.Dirname, error)
 }
 
 type registrySiteReader interface {
@@ -184,11 +185,11 @@ func (s *driftSweep) Run(ctx context.Context) (sweepResult, error) {
 	return s.sweep(ctx, sites, false)
 }
 
-func (s *driftSweep) runSite(ctx context.Context, site string) (sweepResult, error) {
-	return s.sweep(ctx, []string{site}, true)
+func (s *driftSweep) runSite(ctx context.Context, site sitekey.Dirname) (sweepResult, error) {
+	return s.sweep(ctx, []sitekey.Dirname{site}, true)
 }
 
-func (s *driftSweep) sweep(ctx context.Context, sites []string, scoped bool) (sweepResult, error) {
+func (s *driftSweep) sweep(ctx context.Context, sites []sitekey.Dirname, scoped bool) (sweepResult, error) {
 	reports := make([]siteDrift, 0, len(sites))
 	for _, site := range sites {
 		if err := ctx.Err(); err != nil {
@@ -235,7 +236,7 @@ func countReadFailures(reports []siteDrift) int {
 	return n
 }
 
-func driftReportSites(ctx context.Context, repo siteDirnameReader, reg registrySiteReader, tmpl handler.DeployPrefixTemplate) ([]string, error) {
+func driftReportSites(ctx context.Context, repo siteDirnameReader, reg registrySiteReader, tmpl handler.DeployPrefixTemplate) ([]sitekey.Dirname, error) {
 	known, err := repo.KnownSiteDirnames(ctx)
 	if err != nil {
 		return nil, err

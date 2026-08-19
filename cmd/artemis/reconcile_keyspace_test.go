@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/handler"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const domainFormat = "<site>.freecode.camp/deploys/<ts>-<sha>/"
@@ -35,7 +37,7 @@ func TestStorageSiteNames_MatchTheOutboxSiteChangedForm(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t,
-		[]string{tmpl.SiteDirname("test")},
+		[]sitekey.Dirname{tmpl.SiteDirname("test")},
 		storageSiteNames([]string{"test"}, tmpl))
 }
 
@@ -56,7 +58,7 @@ func TestStorageSiteNames_BareFormatIsIdentity(t *testing.T) {
 	require.NoError(t, err)
 
 	names := storageSiteNames([]string{"test", "www"}, tmpl)
-	require.Equal(t, []string{"test", "www"}, names)
+	require.Equal(t, []sitekey.Dirname{"test", "www"}, names)
 	require.Equal(t, tmpl.SitePrefix("test"), layout.sitePrefix(names[0]))
 }
 
@@ -77,7 +79,7 @@ func TestGCLayout_AgreesWithTheWritePathOnEveryRenderedKey(t *testing.T) {
 		require.Equal(t, tmpl.DeployPrefix(slug, id), layout.deployPrefix(dirname, id),
 			"slug %q: gc would move a prefix no deploy was written to, so the real bytes stay and the "+
 				"tombstone dates nothing", slug)
-		require.Equal(t, "_trash/"+dirname+"/"+id+"/", layout.trashPrefix(dirname, id),
+		require.Equal(t, "_trash/"+string(dirname)+"/"+id+"/", layout.trashPrefix(dirname, id),
 			"slug %q: tombstone-purge hard-deletes _trash/<dirname>/<id>/ by reconstructing it from the "+
 				"tombstone row, so any other shape leaks bytes forever", slug)
 	}

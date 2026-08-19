@@ -8,9 +8,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-func activeIDs(t *testing.T, repo *Repo, site string) map[string]struct{} {
+func activeIDs(t *testing.T, repo *Repo, site sitekey.Dirname) map[string]struct{} {
 	t.Helper()
 	deploys, err := repo.DeploysForSite(context.Background(), site)
 	require.NoError(t, err)
@@ -21,7 +23,7 @@ func activeIDs(t *testing.T, repo *Repo, site string) map[string]struct{} {
 	return ids
 }
 
-func tombstoneIDs(t *testing.T, repo *Repo, site string) map[string]struct{} {
+func tombstoneIDs(t *testing.T, repo *Repo, site sitekey.Dirname) map[string]struct{} {
 	t.Helper()
 	stones, err := repo.TombstonesForSite(context.Background(), site)
 	require.NoError(t, err)

@@ -6,11 +6,13 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const StatePending = "pending"
 
-func (r *Repo) BeginDeploy(ctx context.Context, site, id string, mtime time.Time) error {
+func (r *Repo) BeginDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
 		VALUES ($1, $2, $3, 0, false, $4)
@@ -22,7 +24,7 @@ func (r *Repo) BeginDeploy(ctx context.Context, site, id string, mtime time.Time
 	return nil
 }
 
-func (r *Repo) ExpiredPendingDeploys(ctx context.Context, site string, before time.Time) ([]gc.Deploy, error) {
+func (r *Repo) ExpiredPendingDeploys(ctx context.Context, site sitekey.Dirname, before time.Time) ([]gc.Deploy, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, mtime, bytes FROM deploys
 		WHERE site = $1 AND state = $2 AND mtime < $3

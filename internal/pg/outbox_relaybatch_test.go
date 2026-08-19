@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func TestRelayBatch_ExclusiveAcrossReplicas(t *testing.T) {
@@ -18,7 +20,7 @@ func TestRelayBatch_ExclusiveAcrossReplicas(t *testing.T) {
 
 	const total = 30
 	for i := 0; i < total; i++ {
-		require.NoError(t, repo.EnqueueSiteChanged(ctx, fmt.Sprintf("s%d", i)))
+		require.NoError(t, repo.EnqueueSiteChanged(ctx, sitekey.Dirname(fmt.Sprintf("s%d", i))))
 	}
 
 	var mu sync.Mutex
@@ -101,7 +103,7 @@ func TestRelayBatch_MarkSurvivesContextDeath(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	for _, s := range []string{"a", "b", "c"} {
+	for _, s := range []sitekey.Dirname{"a", "b", "c"} {
 		require.NoError(t, repo.EnqueueSiteChanged(context.Background(), s))
 	}
 
@@ -131,7 +133,7 @@ func TestClaimTTL_ExceedsBatchAndMarkBudget(t *testing.T) {
 func TestClaimBatch_ExpiredClaimIsReclaimable(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
-	for _, s := range []string{"a", "b"} {
+	for _, s := range []sitekey.Dirname{"a", "b"} {
 		require.NoError(t, repo.EnqueueSiteChanged(ctx, s))
 	}
 

@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type eventLog struct {
@@ -26,10 +28,10 @@ type fakeLocker struct {
 	log *eventLog
 }
 
-func (l *fakeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
-	l.log.add("lock:" + site)
+func (l *fakeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
+	l.log.add("lock:" + string(site))
 	err := fn()
-	l.log.add("unlock:" + site)
+	l.log.add("unlock:" + string(site))
 	return err
 }
 

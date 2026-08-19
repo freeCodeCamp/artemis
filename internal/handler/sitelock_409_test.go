@@ -10,11 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeErrLocker struct{ err error }
 
-func (l *fakeErrLocker) WithSiteLock(_ context.Context, _ string, _ func() error) error {
+func (l *fakeErrLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, _ func() error) error {
 	return l.err
 }
 

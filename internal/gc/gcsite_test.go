@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeStore struct {
@@ -20,11 +22,11 @@ type fakeStore struct {
 	tombstoneErr error
 }
 
-func (s *fakeStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
-	return s.deploys[site], nil
+func (s *fakeStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
+	return s.deploys[string(site)], nil
 }
 
-func (s *fakeStore) AliasTargets(_ context.Context, _ string) (map[string]struct{}, time.Time, error) {
+func (s *fakeStore) AliasTargets(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	idx := s.aliasCalls
 	s.aliasCalls++
 	if idx >= len(s.targetsSeq) {
@@ -36,11 +38,11 @@ func (s *fakeStore) AliasTargets(_ context.Context, _ string) (map[string]struct
 	return s.targetsSeq[idx], s.lastChange, nil
 }
 
-func (s *fakeStore) Tombstone(_ context.Context, site string, d Deploy) error {
+func (s *fakeStore) Tombstone(_ context.Context, site sitekey.Dirname, d Deploy) error {
 	if s.tombstoneErr != nil {
 		return s.tombstoneErr
 	}
-	s.tombstoned = append(s.tombstoned, site+"/"+d.ID)
+	s.tombstoned = append(s.tombstoned, string(site)+"/"+d.ID)
 	return nil
 }
 
@@ -65,9 +67,9 @@ func (l *fakeLocker) NewLockSession(_ context.Context) (LockSession, error) {
 	return l, nil
 }
 
-func (l *fakeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
+func (l *fakeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
 	l.calls++
-	l.sites = append(l.sites, site)
+	l.sites = append(l.sites, string(site))
 	return fn()
 }
 
@@ -80,9 +82,9 @@ func newSiteGC(store Store, mover Mover) *SiteGC {
 		Policy:       testPolicy(),
 		BlastCap:     defaultTestBlastCap,
 		Locker:       &fakeLocker{},
-		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
-		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
-		LiveAliases: func(_ context.Context, _ string) (map[string]struct{}, error) {
+		DeployPrefix: func(site sitekey.Dirname, id string) string { return string(site) + "/deploys/" + id + "/" },
+		TrashPrefix:  func(site sitekey.Dirname, id string) string { return "_trash/" + string(site) + "/" + id + "/" },
+		LiveAliases: func(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, error) {
 			return map[string]struct{}{}, nil
 		},
 		Now: func() time.Time { return testNow },
@@ -98,8 +100,8 @@ type fakeGCAuditor struct {
 	err   error
 }
 
-func (a *fakeGCAuditor) AuditTombstone(_ context.Context, site, id string) error {
-	a.calls = append(a.calls, [2]string{site, id})
+func (a *fakeGCAuditor) AuditTombstone(_ context.Context, site sitekey.Dirname, id string) error {
+	a.calls = append(a.calls, [2]string{string(site), id})
 	return a.err
 }
 
@@ -130,7 +132,7 @@ func (l *orderRecordingLocker) NewLockSession(_ context.Context) (LockSession, e
 	return l, nil
 }
 
-func (l *orderRecordingLocker) WithSiteLock(_ context.Context, _ string, fn func() error) error {
+func (l *orderRecordingLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
 	*l.log = append(*l.log, "lock")
 	err := fn()
 	*l.log = append(*l.log, "unlock")
@@ -143,7 +145,7 @@ type orderRecordingAuditor struct {
 	log *[]string
 }
 
-func (a *orderRecordingAuditor) AuditTombstone(_ context.Context, _, _ string) error {
+func (a *orderRecordingAuditor) AuditTombstone(_ context.Context, _ sitekey.Dirname, _ string) error {
 	*a.log = append(*a.log, "audit")
 	return nil
 }
@@ -206,7 +208,7 @@ func TestGC_PromoteMidRun(t *testing.T) {
 	}
 	mover := &fakeMover{}
 	g := newSiteGC(store, mover)
-	g.LiveAliases = func(_ context.Context, _ string) (map[string]struct{}, error) {
+	g.LiveAliases = func(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, error) {
 		return aliasSet(victim), nil // R2 live read: alias moved onto victim mid-run
 	}
 	res, err := g.Run(context.Background(), "www", false)

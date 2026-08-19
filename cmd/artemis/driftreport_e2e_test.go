@@ -19,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeBucket struct {
@@ -121,7 +123,7 @@ func driftReportEnv(t *testing.T, dsn, endpoint string) {
 	t.Setenv("VALKEY_ADDR", "127.0.0.1:1")
 }
 
-func seedDriftFixture(t *testing.T, dsn, site, deployID string) {
+func seedDriftFixture(t *testing.T, dsn string, site sitekey.Dirname, deployID string) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := pg.New(ctx, pg.Config{DatabaseURL: dsn})
@@ -142,7 +144,7 @@ func TestRunDriftReport_ReportsNoDriftWhenTheStoresAgree(t *testing.T) {
 	const site, deployID = "www", "20260101-000000-abc1234"
 	seedDriftFixture(t, dsn, site, deployID)
 
-	prefix := site + "/deploys/" + deployID + "/"
+	prefix := string(site) + "/deploys/" + deployID + "/"
 	bucket := newFakeBucket(t, "artemis-test", prefix+"index.html", prefix+"_artemis_meta.json")
 	driftReportEnv(t, dsn, bucket.server.URL)
 
@@ -161,8 +163,8 @@ func TestRunDriftReport_FindsTheOrphanBytesOfAFailedUpload(t *testing.T) {
 	const site, indexed = "www", "20260101-000000-abc1234"
 	seedDriftFixture(t, dsn, site, indexed)
 
-	live := site + "/deploys/" + indexed + "/"
-	abandoned := site + "/deploys/20260102-000000-dead999/"
+	live := string(site) + "/deploys/" + indexed + "/"
+	abandoned := string(site) + "/deploys/20260102-000000-dead999/"
 	bucket := newFakeBucket(t, "artemis-test",
 		live+"index.html", live+"_artemis_meta.json", abandoned+"index.html")
 	driftReportEnv(t, dsn, bucket.server.URL)

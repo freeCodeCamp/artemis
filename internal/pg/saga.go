@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-func (r *Repo) FinalizeAtomic(ctx context.Context, site, deployID, mode string, mtime time.Time, bytes int64) error {
+func (r *Repo) FinalizeAtomic(ctx context.Context, site sitekey.Dirname, deployID, mode string, mtime time.Time, bytes int64) error {
 	return r.WithTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
@@ -21,20 +23,20 @@ func (r *Repo) FinalizeAtomic(ctx context.Context, site, deployID, mode string, 
 		if err := upsertAliasStampingRelease(ctx, tx, site, mode, deployID, mtime); err != nil {
 			return fmt.Errorf("finalize alias %s/%s: %w", site, mode, err)
 		}
-		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": site})
+		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": string(site)})
 	})
 }
 
-func (r *Repo) AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error {
+func (r *Repo) AliasAtomic(ctx context.Context, site sitekey.Dirname, name, deployID string, at time.Time) error {
 	return r.WithTx(ctx, func(tx pgx.Tx) error {
 		if err := upsertAliasStampingRelease(ctx, tx, site, name, deployID, at); err != nil {
 			return fmt.Errorf("alias %s/%s: %w", site, name, err)
 		}
-		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": site})
+		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": string(site)})
 	})
 }
 
-func upsertAliasStampingRelease(ctx context.Context, tx pgx.Tx, site, name, deployID string, at time.Time) error {
+func upsertAliasStampingRelease(ctx context.Context, tx pgx.Tx, site sitekey.Dirname, name, deployID string, at time.Time) error {
 	if _, err := tx.Exec(ctx,
 		`UPDATE deploys d SET alias_released_at = $4
 		 FROM aliases a

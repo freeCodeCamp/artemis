@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const TopicSiteChanged = "site.changed"
@@ -34,9 +36,9 @@ func Enqueue(ctx context.Context, tx pgx.Tx, topic string, payload any) error {
 	return nil
 }
 
-func (r *Repo) EnqueueSiteChanged(ctx context.Context, site string) error {
+func (r *Repo) EnqueueSiteChanged(ctx context.Context, site sitekey.Dirname) error {
 	return r.WithTx(ctx, func(tx pgx.Tx) error {
-		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": site})
+		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": string(site)})
 	})
 }
 

@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type recordingLockSession struct {
@@ -17,11 +19,11 @@ type recordingLockSession struct {
 	underLock bool
 }
 
-func (s *recordingLockSession) WithSiteLock(_ context.Context, site string, fn func() error) error {
+func (s *recordingLockSession) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
 	if s.lockErr != nil {
 		return s.lockErr
 	}
-	s.sites = append(s.sites, site)
+	s.sites = append(s.sites, string(site))
 	s.underLock = true
 	defer func() { s.underLock = false }()
 	return fn()
@@ -57,27 +59,27 @@ func (s *lockAwareStore) note(op string) {
 	}
 }
 
-func (s *lockAwareStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
-	return s.deploys[site], nil
+func (s *lockAwareStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
+	return s.deploys[string(site)], nil
 }
 
-func (s *lockAwareStore) AliasTargets(context.Context, string) (map[string]struct{}, time.Time, error) {
+func (s *lockAwareStore) AliasTargets(context.Context, sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	return s.aliases, time.Time{}, nil
 }
 
-func (s *lockAwareStore) ReindexDeploy(_ context.Context, _, id string, _ time.Time, _ bool) (bool, error) {
+func (s *lockAwareStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, id string, _ time.Time, _ bool) (bool, error) {
 	s.note("ReindexDeploy")
 	s.reindexed = append(s.reindexed, id)
 	return true, nil
 }
 
-func (s *lockAwareStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
+func (s *lockAwareStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	s.note("RecordTombstone")
 	s.tombstoned = append(s.tombstoned, id)
 	return nil
 }
 
-func (s *lockAwareStore) PruneDeploy(_ context.Context, _, id string) error {
+func (s *lockAwareStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, id string) error {
 	s.note("PruneDeploy")
 	s.pruned = append(s.pruned, id)
 	return nil

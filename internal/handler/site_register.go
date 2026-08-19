@@ -257,7 +257,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		var err error
-		moved, err = h.R2.MovePrefix(opCtx, dirname+"/", base+dirname+"/")
+		moved, err = h.R2.MovePrefix(opCtx, string(dirname)+"/", base+string(dirname)+"/")
 		if err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 			return nil

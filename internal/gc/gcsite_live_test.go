@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func TestGC_RollbackMidRun_R2Authority(t *testing.T) {
@@ -17,7 +19,7 @@ func TestGC_RollbackMidRun_R2Authority(t *testing.T) {
 	g := newSiteGC(store, mover)
 
 	calls := 0
-	g.LiveAliases = func(_ context.Context, _ string) (map[string]struct{}, error) {
+	g.LiveAliases = func(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, error) {
 		calls++
 		if calls >= 2 {
 			return aliasSet("f-old"), nil

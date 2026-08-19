@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeReaper struct {
@@ -24,8 +26,8 @@ func (f *fakeReaper) ExpiredTombstones(_ context.Context, before time.Time) ([]T
 	return out, nil
 }
 
-func (f *fakeReaper) ClearTombstone(_ context.Context, site, id string) (bool, error) {
-	f.cleared = append(f.cleared, site+"/"+id)
+func (f *fakeReaper) ClearTombstone(_ context.Context, site sitekey.Dirname, id string) (bool, error) {
+	f.cleared = append(f.cleared, string(site)+"/"+id)
 	for i, t := range f.tombstones {
 		if t.Site == site && t.ID == id {
 			f.tombstones = append(f.tombstones[:i], f.tombstones[i+1:]...)
@@ -40,7 +42,7 @@ type staleReaper struct{ tomb Tombstone }
 func (r staleReaper) ExpiredTombstones(context.Context, time.Time) ([]Tombstone, error) {
 	return []Tombstone{r.tomb}, nil
 }
-func (staleReaper) ClearTombstone(context.Context, string, string) (bool, error) {
+func (staleReaper) ClearTombstone(context.Context, sitekey.Dirname, string) (bool, error) {
 	return false, nil
 }
 
@@ -87,9 +89,9 @@ type fakePurgeLocker struct {
 	sites []string
 }
 
-func (f *fakePurgeLocker) WithSiteLock(_ context.Context, site string, fn func() error) error {
+func (f *fakePurgeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
 	f.calls++
-	f.sites = append(f.sites, site)
+	f.sites = append(f.sites, string(site))
 	return fn()
 }
 
@@ -98,11 +100,11 @@ type fakePurgeAuditor struct {
 	err      error
 }
 
-func (f *fakePurgeAuditor) RecordPurge(_ context.Context, site, deployID string) error {
+func (f *fakePurgeAuditor) RecordPurge(_ context.Context, site sitekey.Dirname, deployID string) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.recorded = append(f.recorded, [2]string{site, deployID})
+	f.recorded = append(f.recorded, [2]string{string(site), deployID})
 	return nil
 }
 

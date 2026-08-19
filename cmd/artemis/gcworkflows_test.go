@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeReaper struct{}
@@ -24,7 +26,9 @@ type fakeReaper struct{}
 func (fakeReaper) ExpiredTombstones(context.Context, time.Time) ([]gc.Tombstone, error) {
 	return nil, nil
 }
-func (fakeReaper) ClearTombstone(context.Context, string, string) (bool, error) { return true, nil }
+func (fakeReaper) ClearTombstone(context.Context, sitekey.Dirname, string) (bool, error) {
+	return true, nil
+}
 
 func TestCronCheckIn_DriftDetectAndPurge(t *testing.T) {
 	type ci struct {
@@ -227,7 +231,7 @@ func TestGCWorkflowDefs_NoWorkflowCanRepairOnASchedule(t *testing.T) {
 func TestSiteFromInput(t *testing.T) {
 	s, err := siteFromInput(map[string]any{"site": "www.freecode.camp"})
 	require.NoError(t, err)
-	assert.Equal(t, "www.freecode.camp", s)
+	assert.Equal(t, sitekey.Dirname("www.freecode.camp"), s)
 
 	_, err = siteFromInput(map[string]any{})
 	require.Error(t, err, "missing site rejected")
@@ -289,15 +293,15 @@ func TestGCWorkflowHandlers_RejectMissingSite(t *testing.T) {
 
 type lockTimeoutStore struct{}
 
-func (lockTimeoutStore) DeploysForSite(context.Context, string) ([]gc.Deploy, error) {
+func (lockTimeoutStore) DeploysForSite(context.Context, sitekey.Dirname) ([]gc.Deploy, error) {
 	return nil, &pgconn.PgError{Code: "55P03"}
 }
 
-func (lockTimeoutStore) AliasTargets(context.Context, string) (map[string]struct{}, time.Time, error) {
+func (lockTimeoutStore) AliasTargets(context.Context, sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	return nil, time.Time{}, nil
 }
 
-func (lockTimeoutStore) Tombstone(context.Context, string, gc.Deploy) error { return nil }
+func (lockTimeoutStore) Tombstone(context.Context, sitekey.Dirname, gc.Deploy) error { return nil }
 
 type gcRecordingTransport struct{ events []*sentry.Event }
 

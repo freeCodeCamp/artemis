@@ -10,9 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-func (r *Repo) WithSiteLock(ctx context.Context, site string, fn func() error) error {
+func (r *Repo) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
 	sess, err := r.NewLockSession(ctx)
 	if err != nil {
 		return fmt.Errorf("site lock %s: %w", site, err)
@@ -46,7 +48,7 @@ type lockSession struct {
 	conn sessionConn
 }
 
-func (s *lockSession) WithSiteLock(ctx context.Context, site string, fn func() error) (err error) {
+func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) (err error) {
 	if _, lockErr := s.conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); lockErr != nil {
 		return fmt.Errorf("site lock %s: %w", site, lockErr)
 	}

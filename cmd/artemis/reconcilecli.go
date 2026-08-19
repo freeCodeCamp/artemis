@@ -12,6 +12,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const reconcileCommand = "reconcile"
@@ -44,12 +45,12 @@ func parseReconcileArgs(args []string) (string, bool, error) {
 	return sites[0], *apply, nil
 }
 
-func resolveSweepSite(known []string, tmpl handler.DeployPrefixTemplate, arg string) (string, error) {
+func resolveSweepSite(known []sitekey.Dirname, tmpl handler.DeployPrefixTemplate, arg string) (sitekey.Dirname, error) {
 	if arg == "" {
 		return "", errors.New("reconcile: site must not be empty")
 	}
-	if slices.Contains(known, arg) {
-		return arg, nil
+	if slices.Contains(known, sitekey.Dirname(arg)) {
+		return sitekey.Dirname(arg), nil
 	}
 	dirname := tmpl.SiteDirname(arg)
 	if slices.Contains(known, dirname) {

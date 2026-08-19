@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakePending struct {
@@ -15,12 +17,12 @@ type fakePending struct {
 	err  error
 }
 
-func (p *fakePending) ExpiredPendingDeploys(_ context.Context, site string, before time.Time) ([]Deploy, error) {
+func (p *fakePending) ExpiredPendingDeploys(_ context.Context, site sitekey.Dirname, before time.Time) ([]Deploy, error) {
 	p.cuts = append(p.cuts, before)
 	if p.err != nil {
 		return nil, p.err
 	}
-	return p.rows[site], nil
+	return p.rows[string(site)], nil
 }
 
 func pendingSiteGC(t *testing.T, store Store, mover Mover, pending PendingSource) *SiteGC {

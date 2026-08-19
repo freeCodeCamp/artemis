@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type Tombstone struct {
-	Site      string
+	Site      sitekey.Dirname
 	ID        string
 	TrashedAt time.Time
 	Bytes     int64
@@ -17,7 +19,7 @@ type Tombstone struct {
 
 type TombstoneReaper interface {
 	ExpiredTombstones(ctx context.Context, before time.Time) ([]Tombstone, error)
-	ClearTombstone(ctx context.Context, site, id string) (bool, error)
+	ClearTombstone(ctx context.Context, site sitekey.Dirname, id string) (bool, error)
 }
 
 type Deleter interface {
@@ -25,11 +27,11 @@ type Deleter interface {
 }
 
 type SiteLocker interface {
-	WithSiteLock(ctx context.Context, site string, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
 }
 
 type PurgeAuditor interface {
-	RecordPurge(ctx context.Context, site, deployID string) error
+	RecordPurge(ctx context.Context, site sitekey.Dirname, deployID string) error
 }
 
 type TombstonePurge struct {
@@ -43,7 +45,7 @@ type TombstonePurge struct {
 	BlastCap  int
 }
 
-func (p *TombstonePurge) withLock(ctx context.Context, site string, fn func() error) error {
+func (p *TombstonePurge) withLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
 	if p.Locker == nil {
 		return fn()
 	}
@@ -62,9 +64,9 @@ func (p *TombstonePurge) trashPrefix(t Tombstone) string {
 		base = "_trash/"
 	}
 	if t.ID == "" {
-		return base + t.Site + "/"
+		return base + string(t.Site) + "/"
 	}
-	return base + t.Site + "/" + t.ID + "/"
+	return base + string(t.Site) + "/" + t.ID + "/"
 }
 
 func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, error) {
@@ -87,7 +89,7 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 	}
 	var runErrs []error
 	for _, t := range expired {
-		label := t.Site + "/" + t.ID
+		label := string(t.Site) + "/" + t.ID
 		if dryRun {
 			res.Purged = append(res.Purged, label)
 			continue

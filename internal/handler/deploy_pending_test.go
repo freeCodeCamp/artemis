@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type recordingBeginner struct {
@@ -21,10 +23,10 @@ type recordingBeginner struct {
 	err   error
 }
 
-func (b *recordingBeginner) BeginDeploy(_ context.Context, site, id string, _ time.Time) error {
+func (b *recordingBeginner) BeginDeploy(_ context.Context, site sitekey.Dirname, id string, _ time.Time) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.calls = append(b.calls, [2]string{site, id})
+	b.calls = append(b.calls, [2]string{string(site), id})
 	return b.err
 }
 
@@ -60,7 +62,7 @@ func TestDeployInit_RecordsThePendingDeployInTheStorageKeyspace(t *testing.T) {
 	require.Len(t, beginner.calls, 1,
 		"an init that records nothing leaves any bytes the client then uploads unowned by every reaper, "+
 			"which is the whole orphan class reconcile exists to scan for")
-	require.Equal(t, "www.freecode.camp", h.DeployPrefix.SiteDirname("www"),
+	require.Equal(t, sitekey.Dirname("www.freecode.camp"), h.DeployPrefix.SiteDirname("www"),
 		"under the default format slug and dirname are the same string, which makes the assertion below "+
 			"vacuous; this fixture must run the production FQDN shape")
 	assert.Equal(t, "www.freecode.camp", beginner.calls[0][0],

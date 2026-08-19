@@ -13,6 +13,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type stubAuditRecorder struct {
@@ -188,9 +190,9 @@ func TestBootWiringProdLayout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			l, err := newGCLayout(tc.format, tc.trashBase)
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantSite, l.sitePrefix(tc.site), "sitePrefix")
-			assert.Equal(t, tc.wantDeploy, l.deployPrefix(tc.site, tc.id), "deployPrefix")
-			assert.Equal(t, tc.wantTrash, l.trashPrefix(tc.site, tc.id), "trashPrefix")
+			assert.Equal(t, tc.wantSite, l.sitePrefix(sitekey.Dirname(tc.site)), "sitePrefix")
+			assert.Equal(t, tc.wantDeploy, l.deployPrefix(sitekey.Dirname(tc.site), tc.id), "deployPrefix")
+			assert.Equal(t, tc.wantTrash, l.trashPrefix(sitekey.Dirname(tc.site), tc.id), "trashPrefix")
 		})
 	}
 }
@@ -296,7 +298,7 @@ func TestNewLiveAliasReader_RejectsASiteTokenOutsideTheSiteSegment(t *testing.T)
 			"and 404s for every site — the same silent-inert failure this constructor exists to refuse")
 }
 
-func prodSlugFn(t *testing.T) func(string) (string, bool) {
+func prodSlugFn(t *testing.T) siteSlugFn {
 	t.Helper()
 	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
 	require.NoError(t, err)

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type cancelOnPutAliasR2 struct {
@@ -27,23 +29,23 @@ type ctxAwareIndex struct {
 	aliased   []string
 }
 
-func (f *ctxAwareIndex) FinalizeAtomic(ctx context.Context, site, deployID, mode string, _ time.Time, _ int64) error {
+func (f *ctxAwareIndex) FinalizeAtomic(ctx context.Context, site sitekey.Dirname, deployID, mode string, _ time.Time, _ int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.finalized = append(f.finalized, site+"/"+deployID+"/"+mode)
+	f.finalized = append(f.finalized, string(site)+"/"+deployID+"/"+mode)
 	return nil
 }
 
-func (f *ctxAwareIndex) AliasAtomic(ctx context.Context, site, name, deployID string, _ time.Time) error {
+func (f *ctxAwareIndex) AliasAtomic(ctx context.Context, site sitekey.Dirname, name, deployID string, _ time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.aliased = append(f.aliased, site+"/"+name+"/"+deployID)
+	f.aliased = append(f.aliased, string(site)+"/"+name+"/"+deployID)
 	return nil
 }
 

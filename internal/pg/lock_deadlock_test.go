@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func newMaxConns2Repo(t *testing.T) *Repo {
@@ -51,7 +53,7 @@ func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
 			wg.Add(1)
 			go func(n int) {
 				defer wg.Done()
-				site := []string{"a.freecode.camp", "b.freecode.camp"}[n]
+				site := []sitekey.Dirname{"a.freecode.camp", "b.freecode.camp"}[n]
 				err := repo.WithSiteLock(ctx, site, func() error {
 					return repo.FinalizeAtomic(ctx, site, "20260101-000000-aaaaaaa", "production", now, 0)
 				})
@@ -81,7 +83,7 @@ func TestLockSession_NoPoolSelfDeadlock(t *testing.T) {
 			wg.Add(1)
 			go func(n int) {
 				defer wg.Done()
-				site := []string{"a.freecode.camp", "b.freecode.camp"}[n]
+				site := []sitekey.Dirname{"a.freecode.camp", "b.freecode.camp"}[n]
 				sess, err := repo.NewLockSession(ctx)
 				assert.NoError(t, err)
 				defer sess.Close(ctx)

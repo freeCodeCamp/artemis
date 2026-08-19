@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const reconcileOpTimeout = 10 * time.Minute
@@ -17,11 +19,11 @@ type ReconcileLister interface {
 }
 
 type ReconcileStore interface {
-	DeploysForSite(ctx context.Context, site string) ([]Deploy, error)
-	AliasTargets(ctx context.Context, site string) (map[string]struct{}, time.Time, error)
-	ReindexDeploy(ctx context.Context, site, id string, mtime time.Time, hasMarker bool) (bool, error)
-	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
-	PruneDeploy(ctx context.Context, site, id string) error
+	DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]Deploy, error)
+	AliasTargets(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, time.Time, error)
+	ReindexDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time, hasMarker bool) (bool, error)
+	RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error
+	PruneDeploy(ctx context.Context, site sitekey.Dirname, id string) error
 }
 
 type Reconciler struct {
@@ -31,17 +33,17 @@ type Reconciler struct {
 	Mover        Mover
 	Grace        time.Duration
 	BlastCap     int
-	SitePrefix   func(site string) string
-	DeployPrefix func(site, id string) string
-	TrashPrefix  func(site, id string) string
-	LiveAliases  func(ctx context.Context, site string) (map[string]struct{}, error)
+	SitePrefix   func(site sitekey.Dirname) string
+	DeployPrefix func(site sitekey.Dirname, id string) string
+	TrashPrefix  func(site sitekey.Dirname, id string) string
+	LiveAliases  func(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, error)
 	Now          func() time.Time
 	Audit        GCAuditor
 	PruneAudit   GCAuditor
 }
 
 type DriftReport struct {
-	Site             string
+	Site             sitekey.Dirname
 	Reindexed        []string
 	OrphanTombstoned []string
 	PGPruned         []string
@@ -69,7 +71,7 @@ type repairPlan struct {
 	prune     []string
 }
 
-func (rc *Reconciler) ReconcileSite(ctx context.Context, site string, dryRun bool) (DriftReport, error) {
+func (rc *Reconciler) ReconcileSite(ctx context.Context, site sitekey.Dirname, dryRun bool) (DriftReport, error) {
 	report := DriftReport{Site: site}
 
 	snap, err := rc.snapshot(ctx, site)
@@ -114,7 +116,7 @@ func (rc *Reconciler) ReconcileSite(ctx context.Context, site string, dryRun boo
 	return report, repairErr
 }
 
-func (rc *Reconciler) snapshot(ctx context.Context, site string) (siteSnapshot, error) {
+func (rc *Reconciler) snapshot(ctx context.Context, site sitekey.Dirname) (siteSnapshot, error) {
 	sitePrefix := rc.SitePrefix(site)
 	keys, err := rc.Lister.ListPrefix(ctx, sitePrefix)
 	if err != nil {
@@ -167,7 +169,7 @@ func (rc *Reconciler) snapshot(ctx context.Context, site string) (siteSnapshot, 
 	return snap, nil
 }
 
-func (rc *Reconciler) classify(ctx context.Context, site string, snap siteSnapshot, report *DriftReport) repairPlan {
+func (rc *Reconciler) classify(ctx context.Context, site sitekey.Dirname, snap siteSnapshot, report *DriftReport) repairPlan {
 	var plan repairPlan
 
 	for _, id := range slices.Sorted(maps.Keys(snap.r2)) {
@@ -212,7 +214,7 @@ func (rc *Reconciler) classify(ctx context.Context, site string, snap siteSnapsh
 	return plan
 }
 
-func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repairPlan, report *DriftReport) {
+func (rc *Reconciler) applyBlastCap(ctx context.Context, site sitekey.Dirname, plan *repairPlan, report *DriftReport) {
 	destructive := len(plan.tombstone) + len(plan.prune)
 	if destructive == 0 || (rc.BlastCap > 0 && destructive <= rc.BlastCap) {
 		return
@@ -234,7 +236,7 @@ func (rc *Reconciler) applyBlastCap(ctx context.Context, site string, plan *repa
 	slog.WarnContext(ctx, "reconcile.capped", "site", site, "reason", report.CapReason)
 }
 
-func (rc *Reconciler) repair(ctx context.Context, sess LockSession, site string, snap siteSnapshot, plan repairPlan, report *DriftReport) error {
+func (rc *Reconciler) repair(ctx context.Context, sess LockSession, site sitekey.Dirname, snap siteSnapshot, plan repairPlan, report *DriftReport) error {
 	for _, id := range plan.reindex {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("reconcile %s: %w", site, err)
@@ -355,7 +357,7 @@ func reindexRefusalReason(bytesGone bool) string {
 	return "deploy is tombstoned; the snapshot predates the trash move, refusing to resurrect it"
 }
 
-func (rc *Reconciler) locked(ctx context.Context, sess LockSession, site string, fn func(context.Context) (bool, error)) (bool, error) {
+func (rc *Reconciler) locked(ctx context.Context, sess LockSession, site sitekey.Dirname, fn func(context.Context) (bool, error)) (bool, error) {
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconcileOpTimeout)
 	defer cancel()
 
@@ -392,7 +394,7 @@ func (v tombstoneVerdict) reason() string {
 	return "proceed"
 }
 
-func (rc *Reconciler) aliasedNow(ctx context.Context, site, id string) (bool, error) {
+func (rc *Reconciler) aliasedNow(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
 	aliases, _, err := rc.Store.AliasTargets(ctx, site)
 	if err != nil {
 		return false, err
@@ -408,7 +410,7 @@ func (rc *Reconciler) aliasedNow(ctx context.Context, site, id string) (bool, er
 	return aliased, nil
 }
 
-func (rc *Reconciler) recheckOrphan(ctx context.Context, site, id string) (tombstoneVerdict, error) {
+func (rc *Reconciler) recheckOrphan(ctx context.Context, site sitekey.Dirname, id string) (tombstoneVerdict, error) {
 	deploys, err := rc.Store.DeploysForSite(ctx, site)
 	if err != nil {
 		return tombstoneProceed, fmt.Errorf("re-read deploys before tombstone %s: %w", id, err)
@@ -457,7 +459,7 @@ func (v pruneVerdict) reason() string {
 	return "proceed"
 }
 
-func (rc *Reconciler) recheckGhost(ctx context.Context, site, id string) (pruneVerdict, error) {
+func (rc *Reconciler) recheckGhost(ctx context.Context, site sitekey.Dirname, id string) (pruneVerdict, error) {
 	keys, err := rc.Lister.ListPrefix(ctx, rc.DeployPrefix(site, id))
 	if err != nil {
 		return pruneProceed, fmt.Errorf("re-list r2 before prune %s: %w", id, err)
@@ -475,11 +477,11 @@ func (rc *Reconciler) recheckGhost(ctx context.Context, site, id string) (pruneV
 	return pruneProceed, nil
 }
 
-func (rc *Reconciler) audit(ctx context.Context, site, id string) {
+func (rc *Reconciler) audit(ctx context.Context, site sitekey.Dirname, id string) {
 	rc.auditWith(ctx, rc.Audit, site, id)
 }
 
-func (rc *Reconciler) auditWith(ctx context.Context, auditor GCAuditor, site, id string) {
+func (rc *Reconciler) auditWith(ctx context.Context, auditor GCAuditor, site sitekey.Dirname, id string) {
 	if auditor == nil {
 		return
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/getsentry/sentry-go"
@@ -156,12 +157,12 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 	}
 }
 
-func siteFromInput(input map[string]any) (string, error) {
+func siteFromInput(input map[string]any) (sitekey.Dirname, error) {
 	s, ok := input["site"].(string)
 	if !ok || s == "" {
 		return "", errors.New("workflow input missing site")
 	}
-	return s, nil
+	return sitekey.Dirname(s), nil
 }
 
 type workflowRegistrar interface {
@@ -177,11 +178,11 @@ func registerGCWorkflows(rt workflowRegistrar, gcw *gcWiring, dryRun bool, sweep
 	return nil
 }
 
-func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []string {
+func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []sitekey.Dirname {
 	if len(slugs) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(slugs))
+	names := make([]sitekey.Dirname, 0, len(slugs))
 	for _, s := range slugs {
 		names = append(names, tmpl.SiteDirname(s))
 	}

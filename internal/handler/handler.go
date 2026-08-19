@@ -18,6 +18,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/getsentry/sentry-go"
 )
@@ -66,8 +67,8 @@ type R2Store interface {
 }
 
 type TombstoneStore interface {
-	RecordTombstone(ctx context.Context, site, id string, bytes int64) error
-	RecordSitePurge(ctx context.Context, site string) error
+	RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error
+	RecordSitePurge(ctx context.Context, site sitekey.Dirname) error
 }
 
 type AuditStore interface {
@@ -77,21 +78,21 @@ type AuditStore interface {
 }
 
 type TrashStore interface {
-	TombstonesForSite(ctx context.Context, site string) ([]gc.Tombstone, error)
-	RestoreDeploy(ctx context.Context, site, id string, mtime time.Time, bytes int64) error
+	TombstonesForSite(ctx context.Context, site sitekey.Dirname) ([]gc.Tombstone, error)
+	RestoreDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time, bytes int64) error
 }
 
 type DeployIndexWriter interface {
-	FinalizeAtomic(ctx context.Context, site, deployID, mode string, mtime time.Time, bytes int64) error
-	AliasAtomic(ctx context.Context, site, name, deployID string, at time.Time) error
+	FinalizeAtomic(ctx context.Context, site sitekey.Dirname, deployID, mode string, mtime time.Time, bytes int64) error
+	AliasAtomic(ctx context.Context, site sitekey.Dirname, name, deployID string, at time.Time) error
 }
 
 type PendingDeployWriter interface {
-	BeginDeploy(ctx context.Context, site, deployID string, mtime time.Time) error
+	BeginDeploy(ctx context.Context, site sitekey.Dirname, deployID string, mtime time.Time) error
 }
 
 type SiteLocker interface {
-	WithSiteLock(ctx context.Context, site string, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
 }
 
 // RegistryHealth is the readiness probe contract for the registry
@@ -159,7 +160,7 @@ type Handlers struct {
 
 var errAliasWriteHandled = errors.New("alias write failure already written to response")
 
-func (h *Handlers) withSiteLock(ctx context.Context, dirname string, fn func() error) error {
+func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn func() error) error {
 	if h.Locker == nil {
 		return fn()
 	}
@@ -200,7 +201,7 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 
 const pendingWriteTimeout = 5 * time.Second
 
-func (h *Handlers) beginPendingDeploy(ctx context.Context, site, deployID string) {
+func (h *Handlers) beginPendingDeploy(ctx context.Context, site sitekey.Dirname, deployID string) {
 	if h.Pending == nil {
 		return
 	}

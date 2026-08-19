@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // TestDeployPrefixTemplate_RendersDefault — sanity for the canonical
@@ -95,7 +97,7 @@ func TestDeployPrefixTemplate_SiteSlugRejectsAForeignDirname(t *testing.T) {
 	tpl, err := NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
 	require.NoError(t, err)
 
-	for _, dirname := range []string{"", "_trash", "www.example.com", ".freecode.camp"} {
+	for _, dirname := range []sitekey.Dirname{"", "_trash", "www.example.com", ".freecode.camp"} {
 		_, ok := tpl.SiteSlug(dirname)
 		assert.False(t, ok,
 			"%q does not render from any slug under this format; returning a plausible-looking slug "+

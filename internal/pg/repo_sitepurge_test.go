@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func TestRepo_RecordSitePurge_ClearsTheWholeSiteIndex(t *testing.T) {
@@ -94,7 +96,7 @@ func TestRepo_KnownSiteDirnames_UnionsEveryTableThatNamesASite(t *testing.T) {
 
 	names, err = repo.KnownSiteDirnames(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"gone.freecode.camp", "learn.freecode.camp", "www.freecode.camp"}, names,
+	assert.Equal(t, []sitekey.Dirname{"gone.freecode.camp", "learn.freecode.camp", "www.freecode.camp"}, names,
 		"the sweep enumerates from this list, so a site named only by an alias or only by a tombstone "+
 			"is a site no sweep would otherwise look at")
 }

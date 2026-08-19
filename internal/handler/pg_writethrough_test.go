@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeIndex struct {
@@ -20,20 +22,20 @@ type fakeIndex struct {
 	fail           bool
 }
 
-func (f *fakeIndex) FinalizeAtomic(_ context.Context, site, deployID, mode string, _ time.Time, bytes int64) error {
+func (f *fakeIndex) FinalizeAtomic(_ context.Context, site sitekey.Dirname, deployID, mode string, _ time.Time, bytes int64) error {
 	if f.fail {
 		return errors.New("pg down")
 	}
-	f.finalized = append(f.finalized, site+"/"+deployID+"/"+mode)
+	f.finalized = append(f.finalized, string(site)+"/"+deployID+"/"+mode)
 	f.finalizedBytes = bytes
 	return nil
 }
 
-func (f *fakeIndex) AliasAtomic(_ context.Context, site, name, deployID string, _ time.Time) error {
+func (f *fakeIndex) AliasAtomic(_ context.Context, site sitekey.Dirname, name, deployID string, _ time.Time) error {
 	if f.fail {
 		return errors.New("pg down")
 	}
-	f.aliased = append(f.aliased, site+"/"+name+"/"+deployID)
+	f.aliased = append(f.aliased, string(site)+"/"+name+"/"+deployID)
 	return nil
 }
 

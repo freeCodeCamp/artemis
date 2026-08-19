@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type orderRecorder struct {
@@ -15,7 +17,7 @@ type orderRecorder struct {
 	order []string
 }
 
-func (r *orderRecorder) Tombstone(ctx context.Context, site string, d Deploy) error {
+func (r *orderRecorder) Tombstone(ctx context.Context, site sitekey.Dirname, d Deploy) error {
 	r.order = append(r.order, "row")
 	return r.fakeStore.Tombstone(ctx, site, d)
 }
@@ -47,7 +49,7 @@ type rowFailStore struct {
 	*fakeStore
 }
 
-func (s *rowFailStore) Tombstone(context.Context, string, Deploy) error {
+func (s *rowFailStore) Tombstone(context.Context, sitekey.Dirname, Deploy) error {
 	return errors.New("pg down")
 }
 

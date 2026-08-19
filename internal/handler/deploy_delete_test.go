@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeTombstones struct {
@@ -17,19 +19,19 @@ type fakeTombstones struct {
 	err      error
 }
 
-func (f *fakeTombstones) RecordSitePurge(_ context.Context, site string) error {
+func (f *fakeTombstones) RecordSitePurge(_ context.Context, site sitekey.Dirname) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.purged = append(f.purged, site)
+	f.purged = append(f.purged, string(site))
 	return nil
 }
 
-func (f *fakeTombstones) RecordTombstone(_ context.Context, site, id string, bytes int64) error {
+func (f *fakeTombstones) RecordTombstone(_ context.Context, site sitekey.Dirname, id string, bytes int64) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.recorded = append(f.recorded, site+"/"+id)
+	f.recorded = append(f.recorded, string(site)+"/"+id)
 	f.bytes = append(f.bytes, bytes)
 	return nil
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/worker"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func defByName(t *testing.T, defs []worker.WorkflowDef, name string) worker.WorkflowDef {
@@ -75,7 +77,7 @@ type errGCStore struct {
 	err error
 }
 
-func (s *errGCStore) DeploysForSite(context.Context, string) ([]gc.Deploy, error) {
+func (s *errGCStore) DeploysForSite(context.Context, sitekey.Dirname) ([]gc.Deploy, error) {
 	return nil, s.err
 }
 
@@ -155,19 +157,21 @@ func TestNewLiveAliasReader_CollectsTargets(t *testing.T) {
 
 type nopReconcileStore struct{}
 
-func (nopReconcileStore) DeploysForSite(context.Context, string) ([]gc.Deploy, error) {
+func (nopReconcileStore) DeploysForSite(context.Context, sitekey.Dirname) ([]gc.Deploy, error) {
 	return nil, nil
 }
 
-func (nopReconcileStore) AliasTargets(context.Context, string) (map[string]struct{}, time.Time, error) {
+func (nopReconcileStore) AliasTargets(context.Context, sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	return map[string]struct{}{}, time.Time{}, nil
 }
 
-func (nopReconcileStore) ReindexDeploy(context.Context, string, string, time.Time, bool) (bool, error) {
+func (nopReconcileStore) ReindexDeploy(context.Context, sitekey.Dirname, string, time.Time, bool) (bool, error) {
 	return true, nil
 }
-func (nopReconcileStore) RecordTombstone(context.Context, string, string, int64) error { return nil }
-func (nopReconcileStore) PruneDeploy(context.Context, string, string) error            { return nil }
+func (nopReconcileStore) RecordTombstone(context.Context, sitekey.Dirname, string, int64) error {
+	return nil
+}
+func (nopReconcileStore) PruneDeploy(context.Context, sitekey.Dirname, string) error { return nil }
 
 func TestOpenTeamCache_DisabledWithoutValkeyAddr(t *testing.T) {
 	cache, cleanup, err := openTeamCache(context.Background(), &config.Config{})

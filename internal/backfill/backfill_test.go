@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type recordingTransport struct {
@@ -64,14 +66,17 @@ func (f *fakeLister) GetAlias(_ context.Context, key string) (string, error) {
 }
 
 type idxDeploy struct {
-	site, id  string
+	site      sitekey.Dirname
+	id        string
 	mtime     time.Time
 	bytes     int64
 	hasMarker bool
 }
 
 type idxAlias struct {
-	site, name, deployID string
+	site     sitekey.Dirname
+	name     string
+	deployID string
 }
 
 type fakeIndexer struct {
@@ -79,12 +84,12 @@ type fakeIndexer struct {
 	aliases []idxAlias
 }
 
-func (f *fakeIndexer) UpsertDeploy(_ context.Context, site, id string, mtime time.Time, bytes int64, hasMarker bool, _ string) error {
+func (f *fakeIndexer) UpsertDeploy(_ context.Context, site sitekey.Dirname, id string, mtime time.Time, bytes int64, hasMarker bool, _ string) error {
 	f.deploys = append(f.deploys, idxDeploy{site, id, mtime, bytes, hasMarker})
 	return nil
 }
 
-func (f *fakeIndexer) UpsertAlias(_ context.Context, site, name, deployID string, _ time.Time) error {
+func (f *fakeIndexer) UpsertAlias(_ context.Context, site sitekey.Dirname, name, deployID string, _ time.Time) error {
 	f.aliases = append(f.aliases, idxAlias{site, name, deployID})
 	return nil
 }
@@ -325,7 +330,7 @@ func TestBackfill_RendersPrefixesFromTheConfiguredLayout(t *testing.T) {
 	idx := &fakeIndexer{}
 	b := &Backfill{
 		Lister: lister, Indexer: idx, Now: func() time.Time { return time.Unix(0, 0) },
-		SitePrefix: func(dirname string) string { return dirname + "/builds/" },
+		SitePrefix: func(dirname sitekey.Dirname) string { return string(dirname) + "/builds/" },
 		AliasKey:   func(dirname, mode string) string { return dirname + "/" + mode },
 	}
 

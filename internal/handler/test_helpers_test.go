@@ -13,6 +13,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // fakeRegistry implements RegistryWriter in-memory. Tests pre-seed
@@ -522,15 +524,15 @@ type fakeTrash struct {
 	restoredBytes    []int64
 }
 
-func (f *fakeTrash) TombstonesForSite(_ context.Context, site string) ([]gc.Tombstone, error) {
-	return f.tombstonesBySite[site], nil
+func (f *fakeTrash) TombstonesForSite(_ context.Context, site sitekey.Dirname) ([]gc.Tombstone, error) {
+	return f.tombstonesBySite[string(site)], nil
 }
 
-func (f *fakeTrash) RestoreDeploy(_ context.Context, site, id string, _ time.Time, bytes int64) error {
+func (f *fakeTrash) RestoreDeploy(_ context.Context, site sitekey.Dirname, id string, _ time.Time, bytes int64) error {
 	if f.restoreErr != nil {
 		return f.restoreErr
 	}
-	f.restored = append(f.restored, site+"/"+id)
+	f.restored = append(f.restored, string(site)+"/"+id)
 	f.restoredBytes = append(f.restoredBytes, bytes)
 	return nil
 }

@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type errMover struct {
@@ -39,7 +41,7 @@ type errClearReaper struct {
 	clearErr error
 }
 
-func (r *errClearReaper) ClearTombstone(ctx context.Context, site, id string) (bool, error) {
+func (r *errClearReaper) ClearTombstone(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
 	if r.clearErr != nil {
 		return false, r.clearErr
 	}
@@ -67,11 +69,11 @@ type errReconcileStore struct {
 	pruned         []string
 }
 
-func (s *errReconcileStore) DeploysForSite(_ context.Context, site string) ([]Deploy, error) {
-	return s.deploys[site], nil
+func (s *errReconcileStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
+	return s.deploys[string(site)], nil
 }
 
-func (s *errReconcileStore) AliasTargets(_ context.Context, _ string) (map[string]struct{}, time.Time, error) {
+func (s *errReconcileStore) AliasTargets(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	s.aliasCalls++
 	if s.aliasErrOnCall != 0 && s.aliasCalls == s.aliasErrOnCall {
 		return nil, time.Time{}, errors.New("pg read failed")
@@ -79,16 +81,16 @@ func (s *errReconcileStore) AliasTargets(_ context.Context, _ string) (map[strin
 	return s.aliases, time.Time{}, nil
 }
 
-func (s *errReconcileStore) ReindexDeploy(_ context.Context, _, _ string, _ time.Time, _ bool) (bool, error) {
+func (s *errReconcileStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, _ string, _ time.Time, _ bool) (bool, error) {
 	return true, nil
 }
 
-func (s *errReconcileStore) RecordTombstone(_ context.Context, _, id string, _ int64) error {
+func (s *errReconcileStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	s.tombstoned = append(s.tombstoned, id)
 	return nil
 }
 
-func (s *errReconcileStore) PruneDeploy(_ context.Context, _, id string) error {
+func (s *errReconcileStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, id string) error {
 	if s.pruneErr != nil {
 		return s.pruneErr
 	}

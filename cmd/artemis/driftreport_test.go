@@ -15,6 +15,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/registry"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func TestReadOnlyStore_RefusesEveryWrite(t *testing.T) {
@@ -38,7 +40,7 @@ func TestReadOnlyStore_RefusesEveryWrite(t *testing.T) {
 
 type failingDirnameReader struct{ err error }
 
-func (r failingDirnameReader) KnownSiteDirnames(context.Context) ([]string, error) {
+func (r failingDirnameReader) KnownSiteDirnames(context.Context) ([]sitekey.Dirname, error) {
 	return nil, r.err
 }
 
@@ -64,7 +66,7 @@ func TestDriftReportSites_PropagatesEitherReaderFailure(t *testing.T) {
 
 type driftInnerStore struct{ nopReconcileStore }
 
-func (driftInnerStore) DeploysForSite(context.Context, string) ([]gc.Deploy, error) {
+func (driftInnerStore) DeploysForSite(context.Context, sitekey.Dirname) ([]gc.Deploy, error) {
 	return []gc.Deploy{{ID: "ghost", Mtime: time.Now().Add(-30 * 24 * time.Hour)}}, nil
 }
 
@@ -75,10 +77,10 @@ func driftReportReconciler(store gc.ReconcileStore) *gc.Reconciler {
 		Store:        store,
 		Mover:        readOnlyMover{},
 		Grace:        time.Hour,
-		SitePrefix:   func(s string) string { return s + "/deploys/" },
-		DeployPrefix: func(s, id string) string { return s + "/deploys/" + id + "/" },
-		TrashPrefix:  func(s, id string) string { return "_trash/" + s + "/" + id + "/" },
-		LiveAliases: func(context.Context, string) (map[string]struct{}, error) {
+		SitePrefix:   func(s sitekey.Dirname) string { return string(s) + "/deploys/" },
+		DeployPrefix: func(s sitekey.Dirname, id string) string { return string(s) + "/deploys/" + id + "/" },
+		TrashPrefix:  func(s sitekey.Dirname, id string) string { return "_trash/" + string(s) + "/" + id + "/" },
+		LiveAliases: func(context.Context, sitekey.Dirname) (map[string]struct{}, error) {
 			return map[string]struct{}{}, nil
 		},
 		Now: time.Now,
@@ -111,9 +113,9 @@ func TestDriftReportWiring_LiveRunIsRefusedBeforeAnyWrite(t *testing.T) {
 		"it must refuse at wiring, before a mutation is even attempted")
 }
 
-type fakeDirnameReader struct{ sites []string }
+type fakeDirnameReader struct{ sites []sitekey.Dirname }
 
-func (r fakeDirnameReader) KnownSiteDirnames(context.Context) ([]string, error) {
+func (r fakeDirnameReader) KnownSiteDirnames(context.Context) ([]sitekey.Dirname, error) {
 	return r.sites, nil
 }
 
@@ -134,12 +136,12 @@ func TestDriftReportSites_CoversSitesTheSchedulerCannotSee(t *testing.T) {
 	require.NoError(t, err)
 
 	sites, err := driftReportSites(context.Background(),
-		fakeDirnameReader{sites: []string{"orphan.freecode.camp", "www.freecode.camp"}},
+		fakeDirnameReader{sites: []sitekey.Dirname{"orphan.freecode.camp", "www.freecode.camp"}},
 		fakeRegistryReader{slugs: []string{"www", "quiet"}},
 		tmpl)
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"orphan.freecode.camp", "quiet.freecode.camp", "www.freecode.camp"}, sites,
+	assert.Equal(t, []sitekey.Dirname{"orphan.freecode.camp", "quiet.freecode.camp", "www.freecode.camp"}, sites,
 		"the sweep is the union: registry slugs the cron uses, plus dirnames only the stores know about")
 }
 
