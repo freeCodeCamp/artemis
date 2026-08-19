@@ -146,9 +146,12 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 	require.Equal(t, http.StatusOK, gone.Code)
 	var after []SiteRow
 	require.NoError(t, json.Unmarshal(gone.Body.Bytes(), &after))
-	for _, r := range after {
-		assert.NotEqual(t, sitekey.Slug("example"), r.Slug, "successful purge deregisters the site")
+	remaining := make([]sitekey.Slug, len(after))
+	for i, r := range after {
+		remaining[i] = r.Slug
 	}
+	assert.NotContains(t, remaining, sitekey.Slug("example"),
+		"successful purge deregisters the site")
 }
 
 func TestSiteDelete_NoPurge_LeavesBytes(t *testing.T) {
