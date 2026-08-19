@@ -104,3 +104,15 @@ func TestDeployPrefixTemplate_SiteSlugRejectsAForeignDirname(t *testing.T) {
 				"would write a third keyspace into audit_log", dirname)
 	}
 }
+
+// The keyspace guarantee is a property of these signatures, not of the
+// bodies, so pin it where a widening breaks the build rather than a
+// test. A parameter that drifts back to string re-opens the double
+// render SiteDirname(string(dirname)) -> <slug>.<root>.<root>, which is
+// a hostname the wildcard certificate does not cover.
+var (
+	_ func(DeployPrefixTemplate, sitekey.Slug) sitekey.Dirname         = DeployPrefixTemplate.SiteDirname
+	_ func(DeployPrefixTemplate, sitekey.Slug) string                  = DeployPrefixTemplate.SitePrefix
+	_ func(DeployPrefixTemplate, sitekey.Slug, string) string          = DeployPrefixTemplate.DeployPrefix
+	_ func(DeployPrefixTemplate, sitekey.Dirname) (sitekey.Slug, bool) = DeployPrefixTemplate.SiteSlug
+)
