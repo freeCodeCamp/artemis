@@ -35,11 +35,11 @@ type Backfill struct {
 	AliasKey   func(dirname, mode string) string
 }
 
-func (b *Backfill) sitePrefix(dirname string) string {
+func (b *Backfill) sitePrefix(dirname sitekey.Dirname) string {
 	if b.SitePrefix != nil {
-		return b.SitePrefix(sitekey.Dirname(dirname))
+		return b.SitePrefix(dirname)
 	}
-	return dirname + "/deploys/"
+	return string(dirname) + "/deploys/"
 }
 
 func (b *Backfill) aliasKey(dirname, mode string) string {
@@ -72,7 +72,7 @@ func (b *Backfill) Run(ctx context.Context) (Result, error) {
 
 	for _, site := range sites {
 		res.Sites++
-		deploysPrefix := b.sitePrefix(site)
+		deploysPrefix := b.sitePrefix(sitekey.Dirname(site))
 		keys, err := b.Lister.ListPrefix(ctx, deploysPrefix)
 		if err != nil {
 			return res, fmt.Errorf("backfill: list %s: %w", site, err)

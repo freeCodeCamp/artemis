@@ -12,6 +12,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // deployIDPattern matches the artemis deploy id shape
@@ -86,7 +88,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	var deployID string
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		// CAS guard: read current production alias and bail on mismatch.
 		// Treat missing-alias as the empty string so callers can use CAS
@@ -151,7 +153,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), "production", deployID, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
 				return errAliasWriteHandled
 			}
@@ -215,7 +217,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
 		prefix := h.deployPrefix(site, req.To)
 		exists, err := h.R2.HasPrefix(commitCtx, prefix)
 		if err != nil {
@@ -268,7 +270,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), "production", req.To, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
 				return errAliasWriteHandled
 			}
@@ -299,7 +301,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deploysPrefix := h.DeployPrefix.SitePrefix(site)
+	deploysPrefix := h.DeployPrefix.SitePrefix(sitekey.Slug(site))
 	keys, err := h.R2.ListPrefix(r.Context(), deploysPrefix)
 	if err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.deploys", err)

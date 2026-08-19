@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"regexp"
 	"runtime/debug"
 	"strings"
@@ -318,6 +319,9 @@ func scrubAttr(a slog.Attr) (slog.Attr, bool) {
 		case fmt.Stringer:
 			return slog.String(a.Key, ScrubText(t.String())), true
 		default:
+			if rv := reflect.ValueOf(t); rv.Kind() == reflect.String {
+				return slog.String(a.Key, ScrubText(rv.String())), true
+			}
 			return slog.Attr{Key: a.Key, Value: v}, true
 		}
 	default:

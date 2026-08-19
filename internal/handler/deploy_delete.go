@@ -10,6 +10,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const destructiveMoveTimeout = 10 * time.Minute
@@ -38,7 +40,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		moved   int
 		success bool
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
 		for _, mode := range []string{"production", "preview"} {
 			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
 			if err != nil && !r2.IsNotFound(err) {
@@ -63,7 +65,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		if bytesErr != nil {
 			deployBytes = 0
 		}
-		if err := h.Tombstones.RecordTombstone(opCtx, h.DeployPrefix.SiteDirname(site), deployID, deployBytes); err != nil {
+		if err := h.Tombstones.RecordTombstone(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), deployID, deployBytes); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
 			return nil
 		}
@@ -101,5 +103,5 @@ func (h *Handlers) trashPrefix(site, id string) string {
 	if base == "" {
 		base = "_trash/"
 	}
-	return base + string(h.DeployPrefix.SiteDirname(site)) + "/" + id + "/"
+	return base + string(h.DeployPrefix.SiteDirname(sitekey.Slug(site))) + "/" + id + "/"
 }

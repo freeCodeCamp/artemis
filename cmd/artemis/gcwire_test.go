@@ -383,6 +383,6 @@ func TestNewGCWiring_GivesEveryAuditorTheSlugConverter(t *testing.T) {
 			"reverts that writer to dirnames and no test downstream would notice", name)
 		slug, ok := got("test.freecode.camp")
 		require.True(t, ok)
-		assert.Equal(t, "test", slug, "%s", name)
+		assert.Equal(t, sitekey.Slug("test"), slug, "%s", name)
 	}
 }

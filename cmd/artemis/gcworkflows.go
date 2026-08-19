@@ -184,7 +184,7 @@ func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []sitek
 	}
 	names := make([]sitekey.Dirname, 0, len(slugs))
 	for _, s := range slugs {
-		names = append(names, tmpl.SiteDirname(s))
+		names = append(names, tmpl.SiteDirname(sitekey.Slug(s)))
 	}
 	return names
 }

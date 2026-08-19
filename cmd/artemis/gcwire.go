@@ -47,7 +47,7 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	h.Audit = repo
 }
 
-type siteSlugFn func(dirname sitekey.Dirname) (string, bool)
+type siteSlugFn func(dirname sitekey.Dirname) (sitekey.Slug, bool)
 
 // auditSite converts the gc keyspace (storage dirname) to the registry
 // slug every audit_log reader queries by. An unmappable dirname keeps
@@ -62,7 +62,7 @@ func auditSite(toSlug siteSlugFn, site sitekey.Dirname) (string, map[string]any)
 		captureAuditFailure("audit.site_unmapped", fmt.Errorf("audit: site %q renders from no slug", site))
 		return string(site), map[string]any{"site_unmapped": true}
 	}
-	return slug, nil
+	return string(slug), nil
 }
 
 type gcPurgeAuditor struct {

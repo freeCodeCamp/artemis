@@ -25,7 +25,7 @@ func TestStorageSiteNames_ProduceThePrefixTheWritePathUsed(t *testing.T) {
 	require.Len(t, names, len(slugs))
 
 	for i, slug := range slugs {
-		require.Equal(t, tmpl.SitePrefix(slug), layout.sitePrefix(names[i]),
+		require.Equal(t, tmpl.SitePrefix(sitekey.Slug(slug)), layout.sitePrefix(names[i]),
 			"slug %q: reconcile would list a prefix no deploy is stored under", slug)
 	}
 }
@@ -71,12 +71,12 @@ func TestGCLayout_AgreesWithTheWritePathOnEveryRenderedKey(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, slug := range []string{"test", "hello-universe", "www"} {
-		dirname := tmpl.SiteDirname(slug)
+		dirname := tmpl.SiteDirname(sitekey.Slug(slug))
 		const id = "20260101-000000-abc1234"
 
-		require.Equal(t, tmpl.SitePrefix(slug), layout.sitePrefix(dirname),
+		require.Equal(t, tmpl.SitePrefix(sitekey.Slug(slug)), layout.sitePrefix(dirname),
 			"slug %q: the sweep lists a prefix the write path never produces", slug)
-		require.Equal(t, tmpl.DeployPrefix(slug, id), layout.deployPrefix(dirname, id),
+		require.Equal(t, tmpl.DeployPrefix(sitekey.Slug(slug), id), layout.deployPrefix(dirname, id),
 			"slug %q: gc would move a prefix no deploy was written to, so the real bytes stay and the "+
 				"tombstone dates nothing", slug)
 		require.Equal(t, "_trash/"+string(dirname)+"/"+id+"/", layout.trashPrefix(dirname, id),

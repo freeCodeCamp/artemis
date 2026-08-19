@@ -49,16 +49,16 @@ func NewDeployPrefixTemplate(raw string) (DeployPrefixTemplate, error) {
 
 // SitePrefix returns the R2 key prefix that contains every deploy for a
 // site, e.g. "www/deploys/". Always ends with "/".
-func (t DeployPrefixTemplate) SitePrefix(site string) string {
-	p := strings.ReplaceAll(t.head, "<site>", site)
+func (t DeployPrefixTemplate) SitePrefix(site sitekey.Slug) string {
+	p := strings.ReplaceAll(t.head, "<site>", string(site))
 	if !strings.HasSuffix(p, "/") {
 		p += "/"
 	}
 	return p
 }
 
-func (t DeployPrefixTemplate) SiteDirname(site string) sitekey.Dirname {
-	p := t.SitePrefix(site)
+func (t DeployPrefixTemplate) SiteDirname(site sitekey.Slug) sitekey.Dirname {
+	p := t.SitePrefix(sitekey.Slug(site))
 	if i := strings.IndexByte(p, '/'); i >= 0 {
 		return sitekey.Dirname(p[:i])
 	}
@@ -69,7 +69,7 @@ func (t DeployPrefixTemplate) SiteDirname(site string) sitekey.Dirname {
 // storage dirname that this template renders for it. ok is false when
 // dirname carries neither the prefix nor the suffix the site segment
 // adds, i.e. nothing this template could have produced.
-func (t DeployPrefixTemplate) SiteSlug(dirname sitekey.Dirname) (string, bool) {
+func (t DeployPrefixTemplate) SiteSlug(dirname sitekey.Dirname) (sitekey.Slug, bool) {
 	pattern := string(t.SiteDirname(siteToken))
 	i := strings.Index(pattern, siteToken)
 	if i < 0 {
@@ -83,13 +83,13 @@ func (t DeployPrefixTemplate) SiteSlug(dirname sitekey.Dirname) (string, bool) {
 	if !strings.HasPrefix(raw, prefix) || !strings.HasSuffix(raw, suffix) {
 		return "", false
 	}
-	return raw[len(prefix) : len(raw)-len(suffix)], true
+	return sitekey.Slug(raw[len(prefix) : len(raw)-len(suffix)]), true
 }
 
 // DeployPrefix returns the R2 key prefix for one deploy, e.g.
 // "www/deploys/20260420-141522-abc1234/". Always ends with "/".
-func (t DeployPrefixTemplate) DeployPrefix(site, deployID string) string {
-	p := strings.ReplaceAll(t.head, "<site>", site) + deployID + t.tail
+func (t DeployPrefixTemplate) DeployPrefix(site sitekey.Slug, deployID string) string {
+	p := strings.ReplaceAll(t.head, "<site>", string(site)) + deployID + t.tail
 	if !strings.HasSuffix(p, "/") {
 		p += "/"
 	}

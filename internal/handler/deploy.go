@@ -16,6 +16,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // DeployInitRequest is the body of POST /api/deploy/init.
@@ -86,7 +88,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	telemetry.FromContext(r.Context()).SetResource(req.Site, deployID)
-	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(req.Site), deployID)
+	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(req.Site)), deployID)
 	h.logAction(r.Context(), "deploy.init", "success")
 	h.auditFromScope(r.Context(), "deploy.init", "success", map[string]any{"sha": req.SHA})
 
@@ -265,7 +267,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	aliasKey := h.aliasKey(claims.Site, mode)
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(claims.Site)), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		if _, err := h.Registry.GetSite(commitCtx, claims.Site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
@@ -283,7 +285,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
-				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
+				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(sitekey.Slug(claims.Site)), deployID, mode, time.Now().UTC(), deployBytes)
 			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
@@ -356,7 +358,7 @@ func frameworkBuildHint(files []string) string {
 // deployPrefix returns the R2 key prefix for one deploy, e.g.
 // "www/deploys/20260420-141522-abc1234/".
 func (h *Handlers) deployPrefix(site, deployID string) string {
-	return h.DeployPrefix.DeployPrefix(site, deployID)
+	return h.DeployPrefix.DeployPrefix(sitekey.Slug(site), deployID)
 }
 
 // aliasKey returns the R2 alias key for `mode` ("preview"/"production").

@@ -52,7 +52,7 @@ func resolveSweepSite(known []sitekey.Dirname, tmpl handler.DeployPrefixTemplate
 	if slices.Contains(known, sitekey.Dirname(arg)) {
 		return sitekey.Dirname(arg), nil
 	}
-	dirname := tmpl.SiteDirname(arg)
+	dirname := tmpl.SiteDirname(sitekey.Slug(arg))
 	if slices.Contains(known, dirname) {
 		return dirname, nil
 	}

@@ -72,8 +72,8 @@ func TestDeployPrefixTemplate_SiteSlugInvertsSiteDirname(t *testing.T) {
 	tpl, err := NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
 	require.NoError(t, err)
 
-	for _, slug := range []string{"www", "test", "a", "learn-beta", "a.freecode.camp"} {
-		dirname := tpl.SiteDirname(slug)
+	for _, slug := range []sitekey.Slug{"www", "test", "a", "learn-beta", "a.freecode.camp"} {
+		dirname := tpl.SiteDirname(sitekey.Slug(slug))
 		got, ok := tpl.SiteSlug(dirname)
 
 		require.True(t, ok, "SiteDirname(%q) rendered %q, which SiteSlug must accept", slug, dirname)
@@ -89,7 +89,7 @@ func TestDeployPrefixTemplate_SiteSlugIsIdentityWhenTheFormatAddsNoAffixes(t *te
 
 	got, ok := tpl.SiteSlug("www")
 	require.True(t, ok)
-	assert.Equal(t, "www", got,
+	assert.Equal(t, sitekey.Slug("www"), got,
 		"under the test format slug and dirname coincide; the inverse must not invent a difference")
 }
 

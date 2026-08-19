@@ -10,6 +10,8 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const defaultTrashRecovery = 7 * 24 * time.Hour
@@ -37,7 +39,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		liveBytes int64
 		outcome   string
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
 		if _, err := h.Registry.GetSite(opCtx, site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
 				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be restored")
@@ -64,7 +66,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			liveBytes = 0
 		}
 
-		restoreErr := h.Trash.RestoreDeploy(opCtx, h.DeployPrefix.SiteDirname(site), deployID, h.Now().UTC(), liveBytes)
+		restoreErr := h.Trash.RestoreDeploy(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), deployID, h.Now().UTC(), liveBytes)
 		if restoreErr != nil {
 			if !errors.Is(restoreErr, registry.ErrNotFound) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "restore_failed", "pg.restore.deploy", restoreErr)
@@ -123,7 +125,7 @@ func (h *Handlers) SiteTrashList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tombstones, err := h.Trash.TombstonesForSite(r.Context(), h.DeployPrefix.SiteDirname(site))
+	tombstones, err := h.Trash.TombstonesForSite(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(site)))
 	if err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "pg_read_failed", "pg.tombstones.list", err)
 		return

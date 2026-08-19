@@ -12,6 +12,8 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // SiteRow is the canonical JSON shape for a registry row across
@@ -163,7 +165,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		site      registry.Site
 		wrote     bool
 	)
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(slug), func() error {
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(slug)), func() error {
 		before, beforeErr = h.Registry.GetSite(r.Context(), slug)
 		var err error
 		site, err = h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
@@ -244,7 +246,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "_trash/"
 	}
-	dirname := h.DeployPrefix.SiteDirname(slug)
+	dirname := h.DeployPrefix.SiteDirname(sitekey.Slug(slug))
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
 	defer cancel()
 	var (
