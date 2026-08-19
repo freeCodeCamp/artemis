@@ -134,6 +134,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `CLEANUP_BLAST_CAP`       | `10`                      | Max deploys reclaimed per sweep, oldest first; `0` refuses every destructive repair          |
 | `CLEANUP_TRASH_PREFIX`    | `_trash/`                 | R2 prefix soft-deleted (tombstoned) objects move to before hard purge                        |
 | `CLEANUP_RECOVERY_DAYS`   | `7`                       | Days a tombstone survives before the purge pass hard-deletes it                              |
+| `CLEANUP_OUTBOX_RETENTION_DAYS` | `30`                | Days a **published** outbox row is kept; unpublished rows are never purged, at any age       |
 | `CLEANUP_DRY_RUN`         | `false`                   | Plan-only GC: compute + log the delete set, execute nothing                                  |
 
 ## Observability
