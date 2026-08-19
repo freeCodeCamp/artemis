@@ -2,6 +2,38 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.8.0](https://github.com/freeCodeCamp/artemis/compare/v1.7.0...v1.8.0) (2026-08-19)
+
+
+### Features
+
+* **gc:** expire abandoned deploy sessions ([7a92fde](https://github.com/freeCodeCamp/artemis/commit/7a92fde55206ef81a5ca1673a4bef93f6fc21e47))
+* **handler:** register the deploy session at init ([1059c6d](https://github.com/freeCodeCamp/artemis/commit/1059c6d80b49f66a883a911cb3d11eeafec90263))
+* **pg:** record a pending row when a deploy starts ([7e26730](https://github.com/freeCodeCamp/artemis/commit/7e267300fb3ca9c5929d391b8a61bcd32e24b9fc))
+
+
+### Bug Fixes
+
+* **auth:** bound the in-process identity caches ([5c1cc74](https://github.com/freeCodeCamp/artemis/commit/5c1cc74d620517dd3c9b2cb743abdd212e76890a))
+* **auth:** classify 429s and close review findings ([6b1ad31](https://github.com/freeCodeCamp/artemis/commit/6b1ad31a7f68e5ecd241950a8f936f057dd10696))
+* **auth:** classify secondary throttles as rate limits ([a4c3abc](https://github.com/freeCodeCamp/artemis/commit/a4c3abc7ca3b2c47a7b9ffe1107bc1152ef7f72f))
+* **auth:** give the scope guard an honest signature ([030a9c6](https://github.com/freeCodeCamp/artemis/commit/030a9c6364df7049ab3475342ff7f1ca082942ad))
+* **backfill:** render R2 keys from the configured layout ([5c97934](https://github.com/freeCodeCamp/artemis/commit/5c97934f388230faa01e6f2b4abc15a3a65b0e10))
+* **cli:** name the failing subcommand on stderr ([b093460](https://github.com/freeCodeCamp/artemis/commit/b093460c73965cb6b01fdadaff415e8632f9b119))
+* **cli:** reject unknown subcommands and stray args ([94acced](https://github.com/freeCodeCamp/artemis/commit/94acceda378e33579f4868f81f67f9dd0b5966cd))
+* **drift:** alert on accruing reclaimable drift ([a5884ce](https://github.com/freeCodeCamp/artemis/commit/a5884ce4a5190a75c4068767864a0434270ab9aa))
+* **drift:** stop the blast cap silencing the report ([96d1022](https://github.com/freeCodeCamp/artemis/commit/96d10228a435a6f151347030e8cc4d5cec56a6c2))
+* **gc:** cap the purge and survive per-site failures ([2e15f45](https://github.com/freeCodeCamp/artemis/commit/2e15f45e38cf57fb7ec39adb21a263ba64a554a4))
+* **gc:** give both gc jobs explicit run budgets ([4c1cb7d](https://github.com/freeCodeCamp/artemis/commit/4c1cb7d0a410ca26826411e8961319b463c08da3))
+* **gc:** make a zero blast cap refuse, not unleash ([5b9bb0f](https://github.com/freeCodeCamp/artemis/commit/5b9bb0fb29b767f46241156040483a30d7c0aac6))
+* **gc:** read live aliases in the sweep keyspace ([9fcad98](https://github.com/freeCodeCamp/artemis/commit/9fcad988d2bdb12cadd9d6d69b182bf894471eec))
+* **gc:** reap the oldest across both delete sources ([04f48cf](https://github.com/freeCodeCamp/artemis/commit/04f48cf7b26556bc6f1fd76ad16a5e3584cbde1d))
+* **gc:** record the tombstone row before moving bytes ([a5ed663](https://github.com/freeCodeCamp/artemis/commit/a5ed663b73c1d7e825e64f5249079909c3147cb5))
+* **gc:** refuse a site token outside the site segment ([9f90a06](https://github.com/freeCodeCamp/artemis/commit/9f90a066e30881efed8c9bee315768c9f975645a))
+* **handler:** build public URLs from config ([11eb897](https://github.com/freeCodeCamp/artemis/commit/11eb897e4641a563e5d969d218c1716052c7d415))
+* **handler:** record tombstones before moving bytes ([5fa5317](https://github.com/freeCodeCamp/artemis/commit/5fa53179df8df1d9c64ddd8b8abeecbc9c72a387))
+* **server:** give upload and finalize a deadline ([7036f49](https://github.com/freeCodeCamp/artemis/commit/7036f494be5c4c7008cd44e07d2dde03ab45e81a))
+
 ## [1.7.0](https://github.com/freeCodeCamp/artemis/compare/v1.6.4...v1.7.0) (2026-08-17)
 
 
