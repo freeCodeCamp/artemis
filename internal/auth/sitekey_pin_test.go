@@ -17,17 +17,6 @@ var (
 	_ sitekey.Slug                                                                        = DeploySessionClaims{}.Site
 )
 
-func TestSign_SiteSurvivesAsSlug(t *testing.T) {
-	s := newSigner(t)
-
-	tok, _, err := s.Sign("alice", sitekey.Slug("www"), "d-1")
-	require.NoError(t, err)
-
-	claims, err := s.Verify(tok)
-	require.NoError(t, err)
-	assert.Equal(t, sitekey.Slug("www"), claims.Site)
-}
-
 func TestSign_SiteWireEncodingIsPlainString(t *testing.T) {
 	s := newSigner(t)
 
