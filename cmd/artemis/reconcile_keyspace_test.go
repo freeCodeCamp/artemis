@@ -20,12 +20,12 @@ func TestStorageSiteNames_ProduceThePrefixTheWritePathUsed(t *testing.T) {
 	layout, err := newGCLayout(domainFormat, "_trash/")
 	require.NoError(t, err)
 
-	slugs := []string{"test", "hello-universe", "flag-frenzy"}
+	slugs := []sitekey.Slug{"test", "hello-universe", "flag-frenzy"}
 	names := storageSiteNames(slugs, tmpl)
 	require.Len(t, names, len(slugs))
 
 	for i, slug := range slugs {
-		require.Equal(t, tmpl.SitePrefix(sitekey.Slug(slug)), layout.sitePrefix(names[i]),
+		require.Equal(t, tmpl.SitePrefix(slug), layout.sitePrefix(names[i]),
 			"slug %q: reconcile would list a prefix no deploy is stored under", slug)
 	}
 }
@@ -38,7 +38,7 @@ func TestStorageSiteNames_MatchTheOutboxSiteChangedForm(t *testing.T) {
 
 	require.Equal(t,
 		[]sitekey.Dirname{tmpl.SiteDirname("test")},
-		storageSiteNames([]string{"test"}, tmpl))
+		storageSiteNames([]sitekey.Slug{"test"}, tmpl))
 }
 
 func TestStorageSiteNames_EmptyRegistryYieldsNoNames(t *testing.T) {
@@ -57,7 +57,7 @@ func TestStorageSiteNames_BareFormatIsIdentity(t *testing.T) {
 	layout, err := newGCLayout("<site>/deploys/<ts>-<sha>/", "_trash/")
 	require.NoError(t, err)
 
-	names := storageSiteNames([]string{"test", "www"}, tmpl)
+	names := storageSiteNames([]sitekey.Slug{"test", "www"}, tmpl)
 	require.Equal(t, []sitekey.Dirname{"test", "www"}, names)
 	require.Equal(t, tmpl.SitePrefix("test"), layout.sitePrefix(names[0]))
 }

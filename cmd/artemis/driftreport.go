@@ -245,7 +245,7 @@ func driftReportSites(ctx context.Context, repo siteDirnameReader, reg registryS
 	if err != nil {
 		return nil, err
 	}
-	slugs := make([]string, 0, len(sites))
+	slugs := make([]sitekey.Slug, 0, len(sites))
 	for _, s := range sites {
 		slugs = append(slugs, s.Slug)
 	}

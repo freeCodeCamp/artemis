@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -19,7 +20,7 @@ import (
 // unknown mode, 404 when the alias key has not been written yet
 // (fresh site, never finalized), 502 on R2 transport errors.
 func (h *Handlers) AliasGet(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	mode := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "mode")))
 
 	switch mode {

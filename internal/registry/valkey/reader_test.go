@@ -10,6 +10,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // eventually polls fn every 10ms until it returns true or timeout
@@ -49,7 +50,7 @@ func TestReader_InitialSnapshotPreloadsState(t *testing.T) {
 	require.NoError(t, err)
 
 	snap := r.Snapshot()
-	require.Equal(t, []string{"preexisting"}, snap.Sites())
+	require.Equal(t, []sitekey.Slug{"preexisting"}, snap.Sites())
 	require.Equal(t, []string{"staff"}, snap.TeamsForSite("preexisting"))
 }
 

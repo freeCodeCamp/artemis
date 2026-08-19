@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // onRefreshErrorFn names the OnRefreshError callback type so it can
@@ -67,23 +68,23 @@ func (r *Reader) SetOnRefreshError(f func(error)) {
 // returned from Sites/TeamsForSite — the snapshot returns fresh
 // copies on every call.
 type snapshot struct {
-	bySite map[string][]string
+	bySite map[sitekey.Slug][]string
 }
 
 // Sites returns the registered slugs sorted ascending. The returned
 // slice is a fresh copy; callers may mutate freely.
-func (s snapshot) Sites() []string {
-	out := make([]string, 0, len(s.bySite))
+func (s snapshot) Sites() []sitekey.Slug {
+	out := make([]sitekey.Slug, 0, len(s.bySite))
 	for k := range s.bySite {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
 // TeamsForSite returns the team slugs authorized for the given site,
 // or nil when the slug is absent. The returned slice is a fresh copy.
-func (s snapshot) TeamsForSite(slug string) []string {
+func (s snapshot) TeamsForSite(slug sitekey.Slug) []string {
 	teams, ok := s.bySite[slug]
 	if !ok {
 		return nil
@@ -136,7 +137,7 @@ func (r *Reader) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	bySite := make(map[string][]string, len(sites))
+	bySite := make(map[sitekey.Slug][]string, len(sites))
 	for _, s := range sites {
 		teams := make([]string, len(s.Teams))
 		copy(teams, s.Teams)

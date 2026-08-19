@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // callRegister POSTs the given body to SiteRegister with the test
@@ -46,7 +48,7 @@ func TestSiteRegister_HappyPath(t *testing.T) {
 
 	var got SiteRegisterResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-	assert.Equal(t, "example", got.Slug)
+	assert.Equal(t, sitekey.Slug("example"), got.Slug)
 	assert.Equal(t, []string{"staff", "platform"}, got.Teams)
 	assert.Equal(t, "alice", got.CreatedBy)
 	assert.False(t, got.CreatedAt.IsZero())
@@ -115,7 +117,7 @@ func TestSiteRegister_409OnDuplicateSlug(t *testing.T) {
 func TestSiteRegister_400OnInvalidSlug(t *testing.T) {
 	cases := []struct {
 		name string
-		slug string
+		slug sitekey.Slug
 	}{
 		{"empty", ""},
 		{"uppercase", "Example"},

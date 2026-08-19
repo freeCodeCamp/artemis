@@ -5,6 +5,8 @@
 // The single implementation lives at internal/registry/valkey.
 package registry
 
+import "github.com/freeCodeCamp/artemis/internal/sitekey"
+
 // Snapshot is a point-in-time view of the registry. Each call to
 // Reader.Snapshot returns a freshly captured Snapshot — callers
 // holding the returned value see a stable view across multiple
@@ -13,12 +15,12 @@ type Snapshot interface {
 	// Sites returns the registered slugs in stable (typically sorted)
 	// order. The returned slice is safe to mutate; callers do not
 	// need to copy defensively before iteration.
-	Sites() []string
+	Sites() []sitekey.Slug
 
 	// TeamsForSite returns the GitHub team slugs authorized for the
 	// given site, or nil when the site is not in the registry. The
 	// returned slice is safe to mutate.
-	TeamsForSite(slug string) []string
+	TeamsForSite(slug sitekey.Slug) []string
 }
 
 // Reader is the read-side handler-facing contract. Writers use the

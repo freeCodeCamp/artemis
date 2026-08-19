@@ -119,7 +119,7 @@ func (r fakeDirnameReader) KnownSiteDirnames(context.Context) ([]sitekey.Dirname
 	return r.sites, nil
 }
 
-type fakeRegistryReader struct{ slugs []string }
+type fakeRegistryReader struct{ slugs []sitekey.Slug }
 
 func (r fakeRegistryReader) Sites(context.Context) ([]registry.Site, error) {
 	out := make([]registry.Site, 0, len(r.slugs))
@@ -137,7 +137,7 @@ func TestDriftReportSites_CoversSitesTheSchedulerCannotSee(t *testing.T) {
 
 	sites, err := driftReportSites(context.Background(),
 		fakeDirnameReader{sites: []sitekey.Dirname{"orphan.freecode.camp", "www.freecode.camp"}},
-		fakeRegistryReader{slugs: []string{"www", "quiet"}},
+		fakeRegistryReader{slugs: []sitekey.Slug{"www", "quiet"}},
 		tmpl)
 	require.NoError(t, err)
 

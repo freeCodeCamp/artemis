@@ -17,7 +17,7 @@ import (
 const defaultTrashRecovery = 7 * 24 * time.Hour
 
 func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return
 	}
@@ -39,7 +39,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		liveBytes int64
 		outcome   string
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		if _, err := h.Registry.GetSite(opCtx, site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
 				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be restored")
@@ -66,7 +66,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			liveBytes = 0
 		}
 
-		restoreErr := h.Trash.RestoreDeploy(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), deployID, h.Now().UTC(), liveBytes)
+		restoreErr := h.Trash.RestoreDeploy(opCtx, h.DeployPrefix.SiteDirname(site), deployID, h.Now().UTC(), liveBytes)
 		if restoreErr != nil {
 			if !errors.Is(restoreErr, registry.ErrNotFound) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "restore_failed", "pg.restore.deploy", restoreErr)
@@ -96,7 +96,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(site), deployID)
 	attrs := []slog.Attr{slog.Int("moved", moved)}
 	detail := map[string]any{"moved": moved}
 	if outcome == "success" {
@@ -115,7 +115,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) SiteTrashList(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return
 	}
@@ -125,7 +125,7 @@ func (h *Handlers) SiteTrashList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tombstones, err := h.Trash.TombstonesForSite(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(site)))
+	tombstones, err := h.Trash.TombstonesForSite(r.Context(), h.DeployPrefix.SiteDirname(site))
 	if err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "pg_read_failed", "pg.tombstones.list", err)
 		return

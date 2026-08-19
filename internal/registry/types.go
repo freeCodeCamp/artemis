@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // Site is the in-memory representation of one registry row. It is the
@@ -11,7 +13,7 @@ import (
 // handlers; backends are responsible for marshalling to/from their
 // wire encodings (e.g. Valkey hash fields).
 type Site struct {
-	Slug      string
+	Slug      sitekey.Slug
 	Teams     []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -45,17 +47,17 @@ type Writer interface {
 	// reflects the source-of-truth at call time.
 	Sites(ctx context.Context) ([]Site, error)
 
-	GetSite(ctx context.Context, slug string) (Site, error)
+	GetSite(ctx context.Context, slug sitekey.Slug) (Site, error)
 
 	// Register creates a new site row and publishes a
 	// registry.changed event on success. Returns ErrAlreadyExists
 	// when slug is already registered.
-	Register(ctx context.Context, slug string, teams []string, createdBy string) (Site, error)
+	Register(ctx context.Context, slug sitekey.Slug, teams []string, createdBy string) (Site, error)
 
 	// UpdateTeams replaces the teams list for an existing slug,
 	// stamps updated_at, and publishes a registry.changed event.
 	// Returns ErrNotFound if the slug is absent.
-	UpdateTeams(ctx context.Context, slug string, teams []string) (Site, error)
+	UpdateTeams(ctx context.Context, slug sitekey.Slug, teams []string) (Site, error)
 
 	// Delete removes a slug from the registry (hash row + index set
 	// member) and publishes a registry.changed event. Returns
@@ -65,5 +67,5 @@ type Writer interface {
 	// gc-site never fires for the site again. The bytes and index
 	// rows stay until an operator runs `artemis reconcile` or the
 	// slug is re-registered (which resumes normal retention).
-	Delete(ctx context.Context, slug string) error
+	Delete(ctx context.Context, slug sitekey.Slug) error
 }

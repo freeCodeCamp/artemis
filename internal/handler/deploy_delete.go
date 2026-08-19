@@ -19,7 +19,7 @@ const destructiveMoveTimeout = 10 * time.Minute
 const aliasCommitTimeout = 60 * time.Second
 
 func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return
 	}
@@ -40,7 +40,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		moved   int
 		success bool
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		for _, mode := range []string{"production", "preview"} {
 			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
 			if err != nil && !r2.IsNotFound(err) {
@@ -65,7 +65,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		if bytesErr != nil {
 			deployBytes = 0
 		}
-		if err := h.Tombstones.RecordTombstone(opCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), deployID, deployBytes); err != nil {
+		if err := h.Tombstones.RecordTombstone(opCtx, h.DeployPrefix.SiteDirname(site), deployID, deployBytes); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.record", err)
 			return nil
 		}
@@ -87,7 +87,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(site), deployID)
 	h.logAction(r.Context(), "site.deploy.delete", "success", slog.Int("moved", moved))
 	h.auditFromScope(r.Context(), "site.deploy.delete", "success", map[string]any{"moved": moved})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -98,10 +98,10 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handlers) trashPrefix(site, id string) string {
+func (h *Handlers) trashPrefix(site sitekey.Slug, id string) string {
 	base := h.TrashPrefixBase
 	if base == "" {
 		base = "_trash/"
 	}
-	return base + string(h.DeployPrefix.SiteDirname(sitekey.Slug(site))) + "/" + id + "/"
+	return base + string(h.DeployPrefix.SiteDirname(site)) + "/" + id + "/"
 }

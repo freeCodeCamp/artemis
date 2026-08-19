@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // newMiniredis returns a miniredis server seeded with the given
@@ -114,7 +115,7 @@ func TestStore_Register_HappyPath(t *testing.T) {
 
 	got, err := s.Register(ctx, "blog", []string{"news-editors", "platform"}, "alice")
 	require.NoError(t, err)
-	require.Equal(t, "blog", got.Slug)
+	require.Equal(t, sitekey.Slug("blog"), got.Slug)
 	require.Equal(t, []string{"news-editors", "platform"}, got.Teams)
 	require.Equal(t, "alice", got.CreatedBy)
 	require.False(t, got.CreatedAt.IsZero())
@@ -253,7 +254,7 @@ func TestStore_Sites_EnumeratesSorted(t *testing.T) {
 	s, _, _ := newStore(t)
 	ctx := context.Background()
 
-	for _, slug := range []string{"charlie", "alpha", "bravo"} {
+	for _, slug := range []sitekey.Slug{"charlie", "alpha", "bravo"} {
 		_, err := s.Register(ctx, slug, []string{"staff"}, "alice")
 		require.NoError(t, err)
 	}
@@ -261,9 +262,9 @@ func TestStore_Sites_EnumeratesSorted(t *testing.T) {
 	all, err := s.Sites(ctx)
 	require.NoError(t, err)
 	require.Len(t, all, 3)
-	require.Equal(t, "alpha", all[0].Slug)
-	require.Equal(t, "bravo", all[1].Slug)
-	require.Equal(t, "charlie", all[2].Slug)
+	require.Equal(t, sitekey.Slug("alpha"), all[0].Slug)
+	require.Equal(t, sitekey.Slug("bravo"), all[1].Slug)
+	require.Equal(t, sitekey.Slug("charlie"), all[2].Slug)
 }
 
 func TestStore_Sites_EmptyWhenUnregistered(t *testing.T) {
@@ -290,7 +291,7 @@ func TestStore_UpdateTeams_HappyPath(t *testing.T) {
 	updated, err := s.UpdateTeams(ctx, "blog", []string{"news-editors", "platform"})
 	require.NoError(t, err)
 
-	require.Equal(t, "blog", updated.Slug)
+	require.Equal(t, sitekey.Slug("blog"), updated.Slug)
 	require.Equal(t, []string{"news-editors", "platform"}, updated.Teams)
 	require.Equal(t, "alice", updated.CreatedBy, "created_by must round-trip")
 	require.True(t, updated.CreatedAt.Equal(original.CreatedAt), "created_at frozen")
@@ -403,7 +404,7 @@ func TestStore_Subscribe_DeliversInOrder(t *testing.T) {
 
 	want := []string{"alpha", "bravo", "charlie"}
 	for _, slug := range want {
-		_, err := s.Register(ctx, slug, []string{"staff"}, "alice")
+		_, err := s.Register(ctx, sitekey.Slug(slug), []string{"staff"}, "alice")
 		require.NoError(t, err)
 	}
 

@@ -57,7 +57,7 @@ type SitePromoteRequest struct {
 //
 // Authz: unchanged — staff-team gate enforced by requireSiteAuthz.
 func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return // already wrote response
 	}
@@ -88,7 +88,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	var deployID string
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		// CAS guard: read current production alias and bail on mismatch.
 		// Treat missing-alias as the empty string so callers can use CAS
@@ -153,7 +153,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), "production", deployID, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
 				return errAliasWriteHandled
 			}
@@ -166,7 +166,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	telemetry.FromContext(r.Context()).SetResource(site, deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(site), deployID)
 	h.logAction(r.Context(), "site.promote", "success")
 	h.auditFromScope(r.Context(), "site.promote", "success", nil)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -193,7 +193,7 @@ type SiteRollbackRequest struct {
 // cron) or if ExpectedCurrent is set and disagrees with the current
 // production alias body.
 func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return
 	}
@@ -217,7 +217,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		prefix := h.deployPrefix(site, req.To)
 		exists, err := h.R2.HasPrefix(commitCtx, prefix)
 		if err != nil {
@@ -270,7 +270,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(site)), "production", req.To, time.Now().UTC()); err != nil {
+			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
 				return errAliasWriteHandled
 			}
@@ -283,7 +283,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	telemetry.FromContext(r.Context()).SetResource(site, req.To)
+	telemetry.FromContext(r.Context()).SetResource(string(site), req.To)
 	h.logAction(r.Context(), "site.rollback", "success", slog.String("to", req.To))
 	h.auditFromScope(r.Context(), "site.rollback", "success", map[string]any{"to": req.To})
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -296,12 +296,12 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 // deploys under <site>/deploys/. Each deploy is identified by the prefix
 // segment "<ts>-<sha>".
 func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
-	site := chi.URLParam(r, "site")
+	site := sitekey.Slug(chi.URLParam(r, "site"))
 	if err := h.requireSiteAuthz(w, r, site); err != nil {
 		return
 	}
 
-	deploysPrefix := h.DeployPrefix.SitePrefix(sitekey.Slug(site))
+	deploysPrefix := h.DeployPrefix.SitePrefix(site)
 	keys, err := h.R2.ListPrefix(r.Context(), deploysPrefix)
 	if err != nil {
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.deploys", err)
@@ -310,7 +310,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 
 	actors := map[string]string{}
 	if h.Audit != nil {
-		if a, aErr := h.Audit.DeployActors(r.Context(), site); aErr != nil {
+		if a, aErr := h.Audit.DeployActors(r.Context(), string(site)); aErr != nil {
 			slog.WarnContext(r.Context(), "site.deploys.actor_join_failed", "site", site, "err", aErr)
 		} else {
 			actors = a
@@ -344,7 +344,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 // authenticated GitHub user is on at least one of the site's authorized
 // teams. Writes the response on failure and returns a non-nil error so
 // the caller can early-return without further work.
-func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site string) error {
+func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site sitekey.Slug) error {
 	teams := h.Sites.Snapshot().TeamsForSite(site)
 	if len(teams) == 0 {
 		writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")

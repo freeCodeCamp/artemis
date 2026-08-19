@@ -20,11 +20,11 @@ import (
 // register / list / update endpoints. The shape is stable so
 // universe-cli can decode the same struct from any of them.
 type SiteRow struct {
-	Slug      string    `json:"slug"`
-	Teams     []string  `json:"teams"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	CreatedBy string    `json:"createdBy"`
+	Slug      sitekey.Slug `json:"slug"`
+	Teams     []string     `json:"teams"`
+	CreatedAt time.Time    `json:"createdAt"`
+	UpdatedAt time.Time    `json:"updatedAt"`
+	CreatedBy string       `json:"createdBy"`
 }
 
 func toSiteRow(s registry.Site) SiteRow {
@@ -39,8 +39,8 @@ func toSiteRow(s registry.Site) SiteRow {
 
 // SiteRegisterRequest is the body of POST /api/site/register.
 type SiteRegisterRequest struct {
-	Slug  string   `json:"slug"`
-	Teams []string `json:"teams,omitempty"`
+	Slug  sitekey.Slug `json:"slug"`
+	Teams []string     `json:"teams,omitempty"`
 }
 
 // SiteRegisterResponse is the 201 body returned on successful
@@ -79,7 +79,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req, maxJSONBodyBytes) {
 		return
 	}
-	if !slugRe.MatchString(req.Slug) {
+	if !slugRe.MatchString(string(req.Slug)) {
 		writeError(w, http.StatusBadRequest, "invalid_slug",
 			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
 		return
@@ -110,7 +110,7 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.InfoContext(r.Context(), "site.register", "site", req.Slug, "teams", teams)
-	telemetry.FromContext(r.Context()).SetResource(req.Slug, "")
+	telemetry.FromContext(r.Context()).SetResource(string(req.Slug), "")
 	h.auditFromScope(r.Context(), "site.register", "success", map[string]any{"teams": teams, "createdBy": login})
 	writeJSON(w, http.StatusCreated, toSiteRow(site))
 }
@@ -135,8 +135,8 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireRegistryAuthz(w, r); err != nil {
 		return
 	}
-	slug := chi.URLParam(r, "slug")
-	if !slugRe.MatchString(slug) {
+	slug := sitekey.Slug(chi.URLParam(r, "slug"))
+	if !slugRe.MatchString(string(slug)) {
 		writeError(w, http.StatusBadRequest, "invalid_slug",
 			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
 		return
@@ -165,7 +165,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		site      registry.Site
 		wrote     bool
 	)
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(slug)), func() error {
+	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(slug), func() error {
 		before, beforeErr = h.Registry.GetSite(r.Context(), slug)
 		var err error
 		site, err = h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
@@ -191,7 +191,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	if beforeErr != nil {
 		beforeTeams = "unknown"
 	}
-	telemetry.FromContext(r.Context()).SetResource(slug, "")
+	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 	h.logAction(r.Context(), "site.update", "success",
 		slog.Any("before", beforeTeams), slog.Any("after", site.Teams))
 	h.auditFromScope(r.Context(), "site.update", "success", map[string]any{"before": beforeTeams, "after": site.Teams})
@@ -219,8 +219,8 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireRegistryAuthz(w, r); err != nil {
 		return
 	}
-	slug := chi.URLParam(r, "slug")
-	if !slugRe.MatchString(slug) {
+	slug := sitekey.Slug(chi.URLParam(r, "slug"))
+	if !slugRe.MatchString(string(slug)) {
 		writeError(w, http.StatusBadRequest, "invalid_slug",
 			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
 		return
@@ -231,7 +231,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			writeRegistryDeleteError(w, r, err)
 			return
 		}
-		telemetry.FromContext(r.Context()).SetResource(slug, "")
+		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 		h.logAction(r.Context(), "site.delete", "success")
 		h.auditFromScope(r.Context(), "site.delete", "success", nil)
 		w.WriteHeader(http.StatusNoContent)
@@ -246,7 +246,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if base == "" {
 		base = "_trash/"
 	}
-	dirname := h.DeployPrefix.SiteDirname(sitekey.Slug(slug))
+	dirname := h.DeployPrefix.SiteDirname(slug)
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
 	defer cancel()
 	var (
@@ -279,7 +279,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(slug, "")
+	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 	h.logAction(r.Context(), "site.purge", "success", slog.Int("moved", moved))
 	h.auditFromScope(r.Context(), "site.purge", "success", map[string]any{"moved": moved})
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})

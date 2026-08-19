@@ -3,26 +3,28 @@ package registry
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type fakeSnapshot struct {
-	bySite map[string][]string
+	bySite map[sitekey.Slug][]string
 }
 
-func (f fakeSnapshot) Sites() []string {
-	out := make([]string, 0, len(f.bySite))
+func (f fakeSnapshot) Sites() []sitekey.Slug {
+	out := make([]sitekey.Slug, 0, len(f.bySite))
 	for k := range f.bySite {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
-func (f fakeSnapshot) TeamsForSite(slug string) []string {
+func (f fakeSnapshot) TeamsForSite(slug sitekey.Slug) []string {
 	teams, ok := f.bySite[slug]
 	if !ok {
 		return nil
@@ -40,17 +42,17 @@ type fakeWriter struct{}
 
 func (fakeWriter) Sites(context.Context) ([]Site, error) { return nil, nil }
 
-func (fakeWriter) Register(context.Context, string, []string, string) (Site, error) {
+func (fakeWriter) Register(context.Context, sitekey.Slug, []string, string) (Site, error) {
 	return Site{}, nil
 }
 
-func (fakeWriter) UpdateTeams(context.Context, string, []string) (Site, error) {
+func (fakeWriter) UpdateTeams(context.Context, sitekey.Slug, []string) (Site, error) {
 	return Site{}, nil
 }
 
-func (fakeWriter) Delete(context.Context, string) error { return nil }
+func (fakeWriter) Delete(context.Context, sitekey.Slug) error { return nil }
 
-func (fakeWriter) GetSite(context.Context, string) (Site, error) { return Site{}, nil }
+func (fakeWriter) GetSite(context.Context, sitekey.Slug) (Site, error) { return Site{}, nil }
 
 var (
 	_ Snapshot = fakeSnapshot{}
@@ -112,14 +114,14 @@ func TestSentinelErrors_WrapPreservesErrorsIs(t *testing.T) {
 func TestSnapshotContract_TeamsForSiteGatesOnRegistration(t *testing.T) {
 	t.Parallel()
 
-	snap := fakeSnapshot{bySite: map[string][]string{
+	snap := fakeSnapshot{bySite: map[sitekey.Slug][]string{
 		"blog":     {"news-editors", "platform"},
 		"internal": {},
 	}}
 
 	tests := []struct {
 		name string
-		slug string
+		slug sitekey.Slug
 		want []string
 	}{
 		{"registered site returns its teams", "blog", []string{"news-editors", "platform"}},
@@ -140,11 +142,11 @@ func TestSnapshotContract_TeamsForSiteGatesOnRegistration(t *testing.T) {
 func TestSnapshotContract_SitesReturnsSortedSlugs(t *testing.T) {
 	t.Parallel()
 
-	snap := fakeSnapshot{bySite: map[string][]string{
+	snap := fakeSnapshot{bySite: map[sitekey.Slug][]string{
 		"charlie": {"staff"},
 		"alpha":   {"staff"},
 		"bravo":   {"staff"},
 	}}
 
-	require.Equal(t, []string{"alpha", "bravo", "charlie"}, snap.Sites())
+	require.Equal(t, []sitekey.Slug{"alpha", "bravo", "charlie"}, snap.Sites())
 }

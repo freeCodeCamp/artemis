@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,7 @@ func TestDestructiveFlow_BreadcrumbsAndSpans(t *testing.T) {
 	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}, userTeams: map[string]map[string]bool{"alice": {"team-a": true}}},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		store)
 
 	w := withChiRoute(http.MethodPost, "/api/site/{site}/promote",

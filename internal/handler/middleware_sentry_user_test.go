@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +15,7 @@ import (
 func TestRequireDeployJWT_SetsSentryUser(t *testing.T) {
 	hub, ft := newHubWithTransport(t)
 	h, jwt := newTestHandlers(t, &fakeGH{},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}}, newFakeR2())
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}}, newFakeR2())
 
 	tok, _, err := jwt.Sign("alice", "www", "d-1")
 	require.NoError(t, err)

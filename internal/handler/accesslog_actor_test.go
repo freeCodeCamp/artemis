@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,7 +152,7 @@ func TestAccessLog_GitHubBearer_ActorPopulated(t *testing.T) {
 	cap := captureAccessLog(t)
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	final := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -170,7 +171,7 @@ func TestAccessLog_NoDuplicateKeys(t *testing.T) {
 	cap := captureAccessLog(t)
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	final := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -190,7 +191,7 @@ func TestActionLog_ScopeSuppliesSingleActor(t *testing.T) {
 	cap := captureAccessLog(t)
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +216,7 @@ func TestAccessLog_DeployJWT_ActorPopulated(t *testing.T) {
 	cap := captureAccessLog(t)
 	h, jwt := newTestHandlers(t,
 		&fakeGH{},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		newFakeR2())
 
 	tok, _, err := jwt.Sign("alice", "www", "d-1")

@@ -13,12 +13,14 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type stubSnapshot struct{}
 
-func (stubSnapshot) Sites() []string              { return []string{"www"} }
-func (stubSnapshot) TeamsForSite(string) []string { return []string{"team-eng"} }
+func (stubSnapshot) Sites() []sitekey.Slug              { return []sitekey.Slug{"www"} }
+func (stubSnapshot) TeamsForSite(sitekey.Slug) []string { return []string{"team-eng"} }
 
 type stubSites struct{}
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +32,7 @@ func TestSignAndVerify_Roundtrip(t *testing.T) {
 	claims, err := s.Verify(tok)
 	require.NoError(t, err)
 	assert.Equal(t, "alice", claims.Subject)
-	assert.Equal(t, "www", claims.Site)
+	assert.Equal(t, sitekey.Slug("www"), claims.Site)
 	assert.Equal(t, "20260420-141522-abc1234", claims.DeployID)
 	assert.Equal(t, "artemis", claims.Issuer)
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,7 +15,7 @@ import (
 func TestRequireGitHubBearer_MissingHeader(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
@@ -29,7 +30,7 @@ func TestRequireGitHubBearer_MissingHeader(t *testing.T) {
 func TestRequireGitHubBearer_RateLimited_Returns429(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{upstreamErr: auth.ErrGitHubRateLimited},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
@@ -45,7 +46,7 @@ func TestRequireGitHubBearer_RateLimited_Returns429(t *testing.T) {
 func TestRequireGitHubBearer_5xx_Returns503(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{upstreamErr: auth.ErrGitHubUnavailable},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
@@ -59,7 +60,7 @@ func TestRequireGitHubBearer_5xx_Returns503(t *testing.T) {
 func TestRequireGitHubBearer_OK_AttachesLoginToContext(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{"good": "alice"}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	var seen string
@@ -75,7 +76,7 @@ func TestRequireGitHubBearer_OK_AttachesLoginToContext(t *testing.T) {
 }
 
 func TestRequireDeployJWT_MissingHeader(t *testing.T) {
-	h, _ := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	r := httptest.NewRequest(http.MethodPut, "/api/deploy/d1/upload", nil)
 	w := httptest.NewRecorder()
@@ -87,7 +88,7 @@ func TestRequireDeployJWT_MissingHeader(t *testing.T) {
 }
 
 func TestRequireDeployJWT_BadToken_Returns403(t *testing.T) {
-	h, _ := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	r := httptest.NewRequest(http.MethodPut, "/api/deploy/d1/upload", nil)
 	r.Header.Set("Authorization", "Bearer not-a-jwt")
@@ -100,7 +101,7 @@ func TestRequireDeployJWT_BadToken_Returns403(t *testing.T) {
 }
 
 func TestRequireDeployJWT_OK_AttachesClaims(t *testing.T) {
-	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{"www": {"team-a"}}}, newFakeR2())
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}}, newFakeR2())
 
 	tok, _, err := jwt.Sign("alice", "www", "d-1")
 	require.NoError(t, err)
@@ -119,7 +120,7 @@ func TestRequireDeployJWT_OK_AttachesClaims(t *testing.T) {
 }
 
 func TestRequireDeployJWT_RejectsUnregisteredSite(t *testing.T) {
-	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	tok, _, err := jwt.Sign("alice", "purged", "d-9")
 	require.NoError(t, err)
@@ -199,7 +200,7 @@ func TestAccessLog_SkipsProbePaths(t *testing.T) {
 func TestRequireGitHubBearer_BadToken_Returns401(t *testing.T) {
 	h, _ := newTestHandlers(t,
 		&fakeGH{tokenLogins: map[string]string{}},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/getsentry/sentry-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ func TestSitePromote_AddsBreadcrumbs(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"team-a": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		store)
 
 	ctx := sentry.SetHubOnContext(context.Background(), hub)

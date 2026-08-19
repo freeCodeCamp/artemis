@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ func TestDeployInit_LogsActionWithActor(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"team-a": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		newFakeR2())
 
 	chain := RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.DeployInit)))
@@ -51,7 +52,7 @@ func TestDeployInit_LogsDeniedWithActor(t *testing.T) {
 			tokenLogins: map[string]string{"good": "mallory"},
 			userTeams:   map[string]map[string]bool{"mallory": {"other": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		newFakeR2())
 
 	chain := RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.DeployInit)))
@@ -70,7 +71,7 @@ func TestDeployInit_LogsDeniedWithActor(t *testing.T) {
 func TestDeployUpload_LogsSuccessWithActor(t *testing.T) {
 	cap := captureAccessLog(t)
 	store := newFakeR2()
-	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{"www": {"team-a"}}}, store)
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}}, store)
 
 	deployID := "20260420-141522-abc1234"
 	tok, _, err := jwt.Sign("alice", "www", deployID)
@@ -95,7 +96,7 @@ func TestDeployUpload_LogsSuccessWithActor(t *testing.T) {
 func TestDeployFinalize_LogsSuccessWithActorAndBytes(t *testing.T) {
 	cap := captureAccessLog(t)
 	store := newFakeR2()
-	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[string][]string{"www": {"team-a"}}}, store)
+	h, jwt := newTestHandlers(t, &fakeGH{}, &fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}}, store)
 
 	deployID := "20260420-141522-abc1234"
 	prefix := "www/deploys/" + deployID + "/"

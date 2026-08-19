@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +16,7 @@ func bearerTok() map[string]string { return map[string]string{"Authorization": "
 
 func TestSiteDelete_RecordsExactlyOneAudit(t *testing.T) {
 	h, _ := newTestHandlers(t, staffCallerGH(),
-		&fakeSites{bySite: map[string][]string{"example": {"team-eng"}}}, newFakeR2())
+		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, newFakeR2())
 	fa := &fakeAudit{}
 	h.Audit = fa
 
@@ -39,7 +40,7 @@ func TestSitePurge_RecordsExactlyOneAudit(t *testing.T) {
 	store.objects["example/production"] = []byte("20260420-141522-abc1234")
 
 	h, _ := newTestHandlers(t, staffCallerGH(),
-		&fakeSites{bySite: map[string][]string{"example": {"team-eng"}}}, store)
+		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, store)
 	h.Tombstones = &fakeTombstones{}
 	fa := &fakeAudit{}
 	h.Audit = fa

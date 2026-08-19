@@ -178,13 +178,13 @@ func registerGCWorkflows(rt workflowRegistrar, gcw *gcWiring, dryRun bool, sweep
 	return nil
 }
 
-func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []sitekey.Dirname {
+func storageSiteNames(slugs []sitekey.Slug, tmpl handler.DeployPrefixTemplate) []sitekey.Dirname {
 	if len(slugs) == 0 {
 		return nil
 	}
 	names := make([]sitekey.Dirname, 0, len(slugs))
 	for _, s := range slugs {
-		names = append(names, tmpl.SiteDirname(sitekey.Slug(s)))
+		names = append(names, tmpl.SiteDirname(s))
 	}
 	return names
 }

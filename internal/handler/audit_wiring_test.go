@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestSitePromote_RecordsExactlyOneAudit(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"team-a": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		store)
 	h.Audit = fa
 
@@ -44,7 +45,7 @@ func TestSiteRegister_RecordsAuditWithCreatedBy(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"staff": true}},
 		},
-		&fakeSites{bySite: map[string][]string{}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{}},
 		newFakeR2())
 	h.Audit = fa
 

@@ -10,12 +10,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type RegistryStore struct {
 	pool     *pgxpool.Pool
 	now      func() time.Time
-	onChange func(slug string)
+	onChange func(slug sitekey.Slug)
 }
 
 func NewRegistryStore(db *DB) *RegistryStore {
@@ -27,18 +28,18 @@ func (s *RegistryStore) WithClock(now func() time.Time) *RegistryStore {
 	return s
 }
 
-func (s *RegistryStore) WithOnChange(fn func(slug string)) *RegistryStore {
+func (s *RegistryStore) WithOnChange(fn func(slug sitekey.Slug)) *RegistryStore {
 	s.onChange = fn
 	return s
 }
 
-func (s *RegistryStore) changed(slug string) {
+func (s *RegistryStore) changed(slug sitekey.Slug) {
 	if s.onChange != nil {
 		s.onChange(slug)
 	}
 }
 
-func (s *RegistryStore) Register(ctx context.Context, slug string, teams []string, createdBy string) (registry.Site, error) {
+func (s *RegistryStore) Register(ctx context.Context, slug sitekey.Slug, teams []string, createdBy string) (registry.Site, error) {
 	now := s.now().UTC()
 	teams = append([]string(nil), teams...)
 	tag, err := s.pool.Exec(ctx,
@@ -56,7 +57,7 @@ func (s *RegistryStore) Register(ctx context.Context, slug string, teams []strin
 	return registry.Site{Slug: slug, Teams: teams, CreatedAt: now, UpdatedAt: now, CreatedBy: createdBy}, nil
 }
 
-func (s *RegistryStore) UpdateTeams(ctx context.Context, slug string, teams []string) (registry.Site, error) {
+func (s *RegistryStore) UpdateTeams(ctx context.Context, slug sitekey.Slug, teams []string) (registry.Site, error) {
 	now := s.now().UTC()
 	teams = append([]string(nil), teams...)
 	var site registry.Site
@@ -74,7 +75,7 @@ func (s *RegistryStore) UpdateTeams(ctx context.Context, slug string, teams []st
 	return site, nil
 }
 
-func (s *RegistryStore) Delete(ctx context.Context, slug string) error {
+func (s *RegistryStore) Delete(ctx context.Context, slug sitekey.Slug) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM sites WHERE slug = $1`, slug)
 	if err != nil {
 		return fmt.Errorf("pg registry delete %s: %w", slug, err)
@@ -133,7 +134,7 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 	return imported, nil
 }
 
-func (s *RegistryStore) GetSite(ctx context.Context, slug string) (registry.Site, error) {
+func (s *RegistryStore) GetSite(ctx context.Context, slug sitekey.Slug) (registry.Site, error) {
 	var site registry.Site
 	err := s.pool.QueryRow(ctx,
 		`SELECT slug, teams, created_at, updated_at, created_by FROM sites WHERE slug = $1`,

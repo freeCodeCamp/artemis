@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func withChiRoute(method, pattern, target string, body []byte, headers map[strin
 }
 
 func standardSites() *fakeSites {
-	return &fakeSites{bySite: map[string][]string{
+	return &fakeSites{bySite: map[sitekey.Slug][]string{
 		"www":   {"team-eng", "team-platform"},
 		"learn": {"team-eng"},
 	}}

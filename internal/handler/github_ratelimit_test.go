@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func TestDeployInit_RateLimitedProbe_Returns429(t *testing.T) {
 			tokenLogins:  map[string]string{"good": "alice"},
 			authorizeErr: auth.ErrGitHubRateLimited,
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		newFakeR2())
 
 	chain := RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.DeployInit)))

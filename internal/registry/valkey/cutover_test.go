@@ -10,18 +10,19 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type stubSource struct {
 	mu     sync.Mutex
-	bySite map[string][]string
+	bySite map[sitekey.Slug][]string
 }
 
 func newStubSource() *stubSource {
-	return &stubSource{bySite: map[string][]string{}}
+	return &stubSource{bySite: map[sitekey.Slug][]string{}}
 }
 
-func (s *stubSource) set(slug string, teams []string) {
+func (s *stubSource) set(slug sitekey.Slug, teams []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bySite[slug] = append([]string(nil), teams...)
@@ -51,7 +52,7 @@ func TestRegistryCutover(t *testing.T) {
 	require.NoError(t, err)
 
 	snap := reader.Snapshot()
-	require.Equal(t, []string{"preexisting"}, snap.Sites(),
+	require.Equal(t, []sitekey.Slug{"preexisting"}, snap.Sites(),
 		"initial read served from PG source via cache-front")
 	require.Equal(t, []string{"staff"}, snap.TeamsForSite("preexisting"))
 

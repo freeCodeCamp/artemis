@@ -24,6 +24,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // ChannelRegistryChanged is the pub-sub channel emitted on every
@@ -204,12 +205,12 @@ func (s *Store) Subscribe(ctx context.Context) (<-chan string, error) {
 	return out, nil
 }
 
-func (s *Store) Publish(ctx context.Context, slug string) error {
-	return s.client.Publish(ctx, ChannelRegistryChanged, slug).Err()
+func (s *Store) Publish(ctx context.Context, slug sitekey.Slug) error {
+	return s.client.Publish(ctx, ChannelRegistryChanged, string(slug)).Err()
 }
 
-func PublishOnChange(ctx context.Context, store *Store) func(slug string) {
-	return func(slug string) {
+func PublishOnChange(ctx context.Context, store *Store) func(slug sitekey.Slug) {
+	return func(slug sitekey.Slug) {
 		if err := store.Publish(ctx, slug); err != nil {
 			slog.Warn("registry.publish.failed", "site", slug, "err", err)
 		}
@@ -218,8 +219,8 @@ func PublishOnChange(ctx context.Context, store *Store) func(slug string) {
 
 // siteKey returns the hash key for a given slug. Defined in one place
 // so the wire format (`site:<slug>`) cannot drift between methods.
-func siteKey(slug string) string {
-	return "site:" + slug
+func siteKey(slug sitekey.Slug) string {
+	return "site:" + string(slug)
 }
 
 // Register writes a new site row atomically and publishes a
@@ -227,7 +228,7 @@ func siteKey(slug string) string {
 // slug is already in the index set; the existing row is left
 // untouched. All concurrent Register calls for the same slug are
 // serialized — exactly one succeeds, the rest return ErrAlreadyExists.
-func (s *Store) Register(ctx context.Context, slug string, teams []string, createdBy string) (Site, error) {
+func (s *Store) Register(ctx context.Context, slug sitekey.Slug, teams []string, createdBy string) (Site, error) {
 	if slug == "" {
 		return Site{}, errors.New("registry: empty slug")
 	}
@@ -245,7 +246,7 @@ func (s *Store) Register(ctx context.Context, slug string, teams []string, creat
 	// (first one) or trip the WATCH (rest) and re-read the index;
 	// re-read sees the slug present and returns ErrAlreadyExists.
 	txf := func(tx *redis.Tx) error {
-		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		exists, err := tx.SIsMember(ctx, keyAllSites, string(slug)).Result()
 		if err != nil {
 			return err
 		}
@@ -263,8 +264,8 @@ func (s *Store) Register(ctx context.Context, slug string, teams []string, creat
 				fieldUpdatedAt, site.UpdatedAt.Format(time.RFC3339Nano),
 				fieldCreatedBy, site.CreatedBy,
 			)
-			pipe.SAdd(ctx, keyAllSites, slug)
-			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			pipe.SAdd(ctx, keyAllSites, string(slug))
+			pipe.Publish(ctx, ChannelRegistryChanged, string(slug))
 			return nil
 		})
 		return err
@@ -292,7 +293,7 @@ func (s *Store) Register(ctx context.Context, slug string, teams []string, creat
 // event. Returns ErrNotFound if the slug is not in the index set.
 // Concurrent updates are serialized via WATCH+MULTI/EXEC on the row
 // key; the loser of an optimistic-lock race retries and re-reads.
-func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (Site, error) {
+func (s *Store) UpdateTeams(ctx context.Context, slug sitekey.Slug, teams []string) (Site, error) {
 	if slug == "" {
 		return Site{}, errors.New("registry: empty slug")
 	}
@@ -301,7 +302,7 @@ func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (S
 
 	var resolved Site
 	txf := func(tx *redis.Tx) error {
-		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		exists, err := tx.SIsMember(ctx, keyAllSites, string(slug)).Result()
 		if err != nil {
 			return err
 		}
@@ -327,7 +328,7 @@ func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (S
 				fieldTeams, string(teamsJSON),
 				fieldUpdatedAt, now.Format(time.RFC3339Nano),
 			)
-			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			pipe.Publish(ctx, ChannelRegistryChanged, string(slug))
 			return nil
 		})
 		if err != nil {
@@ -361,12 +362,12 @@ func (s *Store) UpdateTeams(ctx context.Context, slug string, teams []string) (S
 // slug is absent. R2 deploy bytes are NOT touched, and no job
 // collects them afterwards — see registry.Writer.Delete for the
 // retention consequences.
-func (s *Store) Delete(ctx context.Context, slug string) error {
+func (s *Store) Delete(ctx context.Context, slug sitekey.Slug) error {
 	if slug == "" {
 		return errors.New("registry: empty slug")
 	}
 	txf := func(tx *redis.Tx) error {
-		exists, err := tx.SIsMember(ctx, keyAllSites, slug).Result()
+		exists, err := tx.SIsMember(ctx, keyAllSites, string(slug)).Result()
 		if err != nil {
 			return err
 		}
@@ -375,8 +376,8 @@ func (s *Store) Delete(ctx context.Context, slug string) error {
 		}
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.Del(ctx, siteKey(slug))
-			pipe.SRem(ctx, keyAllSites, slug)
-			pipe.Publish(ctx, ChannelRegistryChanged, slug)
+			pipe.SRem(ctx, keyAllSites, string(slug))
+			pipe.Publish(ctx, ChannelRegistryChanged, string(slug))
 			return nil
 		})
 		return err
@@ -398,7 +399,7 @@ func (s *Store) Delete(ctx context.Context, slug string) error {
 // TeamsForSite returns the authorized teams for a slug or
 // ErrNotFound when the slug is absent. Callers MUST treat the slice
 // as read-only; the package returns a fresh copy per call.
-func (s *Store) TeamsForSite(ctx context.Context, slug string) ([]string, error) {
+func (s *Store) TeamsForSite(ctx context.Context, slug sitekey.Slug) ([]string, error) {
 	site, err := s.GetSite(ctx, slug)
 	if err != nil {
 		return nil, err
@@ -409,7 +410,7 @@ func (s *Store) TeamsForSite(ctx context.Context, slug string) ([]string, error)
 // GetSite returns the full Site row or ErrNotFound. Used by the
 // list endpoint to enumerate metadata; callers that only need the
 // teams list should use TeamsForSite.
-func (s *Store) GetSite(ctx context.Context, slug string) (Site, error) {
+func (s *Store) GetSite(ctx context.Context, slug sitekey.Slug) (Site, error) {
 	values, err := s.client.HGetAll(ctx, siteKey(slug)).Result()
 	if err != nil {
 		return Site{}, err
@@ -434,7 +435,8 @@ func (s *Store) Sites(ctx context.Context) ([]Site, error) {
 	}
 	sort.Strings(slugs)
 	out := make([]Site, 0, len(slugs))
-	for _, slug := range slugs {
+	for _, raw := range slugs {
+		slug := sitekey.Slug(raw)
 		values, err := s.client.HGetAll(ctx, siteKey(slug)).Result()
 		if err != nil {
 			return nil, err
@@ -455,7 +457,7 @@ func (s *Store) Sites(ctx context.Context) ([]Site, error) {
 
 // decodeSite parses the raw hash fields back into a Site. Wire
 // format (JSON teams, RFC3339Nano timestamps) is enforced here.
-func decodeSite(slug string, values map[string]string) (Site, error) {
+func decodeSite(slug sitekey.Slug, values map[string]string) (Site, error) {
 	site := Site{Slug: slug, CreatedBy: values[fieldCreatedBy]}
 	if raw, ok := values[fieldTeams]; ok && raw != "" {
 		if err := json.Unmarshal([]byte(raw), &site.Teams); err != nil {

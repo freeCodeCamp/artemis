@@ -236,6 +236,10 @@ HTTP writers record the registry slug; the GC writers record the storage dirname
 
 Its own wave. First deliverable is the compiler-produced coercion-site list — change the type, read every resulting error — BEFORE any behaviour change, so the refactor is provably zero-runtime-effect.
 
+**Wave 2 outcome (2026-08-19).** `sitekey.Slug` now runs from every ingress to the render boundary: URL params (`chi.URLParam`), request/response bodies (`SiteRegisterRequest.Slug`, `SiteRow.Slug`), the deploy-session JWT claim (`auth.DeploySessionClaims.Site`), the registry contract (`registry.Site.Slug`, `Writer`, `Snapshot`) and both backends (`internal/pg/registry.go`, `internal/registry/valkey`). Wire and storage bytes are unchanged: the valkey store converts to `string` at every command argument, and `TestStore_Subscribe_DeliversInOrder` (`internal/registry/valkey/store_test.go:395`) still asserts a plain-`string` pub-sub payload. Signatures are pinned against silent reversion in `internal/auth/sitekey_pin_test.go` and `internal/registry/sitekey_pin_test.go`.
+
+The split **stops at the audit boundary on purpose.** `pg.AuditEvent.Site`, `pg.AuditFilter.Site` and `telemetry.Scope.SetResource` keep plain `string`, because `auditSite` (`cmd/artemis/gcwire.go:56`) falls back to writing the dirname with a `site_unmapped` detail flag when a dirname renders from no slug. Typing that column `Slug` would assert a guarantee the fallback path breaks. The audit boundary converts explicitly with `string(site)` until the keyspace decision above lands.
+
 ### Orphan reclaim (operator run, time-sensitive)
 
 The live drift report against production proposed 37 repairs (32 failed-upload prefixes, 5 lost index rows) across 9 sites. `drift.reclaimable` alerts at threshold 25, so the first nightly sweep after 1.8.0 deploys will fire until the backlog is reclaimed: `artemis reconcile <site> --apply` per site, and the blast cap of 10 means any site holding more than 10 items needs repeat runs.

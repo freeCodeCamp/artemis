@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"slices"
 	"sort"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
@@ -22,7 +23,7 @@ import (
 // ErrAlreadyExists on duplicate. The injected clock keeps timestamps
 // deterministic.
 type fakeRegistry struct {
-	bySite map[string]registry.Site
+	bySite map[sitekey.Slug]registry.Site
 
 	// fixedNow drives created_at / updated_at; if zero, time.Now() is used.
 	fixedNow time.Time
@@ -32,10 +33,10 @@ type fakeRegistry struct {
 }
 
 func newFakeRegistry() *fakeRegistry {
-	return &fakeRegistry{bySite: map[string]registry.Site{}}
+	return &fakeRegistry{bySite: map[sitekey.Slug]registry.Site{}}
 }
 
-func (f *fakeRegistry) Register(_ context.Context, slug string, teams []string, createdBy string) (registry.Site, error) {
+func (f *fakeRegistry) Register(_ context.Context, slug sitekey.Slug, teams []string, createdBy string) (registry.Site, error) {
 	if f.registerErr != nil {
 		return registry.Site{}, f.registerErr
 	}
@@ -59,7 +60,7 @@ func (f *fakeRegistry) Register(_ context.Context, slug string, teams []string, 
 	return site, nil
 }
 
-func (f *fakeRegistry) UpdateTeams(_ context.Context, slug string, teams []string) (registry.Site, error) {
+func (f *fakeRegistry) UpdateTeams(_ context.Context, slug sitekey.Slug, teams []string) (registry.Site, error) {
 	if f.registerErr != nil {
 		return registry.Site{}, f.registerErr
 	}
@@ -84,7 +85,7 @@ func (f *fakeRegistry) UpdateTeams(_ context.Context, slug string, teams []strin
 	return updated, nil
 }
 
-func (f *fakeRegistry) Delete(_ context.Context, slug string) error {
+func (f *fakeRegistry) Delete(_ context.Context, slug sitekey.Slug) error {
 	if f.registerErr != nil {
 		return f.registerErr
 	}
@@ -95,7 +96,7 @@ func (f *fakeRegistry) Delete(_ context.Context, slug string) error {
 	return nil
 }
 
-func (f *fakeRegistry) GetSite(_ context.Context, slug string) (registry.Site, error) {
+func (f *fakeRegistry) GetSite(_ context.Context, slug sitekey.Slug) (registry.Site, error) {
 	if f.getErr != nil {
 		return registry.Site{}, f.getErr
 	}
@@ -126,19 +127,19 @@ func (f *fakeRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 // tests that need to assert the handler's error envelope mapping.
 type erroringRegistry struct{ err error }
 
-func (e *erroringRegistry) Register(_ context.Context, _ string, _ []string, _ string) (registry.Site, error) {
+func (e *erroringRegistry) Register(_ context.Context, _ sitekey.Slug, _ []string, _ string) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
-func (e *erroringRegistry) UpdateTeams(_ context.Context, _ string, _ []string) (registry.Site, error) {
+func (e *erroringRegistry) UpdateTeams(_ context.Context, _ sitekey.Slug, _ []string) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
-func (e *erroringRegistry) Delete(_ context.Context, _ string) error {
+func (e *erroringRegistry) Delete(_ context.Context, _ sitekey.Slug) error {
 	return e.err
 }
 func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	return nil, e.err
 }
-func (e *erroringRegistry) GetSite(_ context.Context, _ string) (registry.Site, error) {
+func (e *erroringRegistry) GetSite(_ context.Context, _ sitekey.Slug) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
 
@@ -243,7 +244,7 @@ func sleepUntilExpired() {
 	time.Sleep(20 * time.Millisecond)
 }
 
-func (f *fakeJWT) Sign(login, site, deployID string) (string, time.Time, error) {
+func (f *fakeJWT) Sign(login string, site sitekey.Slug, deployID string) (string, time.Time, error) {
 	return f.signer.Sign(login, site, deployID)
 }
 
@@ -253,11 +254,11 @@ func (f *fakeJWT) Verify(token string) (auth.DeploySessionClaims, error) {
 
 // fakeSites implements SitesProvider over an in-memory map.
 type fakeSites struct {
-	bySite map[string][]string
+	bySite map[sitekey.Slug][]string
 }
 
 func (f *fakeSites) Snapshot() registry.Snapshot {
-	cp := make(map[string][]string, len(f.bySite))
+	cp := make(map[sitekey.Slug][]string, len(f.bySite))
 	for k, v := range f.bySite {
 		dup := make([]string, len(v))
 		copy(dup, v)
@@ -269,19 +270,19 @@ func (f *fakeSites) Snapshot() registry.Snapshot {
 // staticSnapshot is a registry.Snapshot impl backed by an in-memory
 // map. Test-only — production reads come from valkey.Reader.
 type staticSnapshot struct {
-	bySite map[string][]string
+	bySite map[sitekey.Slug][]string
 }
 
-func (s staticSnapshot) Sites() []string {
-	out := make([]string, 0, len(s.bySite))
+func (s staticSnapshot) Sites() []sitekey.Slug {
+	out := make([]sitekey.Slug, 0, len(s.bySite))
 	for k := range s.bySite {
 		out = append(out, k)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
-func (s staticSnapshot) TeamsForSite(slug string) []string {
+func (s staticSnapshot) TeamsForSite(slug sitekey.Slug) []string {
 	teams, ok := s.bySite[slug]
 	if !ok {
 		return nil

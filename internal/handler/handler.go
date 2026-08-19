@@ -37,7 +37,7 @@ type GitHubAuthenticator interface {
 // DeployJWTSigner is the subset of *auth.DeploySessionSigner used by the
 // handler layer.
 type DeployJWTSigner interface {
-	Sign(login, site, deployID string) (string, time.Time, error)
+	Sign(login string, site sitekey.Slug, deployID string) (string, time.Time, error)
 	Verify(token string) (auth.DeploySessionClaims, error)
 }
 

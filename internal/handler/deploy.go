@@ -22,9 +22,9 @@ import (
 
 // DeployInitRequest is the body of POST /api/deploy/init.
 type DeployInitRequest struct {
-	Site  string   `json:"site"`
-	SHA   string   `json:"sha"`
-	Files []string `json:"files,omitempty"` // optional manifest used by /finalize
+	Site  sitekey.Slug `json:"site"`
+	SHA   string       `json:"sha"`
+	Files []string     `json:"files,omitempty"` // optional manifest used by /finalize
 }
 
 // DeployInitResponse is the success payload of /api/deploy/init.
@@ -57,7 +57,7 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(req.Site, "")
+	telemetry.FromContext(r.Context()).SetResource(string(req.Site), "")
 	h.logAction(r.Context(), "deploy.init", "start", slog.String("sha", req.SHA))
 
 	teams := h.Sites.Snapshot().TeamsForSite(req.Site)
@@ -87,8 +87,8 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(req.Site, deployID)
-	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(sitekey.Slug(req.Site)), deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(req.Site), deployID)
+	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(req.Site), deployID)
 	h.logAction(r.Context(), "deploy.init", "success")
 	h.auditFromScope(r.Context(), "deploy.init", "success", map[string]any{"sha": req.SHA})
 
@@ -164,7 +164,7 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
 	h.logAction(r.Context(), "deploy.upload", "success",
 		slog.String("path", relPath), slog.Int64("bytes", contentLength))
 	h.auditFromScope(r.Context(), "deploy.upload", "success", map[string]any{"path": relPath, "bytes": contentLength})
@@ -244,7 +244,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 
 	markerKey := prefix + gc.MarkerObjectName
 	meta := fmt.Sprintf(`{"site":%q,"deployId":%q,"mode":%q,"finalizedAt":%q}`,
-		claims.Site, deployID, mode, time.Now().UTC().Format(time.RFC3339))
+		string(claims.Site), deployID, mode, time.Now().UTC().Format(time.RFC3339))
 	if err := telemetry.WithSpan(r.Context(), "r2.put.marker.finalize", func(ctx context.Context) error {
 		return h.R2.PutObject(ctx, markerKey, strings.NewReader(meta), "application/json", int64(len(meta)))
 	}); err != nil {
@@ -267,7 +267,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	aliasKey := h.aliasKey(claims.Site, mode)
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(sitekey.Slug(claims.Site)), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		if _, err := h.Registry.GetSite(commitCtx, claims.Site); err != nil {
 			if errors.Is(err, registry.ErrNotFound) {
@@ -285,7 +285,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		}
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
-				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(sitekey.Slug(claims.Site)), deployID, mode, time.Now().UTC(), deployBytes)
+				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
 			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
@@ -299,7 +299,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	telemetry.FromContext(r.Context()).SetResource(claims.Site, deployID)
+	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
 	h.logAction(r.Context(), "deploy.finalize", "success",
 		slog.String("mode", mode), slog.Int64("bytes", deployBytes))
 	h.auditFromScope(r.Context(), "deploy.finalize", "success", map[string]any{"mode": mode, "bytes": deployBytes})
@@ -357,26 +357,26 @@ func frameworkBuildHint(files []string) string {
 
 // deployPrefix returns the R2 key prefix for one deploy, e.g.
 // "www/deploys/20260420-141522-abc1234/".
-func (h *Handlers) deployPrefix(site, deployID string) string {
-	return h.DeployPrefix.DeployPrefix(sitekey.Slug(site), deployID)
+func (h *Handlers) deployPrefix(site sitekey.Slug, deployID string) string {
+	return h.DeployPrefix.DeployPrefix(site, deployID)
 }
 
 // aliasKey returns the R2 alias key for `mode` ("preview"/"production").
-func (h *Handlers) aliasKey(site, mode string) string {
+func (h *Handlers) aliasKey(site sitekey.Slug, mode string) string {
 	switch mode {
 	case "production":
-		return strings.ReplaceAll(h.AliasProductionFmt, "<site>", site)
+		return strings.ReplaceAll(h.AliasProductionFmt, "<site>", string(site))
 	default:
-		return strings.ReplaceAll(h.AliasPreviewFmt, "<site>", site)
+		return strings.ReplaceAll(h.AliasPreviewFmt, "<site>", string(site))
 	}
 }
 
 // publicURL returns the user-visible URL for a finalized deploy.
-func (h *Handlers) publicURL(site, mode string) string {
+func (h *Handlers) publicURL(site sitekey.Slug, mode string) string {
 	if mode == "production" {
-		return strings.ReplaceAll(h.PublicProductionURLFmt, "<site>", site)
+		return strings.ReplaceAll(h.PublicProductionURLFmt, "<site>", string(site))
 	}
-	return strings.ReplaceAll(h.PublicPreviewURLFmt, "<site>", site)
+	return strings.ReplaceAll(h.PublicPreviewURLFmt, "<site>", string(site))
 }
 
 // normalizeMode validates and normalizes finalize/promote/rollback `mode` arg.

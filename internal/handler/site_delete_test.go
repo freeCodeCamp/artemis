@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func callDelete(h *Handlers, slug, login, token string) *httptest.ResponseRecord
 }
 
 func TestSiteDelete_HappyPath(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
 	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)

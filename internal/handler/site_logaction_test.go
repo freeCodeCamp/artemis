@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +20,7 @@ func TestSitePromote_LogsActionWithActor(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"team-a": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		store)
 
 	w := withChiRoute(http.MethodPost, "/api/site/{site}/promote",
@@ -46,7 +47,7 @@ func TestSiteUpdate_LogsBeforeAfterTeams(t *testing.T) {
 			tokenLogins: map[string]string{"good": "alice"},
 			userTeams:   map[string]map[string]bool{"alice": {"staff": true}},
 		},
-		&fakeSites{bySite: map[string][]string{"www": {"team-a"}}},
+		&fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-a"}}},
 		newFakeR2())
 
 	w := withChiRoute(http.MethodPatch, "/api/site/{slug}",

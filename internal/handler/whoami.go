@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
-	"sort"
+	"slices"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // WhoAmI implements GET /api/whoami. Returns the resolved login plus the
@@ -31,7 +33,7 @@ func (h *Handlers) WhoAmI(w http.ResponseWriter, r *http.Request) {
 		userTeams[t] = struct{}{}
 	}
 
-	authorized := []string{}
+	authorized := []sitekey.Slug{}
 	snap := h.Sites.Snapshot()
 	for _, site := range snap.Sites() {
 		siteTeams := snap.TeamsForSite(site)
@@ -45,7 +47,7 @@ func (h *Handlers) WhoAmI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	sort.Strings(authorized)
+	slices.Sort(authorized)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"login":           login,
 		"authorizedSites": authorized,

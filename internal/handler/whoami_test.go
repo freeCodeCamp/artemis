@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestWhoAmI_ReturnsLoginAndAuthorizedSites(t *testing.T) {
 			"alice": {"team-eng": true},
 		},
 	}
-	st := &fakeSites{bySite: map[string][]string{
+	st := &fakeSites{bySite: map[sitekey.Slug][]string{
 		"www":   {"team-eng", "team-platform"},
 		"learn": {"team-eng"},
 		"news":  {"team-content"},
@@ -46,7 +47,7 @@ func TestWhoAmI_UpstreamErrorReturns503(t *testing.T) {
 		tokenLogins: map[string]string{"good": "alice"},
 		upstreamErr: assert.AnError,
 	}
-	st := &fakeSites{bySite: map[string][]string{"www": {"team-eng"}}}
+	st := &fakeSites{bySite: map[sitekey.Slug][]string{"www": {"team-eng"}}}
 	h, _ := newTestHandlers(t, gh, st, newFakeR2())
 
 	r := httptest.NewRequest(http.MethodGet, "/api/whoami", nil).
@@ -65,7 +66,7 @@ func TestWhoAmI_SkipsSitesWithNoTeams(t *testing.T) {
 		},
 	}
 	// Site with no teams should be skipped (cannot grant via empty team list).
-	st := &fakeSites{bySite: map[string][]string{
+	st := &fakeSites{bySite: map[sitekey.Slug][]string{
 		"www":   {"team-eng"},
 		"empty": {},
 	}}
@@ -89,7 +90,7 @@ func TestWhoAmI_NoAuthorizedSites(t *testing.T) {
 		tokenLogins: map[string]string{"g": "bob"},
 		userTeams:   map[string]map[string]bool{},
 	}
-	st := &fakeSites{bySite: map[string][]string{
+	st := &fakeSites{bySite: map[sitekey.Slug][]string{
 		"www": {"team-eng"},
 	}}
 	h, _ := newTestHandlers(t, gh, st, newFakeR2())
@@ -119,7 +120,7 @@ func TestWhoAmI_OneGitHubCallPerCold(t *testing.T) {
 			"alice": {"team-eng": true, "team-platform": true},
 		},
 	}
-	st := &fakeSites{bySite: map[string][]string{
+	st := &fakeSites{bySite: map[sitekey.Slug][]string{
 		"www":   {"team-eng", "team-platform", "team-content"},
 		"learn": {"team-eng", "team-research", "team-platform"},
 		"news":  {"team-content", "team-platform", "team-eng"},

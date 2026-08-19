@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 type flakyMoveR2 struct {
@@ -112,11 +114,11 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 	require.Equal(t, http.StatusOK, listW.Code)
 	var rows []SiteRow
 	require.NoError(t, json.Unmarshal(listW.Body.Bytes(), &rows))
-	slugs := make([]string, len(rows))
+	slugs := make([]sitekey.Slug, len(rows))
 	for i, r := range rows {
 		slugs[i] = r.Slug
 	}
-	assert.Contains(t, slugs, "example", "failed purge must not deregister the site (still retryable)")
+	assert.Contains(t, slugs, sitekey.Slug("example"), "failed purge must not deregister the site (still retryable)")
 	assert.Equal(t, []string{"example"}, tomb.purged,
 		"the site tombstone lands before the move, so a failed move leaves the row naming the bytes still "+
 			"in place; the retry re-records it, restarting the recovery clock exactly as "+
@@ -145,7 +147,7 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 	var after []SiteRow
 	require.NoError(t, json.Unmarshal(gone.Body.Bytes(), &after))
 	for _, r := range after {
-		assert.NotEqual(t, "example", r.Slug, "successful purge deregisters the site")
+		assert.NotEqual(t, sitekey.Slug("example"), r.Slug, "successful purge deregisters the site")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func seededValkey(t *testing.T) *valkey.Store {
@@ -39,9 +40,9 @@ func TestRegistryImportOnBoot(t *testing.T) {
 	sites, err := pgStore.Sites(ctx)
 	require.NoError(t, err)
 	require.Len(t, sites, 2)
-	assert.Equal(t, "learn", sites[0].Slug)
+	assert.Equal(t, sitekey.Slug("learn"), sites[0].Slug)
 	assert.Equal(t, []string{"team-eng"}, sites[0].Teams)
-	assert.Equal(t, "www", sites[1].Slug)
+	assert.Equal(t, sitekey.Slug("www"), sites[1].Slug)
 	assert.ElementsMatch(t, []string{"team-eng", "team-platform"}, sites[1].Teams)
 
 	n2, err := pgStore.Import(ctx, src)
@@ -68,7 +69,7 @@ func TestRegistryImportOnBoot_NoClobberWhenPGNonEmpty(t *testing.T) {
 	sites, err := pgStore.Sites(ctx)
 	require.NoError(t, err)
 	require.Len(t, sites, 1, "Valkey rows do not clobber existing PG data")
-	assert.Equal(t, "www", sites[0].Slug)
+	assert.Equal(t, sitekey.Slug("www"), sites[0].Slug)
 	assert.Equal(t, []string{"newer-team"}, sites[0].Teams)
 }
 

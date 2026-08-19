@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func newTestRegistry(t *testing.T) *RegistryStore {
@@ -18,12 +19,12 @@ func newTestRegistry(t *testing.T) *RegistryStore {
 
 func TestRegistryPG(t *testing.T) {
 	ctx := context.Background()
-	var changed []string
-	store := newTestRegistry(t).WithOnChange(func(slug string) { changed = append(changed, slug) })
+	var changed []sitekey.Slug
+	store := newTestRegistry(t).WithOnChange(func(slug sitekey.Slug) { changed = append(changed, slug) })
 
 	site, err := store.Register(ctx, "www", []string{"team-eng", "team-platform"}, "alice")
 	require.NoError(t, err)
-	assert.Equal(t, "www", site.Slug)
+	assert.Equal(t, sitekey.Slug("www"), site.Slug)
 	assert.ElementsMatch(t, []string{"team-eng", "team-platform"}, site.Teams)
 
 	_, err = store.Register(ctx, "www", []string{"x"}, "bob")
@@ -40,7 +41,7 @@ func TestRegistryPG(t *testing.T) {
 
 	got, err := store.GetSite(ctx, "www")
 	require.NoError(t, err)
-	assert.Equal(t, "www", got.Slug)
+	assert.Equal(t, sitekey.Slug("www"), got.Slug)
 	assert.Equal(t, []string{"team-platform"}, got.Teams, "GetSite reflects the latest authoritative row")
 	_, err = store.GetSite(ctx, "absent")
 	assert.ErrorIs(t, err, registry.ErrNotFound)
@@ -50,8 +51,8 @@ func TestRegistryPG(t *testing.T) {
 	sites, err := store.Sites(ctx)
 	require.NoError(t, err)
 	require.Len(t, sites, 2)
-	assert.Equal(t, "learn", sites[0].Slug, "sorted by slug ascending")
-	assert.Equal(t, "www", sites[1].Slug)
+	assert.Equal(t, sitekey.Slug("learn"), sites[0].Slug, "sorted by slug ascending")
+	assert.Equal(t, sitekey.Slug("www"), sites[1].Slug)
 
 	require.NoError(t, store.Delete(ctx, "www"))
 	assert.ErrorIs(t, store.Delete(ctx, "www"), registry.ErrNotFound, "double delete -> not found")
@@ -59,6 +60,6 @@ func TestRegistryPG(t *testing.T) {
 	_, err = store.GetSite(ctx, "www")
 	assert.ErrorIs(t, err, registry.ErrNotFound, "GetSite after delete -> not found")
 
-	assert.Equal(t, []string{"www", "www", "learn", "www"}, changed,
+	assert.Equal(t, []sitekey.Slug{"www", "www", "learn", "www"}, changed,
 		"registry.changed fires on register/update/register/delete for Valkey cache invalidation")
 }

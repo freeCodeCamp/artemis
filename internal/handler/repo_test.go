@@ -19,6 +19,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/reporequest"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 // fakeRepoStore is an in-memory RepoStore with the same status semantics
@@ -206,7 +207,7 @@ func (f *fakeRepoCreator) ListTemplates(_ context.Context) ([]string, error) {
 // Universe-org membership prober used by repo authz.
 func repoHandlers(t *testing.T, repoGH *fakeGH, store RepoStore, creator RepoCreator) *Handlers {
 	t.Helper()
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 	h.RepoGH = repoGH
 	h.Repos = store
 	h.GitHubApp = creator

@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const (
@@ -32,8 +34,8 @@ const (
 // had outer Login/Issuer fields that shadowed the embedded ones at
 // marshal time and silently dropped the embedded values on the wire.
 type DeploySessionClaims struct {
-	Site     string `json:"site"`
-	DeployID string `json:"deployId"`
+	Site     sitekey.Slug `json:"site"`
+	DeployID string       `json:"deployId"`
 	jwt.RegisteredClaims
 }
 
@@ -71,7 +73,7 @@ func NewDeploySessionSigner(secret string, ttl time.Duration) (*DeploySessionSig
 
 // Sign issues a JWT scoped to (login, site, deployId). Returns the token
 // string and its absolute expiry time.
-func (s *DeploySessionSigner) Sign(login, site, deployID string) (string, time.Time, error) {
+func (s *DeploySessionSigner) Sign(login string, site sitekey.Slug, deployID string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(s.ttl)
 	claims := DeploySessionClaims{

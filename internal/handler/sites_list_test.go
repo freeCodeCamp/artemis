@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +22,7 @@ func callSitesList(h *Handlers, login, token string) *httptest.ResponseRecorder 
 }
 
 func TestSitesList_EmptyRegistry(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	w := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -32,7 +33,7 @@ func TestSitesList_EmptyRegistry(t *testing.T) {
 }
 
 func TestSitesList_PopulatedReturnsRowsSorted(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	for _, slug := range []string{"charlie", "alpha", "bravo"} {
 		body := []byte(`{"slug":"` + slug + `","teams":["staff"]}`)
@@ -49,9 +50,9 @@ func TestSitesList_PopulatedReturnsRowsSorted(t *testing.T) {
 	var got []SiteRow
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Len(t, got, 3)
-	assert.Equal(t, "alpha", got[0].Slug)
-	assert.Equal(t, "bravo", got[1].Slug)
-	assert.Equal(t, "charlie", got[2].Slug)
+	assert.Equal(t, sitekey.Slug("alpha"), got[0].Slug)
+	assert.Equal(t, sitekey.Slug("bravo"), got[1].Slug)
+	assert.Equal(t, sitekey.Slug("charlie"), got[2].Slug)
 	assert.Equal(t, []string{"staff"}, got[0].Teams)
 	assert.Equal(t, "alice", got[0].CreatedBy)
 	assert.False(t, got[0].CreatedAt.IsZero())
@@ -65,7 +66,7 @@ func nonStaffGH() *fakeGH {
 }
 
 func TestSitesList_RedactsCreatedByForNonStaff(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	body := []byte(`{"slug":"alpha","teams":["staff"]}`)
 	require.Equal(t, http.StatusCreated, callRegister(h, body, "alice", "tok").Code)
@@ -80,12 +81,12 @@ func TestSitesList_RedactsCreatedByForNonStaff(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Len(t, got, 1)
 	assert.Empty(t, got[0].CreatedBy, "non-staff caller must not see actor identity")
-	assert.Equal(t, "alpha", got[0].Slug, "non-actor fields stay visible")
+	assert.Equal(t, sitekey.Slug("alpha"), got[0].Slug, "non-actor fields stay visible")
 	assert.Equal(t, []string{"staff"}, got[0].Teams)
 }
 
 func TestSitesList_RedactsWhenAuthzProbeErrors(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 
 	body := []byte(`{"slug":"alpha","teams":["staff"]}`)
 	require.Equal(t, http.StatusCreated, callRegister(h, body, "alice", "tok").Code)
@@ -120,7 +121,7 @@ func TestSitesList_502OnRegistryReadError(t *testing.T) {
 }
 
 func TestSitesList_ActorGateIndependentOfRepoFeature(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[string][]string{}}, newFakeR2())
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
 	h.RepoGH = staffCallerGH()
 	h.AuditReadAuthzTeam = "staff"
 	require.False(t, h.RepoEnabled(), "repo-create feature off (Repos/GitHubApp nil) — actor/audit gating must not depend on it")
