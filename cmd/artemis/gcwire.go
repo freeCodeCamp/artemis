@@ -228,11 +228,17 @@ func gcPolicy(c config.CleanupConfig) gc.Policy {
 	}
 }
 
+type outboxPurger interface {
+	PurgeOutbox(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
 type gcWiring struct {
-	Repo       *pg.Repo
-	SiteGC     *gc.SiteGC
-	Reconciler *gc.Reconciler
-	Purge      *gc.TombstonePurge
+	Repo            *pg.Repo
+	SiteGC          *gc.SiteGC
+	Reconciler      *gc.Reconciler
+	Purge           *gc.TombstonePurge
+	Outbox          outboxPurger
+	OutboxRetention time.Duration
 }
 
 func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, error) {
@@ -250,8 +256,14 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 		return nil, err
 	}
 	toSlug := siteSlugFn(tmpl.SiteSlug)
+	var outbox outboxPurger
+	if repo != nil {
+		outbox = repo
+	}
 	return &gcWiring{
-		Repo: repo,
+		Repo:            repo,
+		Outbox:          outbox,
+		OutboxRetention: time.Duration(cfg.Cleanup.OutboxRetentionDays) * 24 * time.Hour,
 		SiteGC: &gc.SiteGC{
 			Store:        repo,
 			Mover:        r2c,

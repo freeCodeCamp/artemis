@@ -115,3 +115,23 @@ func (r *Repo) MarkPublished(ctx context.Context, ids []int64, at time.Time) err
 	}
 	return nil
 }
+
+// PurgeOutbox deletes rows the relay already published and that are
+// older than before, at most limit per call. Unpublished rows are
+// never eligible: they are undelivered work, and only the relay
+// retires one. A non-positive limit is a refusal, not "unbounded".
+func (r *Repo) PurgeOutbox(ctx context.Context, before time.Time, limit int) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM outbox WHERE id IN (
+		   SELECT id FROM outbox
+		   WHERE published_at IS NOT NULL AND published_at < $1
+		   ORDER BY id
+		   LIMIT $2)`, before, limit)
+	if err != nil {
+		return 0, fmt.Errorf("pg outbox purge: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}

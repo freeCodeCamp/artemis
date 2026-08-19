@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -141,11 +142,15 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			Cron:             []string{cronTombstonePurge},
 			ExecutionTimeout: gcRunBudget,
 			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
+				var errs []error
 				if _, err := gcw.Purge.Run(ctx, dryRun); err != nil {
 					observability.CaptureBackground("tombstone.purge", err)
-					return err
+					errs = append(errs, err)
 				}
-				return nil
+				if err := purgeOutbox(ctx, gcw.Outbox, gcw.OutboxRetention, dryRun); err != nil {
+					errs = append(errs, err)
+				}
+				return errors.Join(errs...)
 			})),
 		},
 	}
@@ -181,4 +186,28 @@ func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []strin
 		names = append(names, tmpl.SiteDirname(s))
 	}
 	return names
+}
+
+// outboxPurgeBatch bounds one night's delete. A backlog larger than
+// this drains over successive runs rather than holding a single long
+// transaction open against the table the relay writes to.
+const outboxPurgeBatch = 5000
+
+func purgeOutbox(ctx context.Context, p outboxPurger, retention time.Duration, dryRun bool) error {
+	if p == nil || dryRun || retention <= 0 {
+		return nil
+	}
+	before := time.Now().UTC().Add(-retention)
+	n, err := p.PurgeOutbox(ctx, before, outboxPurgeBatch)
+	if err != nil {
+		observability.CaptureBackground("outbox.purge", err)
+		return fmt.Errorf("outbox purge: %w", err)
+	}
+	if n == outboxPurgeBatch {
+		slog.WarnContext(ctx, "outbox.purge.capped", "rows", n, "batch", outboxPurgeBatch,
+			"note", "backlog exceeds one run; the remainder drains tomorrow")
+		return nil
+	}
+	slog.InfoContext(ctx, "outbox.purged", "rows", n, "before", before)
+	return nil
 }

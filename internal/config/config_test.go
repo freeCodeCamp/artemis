@@ -490,3 +490,37 @@ func TestLoad_AcceptsNumericAppIDs(t *testing.T) {
 	assert.Equal(t, "3287718", cfg.Repo.App.AppID)
 	assert.Equal(t, "121700722", cfg.Repo.App.InstallationID)
 }
+
+func TestLoadCleanup_OutboxRetentionDefaultsToThirtyDays(t *testing.T) {
+	t.Setenv("CLEANUP_OUTBOX_RETENTION_DAYS", "")
+	os.Unsetenv("CLEANUP_OUTBOX_RETENTION_DAYS")
+	c := CleanupConfig{}
+	require.NoError(t, loadCleanup(&c))
+	assert.Equal(t, 0, c.OutboxRetentionDays,
+		"loadCleanup only overrides; the default itself is seeded in Load")
+}
+
+func TestLoad_SeedsTheOutboxRetentionDefault(t *testing.T) {
+	for k, v := range requiredEnv() {
+		t.Setenv(k, v)
+	}
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 30, cfg.Cleanup.OutboxRetentionDays,
+		"published outbox rows are a debugging trail, not state; unbounded is not a policy")
+}
+
+func TestLoadCleanup_RejectsANonPositiveOutboxRetention(t *testing.T) {
+	for _, v := range []string{"0", "-1", "banana"} {
+		t.Setenv("CLEANUP_OUTBOX_RETENTION_DAYS", v)
+		c := CleanupConfig{}
+		require.Error(t, loadCleanup(&c), "value %q must be refused at boot", v)
+	}
+}
+
+func TestLoadCleanup_ReadsTheOutboxRetentionOverride(t *testing.T) {
+	t.Setenv("CLEANUP_OUTBOX_RETENTION_DAYS", "7")
+	c := CleanupConfig{}
+	require.NoError(t, loadCleanup(&c))
+	assert.Equal(t, 7, c.OutboxRetentionDays)
+}

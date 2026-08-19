@@ -58,8 +58,11 @@ type CleanupConfig struct {
 	BlastCap      int
 	TrashPrefix   string
 	RecoveryDays  int
-	DryRun        bool
-	ServeCacheTTL time.Duration
+	// OutboxRetentionDays bounds how long a published outbox row is
+	// kept. Unpublished rows are never touched, at any age.
+	OutboxRetentionDays int
+	DryRun              bool
+	ServeCacheTTL       time.Duration
 }
 
 // SentryConfig holds the optional Sentry error-monitoring + tracing
@@ -185,6 +188,7 @@ const (
 	defaultCleanupGrace           = 72 * time.Hour
 	defaultCleanupRecoveryDays    = 7
 	defaultCleanupTrashPrefix     = "_trash/"
+	defaultCleanupOutboxRetention = 30
 	minSigningKeyBytes            = 32
 	defaultRegistryAuthzTeam      = "staff"
 	defaultRepoOrg                = "freeCodeCamp-Universe"
@@ -251,7 +255,9 @@ func Load() (*Config, error) {
 			Grace:         defaultCleanupGrace,
 			TrashPrefix:   defaultCleanupTrashPrefix,
 			RecoveryDays:  defaultCleanupRecoveryDays,
-			ServeCacheTTL: serveCacheTTL,
+
+			OutboxRetentionDays: defaultCleanupOutboxRetention,
+			ServeCacheTTL:       serveCacheTTL,
 		},
 	}
 
@@ -582,6 +588,13 @@ func loadCleanup(c *CleanupConfig) error {
 			return fmt.Errorf("invalid CLEANUP_RECOVERY_DAYS %q: must be positive integer (days)", v)
 		}
 		c.RecoveryDays = n
+	}
+	if v, ok := os.LookupEnv("CLEANUP_OUTBOX_RETENTION_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("invalid CLEANUP_OUTBOX_RETENTION_DAYS %q: must be positive integer (days)", v)
+		}
+		c.OutboxRetentionDays = n
 	}
 	if v, ok := os.LookupEnv("CLEANUP_DRY_RUN"); ok {
 		c.DryRun = v == "1" || strings.EqualFold(v, "true")
