@@ -295,3 +295,92 @@ func TestNewLiveAliasReader_RejectsASiteTokenOutsideTheSiteSegment(t *testing.T)
 		"the reader substitutes nothing after the site segment, so a surviving <site> is fetched literally "+
 			"and 404s for every site — the same silent-inert failure this constructor exists to refuse")
 }
+
+func prodSlugFn(t *testing.T) func(string) (string, bool) {
+	t.Helper()
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+	return tmpl.SiteSlug
+}
+
+func TestGCTombstoneAuditor_RecordsTheRegistrySlugNotTheStorageDirname(t *testing.T) {
+	repo := &stubAuditRecorder{}
+	a := gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone", toSlug: prodSlugFn(t)}
+
+	require.NoError(t, a.AuditTombstone(context.Background(), "test.freecode.camp", "id1"))
+
+	assert.Equal(t, "test", repo.last.Site,
+		"audit_log.site is read back by DeployActors and by ?site= on the audit API, both of which are "+
+			"handed the URL slug; a dirname here is invisible to every reader")
+}
+
+func TestGCPurgeAuditor_RecordsTheRegistrySlugNotTheStorageDirname(t *testing.T) {
+	repo := &stubAuditRecorder{}
+	a := gcPurgeAuditor{repo: repo, toSlug: prodSlugFn(t)}
+
+	require.NoError(t, a.RecordPurge(context.Background(), "test.freecode.camp", "id1"))
+
+	assert.Equal(t, "test", repo.last.Site)
+}
+
+func TestGCTombstoneAuditor_KeepsTheRawSiteWhenTheDirnameDoesNotMap(t *testing.T) {
+	got := trapAuditCapture(t)
+	repo := &stubAuditRecorder{}
+	a := gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone", toSlug: prodSlugFn(t)}
+
+	require.NoError(t, a.AuditTombstone(context.Background(), "www.example.com", "id1"))
+
+	assert.Equal(t, "www.example.com", repo.last.Site,
+		"an unmappable dirname must still produce a row — losing the audit record is worse than an "+
+			"off-keyspace one, and audit_log is append-only so nothing can repair a gap later")
+	assert.Equal(t, true, repo.last.Detail["site_unmapped"],
+		"the row must say so itself, so a reader can tell this site value apart from a slug")
+	assert.Equal(t, "audit.site_unmapped", got.op,
+		"and it must page, because it means the sweep is walking prefixes the deploy format cannot render")
+}
+
+func TestGCPurgeAuditor_KeepsTheRawSiteWhenTheDirnameDoesNotMap(t *testing.T) {
+	got := trapAuditCapture(t)
+	repo := &stubAuditRecorder{}
+	a := gcPurgeAuditor{repo: repo, toSlug: prodSlugFn(t)}
+
+	require.NoError(t, a.RecordPurge(context.Background(), "www.example.com", "id1"))
+
+	assert.Equal(t, "www.example.com", repo.last.Site)
+	assert.Equal(t, "audit.site_unmapped", got.op)
+}
+
+func TestGCTombstoneAuditor_PassesTheSiteThroughWhenNoConverterIsWired(t *testing.T) {
+	repo := &stubAuditRecorder{}
+	a := gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone"}
+
+	require.NoError(t, a.AuditTombstone(context.Background(), "www", "id1"))
+
+	assert.Equal(t, "www", repo.last.Site)
+	assert.Nil(t, repo.last.Detail, "a nil converter is not an anomaly, so it must not flag the row")
+}
+
+func TestNewGCWiring_GivesEveryAuditorTheSlugConverter(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>.freecode.camp/deploys/<ts>-<sha>/",
+		Cleanup:            config.CleanupConfig{TrashPrefix: "_trash/", BlastCap: 10},
+	}
+	cfg.Aliases.ProductionKeyFormat = "<site>.freecode.camp/production"
+	cfg.Aliases.PreviewKeyFormat = "<site>.freecode.camp/preview"
+
+	w, err := newGCWiring(cfg, nil, nil)
+	require.NoError(t, err)
+
+	for name, got := range map[string]siteSlugFn{
+		"SiteGC.Audit":          w.SiteGC.Audit.(gcTombstoneAuditor).toSlug,
+		"Reconciler.Audit":      w.Reconciler.Audit.(gcTombstoneAuditor).toSlug,
+		"Reconciler.PruneAudit": w.Reconciler.PruneAudit.(gcTombstoneAuditor).toSlug,
+		"Purge.Audit":           w.Purge.Audit.(gcPurgeAuditor).toSlug,
+	} {
+		require.NotNil(t, got, "%s must convert to the registry keyspace; a nil converter silently "+
+			"reverts that writer to dirnames and no test downstream would notice", name)
+		slug, ok := got("test.freecode.camp")
+		require.True(t, ok)
+		assert.Equal(t, "test", slug, "%s", name)
+	}
+}

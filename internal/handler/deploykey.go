@@ -27,6 +27,8 @@ type DeployPrefixTemplate struct {
 
 const deployIDToken = "<ts>-<sha>"
 
+const siteToken = "<site>"
+
 // NewDeployPrefixTemplate parses raw into the rendered template.
 // Returns an error if either required token is absent or if `<site>`
 // appears after `<ts>-<sha>` (would leave SitePrefix unrenderable).
@@ -59,6 +61,26 @@ func (t DeployPrefixTemplate) SiteDirname(site string) string {
 		return p[:i]
 	}
 	return p
+}
+
+// SiteSlug inverts SiteDirname: it recovers the registry slug from the
+// storage dirname that this template renders for it. ok is false when
+// dirname carries neither the prefix nor the suffix the site segment
+// adds, i.e. nothing this template could have produced.
+func (t DeployPrefixTemplate) SiteSlug(dirname string) (string, bool) {
+	pattern := t.SiteDirname(siteToken)
+	i := strings.Index(pattern, siteToken)
+	if i < 0 {
+		return "", false
+	}
+	prefix, suffix := pattern[:i], pattern[i+len(siteToken):]
+	if len(dirname) <= len(prefix)+len(suffix) {
+		return "", false
+	}
+	if !strings.HasPrefix(dirname, prefix) || !strings.HasSuffix(dirname, suffix) {
+		return "", false
+	}
+	return dirname[len(prefix) : len(dirname)-len(suffix)], true
 }
 
 // DeployPrefix returns the R2 key prefix for one deploy, e.g.

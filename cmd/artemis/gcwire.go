@@ -46,15 +46,38 @@ func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
 	h.Audit = repo
 }
 
-type gcPurgeAuditor struct{ repo auditRecorder }
+type siteSlugFn func(dirname string) (string, bool)
+
+// auditSite converts the gc keyspace (storage dirname) to the registry
+// slug every audit_log reader queries by. An unmappable dirname keeps
+// its raw value and flags the row, because audit_log is append-only:
+// a dropped row can never be repaired, an odd one can be read around.
+func auditSite(toSlug siteSlugFn, site string) (string, map[string]any) {
+	if toSlug == nil {
+		return site, nil
+	}
+	slug, ok := toSlug(site)
+	if !ok {
+		captureAuditFailure("audit.site_unmapped", fmt.Errorf("audit: site %q renders from no slug", site))
+		return site, map[string]any{"site_unmapped": true}
+	}
+	return slug, nil
+}
+
+type gcPurgeAuditor struct {
+	repo   auditRecorder
+	toSlug siteSlugFn
+}
 
 func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site, deployID string) error {
+	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    "system:gc",
 		Action:   "gc.purge",
-		Site:     site,
+		Site:     slug,
 		DeployID: deployID,
 		Outcome:  "success",
+		Detail:   detail,
 	})
 	if err != nil {
 		captureAuditFailure("audit.record", err)
@@ -66,15 +89,18 @@ type gcTombstoneAuditor struct {
 	repo   auditRecorder
 	actor  string
 	action string
+	toSlug siteSlugFn
 }
 
 func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site, id string) error {
+	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    a.actor,
 		Action:   a.action,
-		Site:     site,
+		Site:     slug,
 		DeployID: id,
 		Outcome:  "success",
+		Detail:   detail,
 	})
 	if err != nil {
 		captureAuditFailure("audit.record", err)
@@ -219,6 +245,11 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 	if err != nil {
 		return nil, err
 	}
+	tmpl, err := handler.NewDeployPrefixTemplate(cfg.DeployPrefixFormat)
+	if err != nil {
+		return nil, err
+	}
+	toSlug := siteSlugFn(tmpl.SiteSlug)
 	return &gcWiring{
 		Repo: repo,
 		SiteGC: &gc.SiteGC{
@@ -232,7 +263,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
-			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone"},
+			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone", toSlug: toSlug},
 		},
 		Reconciler: &gc.Reconciler{
 			Lister:       r2c,
@@ -246,8 +277,8 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			TrashPrefix:  layout.trashPrefix,
 			LiveAliases:  liveAliases,
 			Now:          time.Now,
-			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile"},
-			PruneAudit:   gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile.prune"},
+			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile", toSlug: toSlug},
+			PruneAudit:   gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile.prune", toSlug: toSlug},
 		},
 		Purge: &gc.TombstonePurge{
 			Store:     repo,
@@ -257,7 +288,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 			BlastCap:  cfg.Cleanup.BlastCap,
 			Now:       time.Now,
 			Locker:    repo,
-			Audit:     gcPurgeAuditor{repo: repo},
+			Audit:     gcPurgeAuditor{repo: repo, toSlug: toSlug},
 		},
 	}, nil
 }

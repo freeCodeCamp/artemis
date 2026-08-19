@@ -65,3 +65,40 @@ func hasSuffix(s, suf string) bool {
 	}
 	return s[len(s)-len(suf):] == suf
 }
+
+func TestDeployPrefixTemplate_SiteSlugInvertsSiteDirname(t *testing.T) {
+	tpl, err := NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	for _, slug := range []string{"www", "test", "a", "learn-beta", "a.freecode.camp"} {
+		dirname := tpl.SiteDirname(slug)
+		got, ok := tpl.SiteSlug(dirname)
+
+		require.True(t, ok, "SiteDirname(%q) rendered %q, which SiteSlug must accept", slug, dirname)
+		assert.Equal(t, slug, got,
+			"SiteSlug is the only sanctioned dirname->slug conversion; a slug that already ends in the "+
+				"root domain must lose exactly one suffix, not two")
+	}
+}
+
+func TestDeployPrefixTemplate_SiteSlugIsIdentityWhenTheFormatAddsNoAffixes(t *testing.T) {
+	tpl, err := NewDeployPrefixTemplate("<site>/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	got, ok := tpl.SiteSlug("www")
+	require.True(t, ok)
+	assert.Equal(t, "www", got,
+		"under the test format slug and dirname coincide; the inverse must not invent a difference")
+}
+
+func TestDeployPrefixTemplate_SiteSlugRejectsAForeignDirname(t *testing.T) {
+	tpl, err := NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	for _, dirname := range []string{"", "_trash", "www.example.com", ".freecode.camp"} {
+		_, ok := tpl.SiteSlug(dirname)
+		assert.False(t, ok,
+			"%q does not render from any slug under this format; returning a plausible-looking slug "+
+				"would write a third keyspace into audit_log", dirname)
+	}
+}
