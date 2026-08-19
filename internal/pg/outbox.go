@@ -117,12 +117,27 @@ func (r *Repo) MarkPublished(ctx context.Context, ids []int64, at time.Time) err
 }
 
 // PurgeOutbox deletes rows the relay already published and that are
-// older than before, at most limit per call. Unpublished rows are
-// never eligible: they are undelivered work, and only the relay
-// retires one. A non-positive limit is a refusal, not "unbounded".
-func (r *Repo) PurgeOutbox(ctx context.Context, before time.Time, limit int) (int, error) {
+// older than before, at most limit per call, and returns how many.
+// Unpublished rows are never eligible: they are undelivered work, and
+// only the relay retires one. A non-positive limit is a refusal, not
+// "unbounded". Under dryRun it counts the same set and deletes none,
+// so a planning run reports the delete set the live run would take.
+func (r *Repo) PurgeOutbox(ctx context.Context, before time.Time, limit int, dryRun bool) (int, error) {
 	if limit <= 0 {
 		return 0, nil
+	}
+	if dryRun {
+		var n int
+		err := r.pool.QueryRow(ctx,
+			`SELECT count(*) FROM (
+			   SELECT 1 FROM outbox
+			   WHERE published_at IS NOT NULL AND published_at < $1
+			   ORDER BY id
+			   LIMIT $2) t`, before, limit).Scan(&n)
+		if err != nil {
+			return 0, fmt.Errorf("pg outbox purge count: %w", err)
+		}
+		return n, nil
 	}
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM outbox WHERE id IN (

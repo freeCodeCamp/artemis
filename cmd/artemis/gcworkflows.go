@@ -194,20 +194,20 @@ func storageSiteNames(slugs []string, tmpl handler.DeployPrefixTemplate) []strin
 const outboxPurgeBatch = 5000
 
 func purgeOutbox(ctx context.Context, p outboxPurger, retention time.Duration, dryRun bool) error {
-	if p == nil || dryRun || retention <= 0 {
+	if p == nil || retention <= 0 {
 		return nil
 	}
 	before := time.Now().UTC().Add(-retention)
-	n, err := p.PurgeOutbox(ctx, before, outboxPurgeBatch)
+	n, err := p.PurgeOutbox(ctx, before, outboxPurgeBatch, dryRun)
 	if err != nil {
 		observability.CaptureBackground("outbox.purge", err)
 		return fmt.Errorf("outbox purge: %w", err)
 	}
-	if n == outboxPurgeBatch {
-		slog.WarnContext(ctx, "outbox.purge.capped", "rows", n, "batch", outboxPurgeBatch,
-			"note", "backlog exceeds one run; the remainder drains tomorrow")
-		return nil
+	slog.InfoContext(ctx, "outbox.purged", "rows", n, "before", before, "dryRun", dryRun)
+	if n == outboxPurgeBatch && !dryRun {
+		slog.WarnContext(ctx, "outbox.purge.capped", "rows", n, "batch", outboxPurgeBatch)
+		observability.CaptureBackground("outbox.purge.capped",
+			fmt.Errorf("outbox purge hit its %d-row ceiling: a backlog survived the run", outboxPurgeBatch))
 	}
-	slog.InfoContext(ctx, "outbox.purged", "rows", n, "before", before)
 	return nil
 }

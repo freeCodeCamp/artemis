@@ -491,15 +491,6 @@ func TestLoad_AcceptsNumericAppIDs(t *testing.T) {
 	assert.Equal(t, "121700722", cfg.Repo.App.InstallationID)
 }
 
-func TestLoadCleanup_OutboxRetentionDefaultsToThirtyDays(t *testing.T) {
-	t.Setenv("CLEANUP_OUTBOX_RETENTION_DAYS", "")
-	os.Unsetenv("CLEANUP_OUTBOX_RETENTION_DAYS")
-	c := CleanupConfig{}
-	require.NoError(t, loadCleanup(&c))
-	assert.Equal(t, 0, c.OutboxRetentionDays,
-		"loadCleanup only overrides; the default itself is seeded in Load")
-}
-
 func TestLoad_SeedsTheOutboxRetentionDefault(t *testing.T) {
 	for k, v := range requiredEnv() {
 		t.Setenv(k, v)

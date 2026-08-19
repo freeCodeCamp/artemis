@@ -45,7 +45,7 @@ func TestPurgeOutbox_DropsPublishedRowsPastTheWindow(t *testing.T) {
 	fresh := seedOutbox(ctx, t, repo, "site.changed", &recent)
 	undelivered := seedOutbox(ctx, t, repo, "site.changed", nil)
 
-	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 100)
+	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 100, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 
@@ -67,7 +67,7 @@ func TestPurgeOutbox_KeepsAnAncientUnpublishedRow(t *testing.T) {
 		now.Add(-365*24*time.Hour), stuck)
 	require.NoError(t, err)
 
-	n, err := repo.PurgeOutbox(ctx, now, 100)
+	n, err := repo.PurgeOutbox(ctx, now, 100, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, n)
@@ -86,7 +86,7 @@ func TestPurgeOutbox_StopsAtTheBatchLimit(t *testing.T) {
 		seedOutbox(ctx, t, repo, "site.changed", &old)
 	}
 
-	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 2)
+	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 2, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, 2, n, "one run must delete at most the batch limit so a large backlog cannot hold a "+
@@ -100,10 +100,46 @@ func TestPurgeOutbox_RefusesANonPositiveLimit(t *testing.T) {
 	old := time.Now().UTC().Add(-40 * 24 * time.Hour)
 	kept := seedOutbox(ctx, t, repo, "site.changed", &old)
 
-	n, err := repo.PurgeOutbox(ctx, time.Now().UTC(), 0)
+	n, err := repo.PurgeOutbox(ctx, time.Now().UTC(), 0, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, n)
 	assert.Contains(t, outboxIDs(ctx, t, repo), kept,
 		"a zero limit means no work, matching the blast cap's refuse-rather-than-unleash reading")
+}
+
+func TestPurgeOutbox_CountsWithoutDeletingOnADryRun(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	old := now.Add(-40 * 24 * time.Hour)
+
+	for range 3 {
+		seedOutbox(ctx, t, repo, "site.changed", &old)
+	}
+	seedOutbox(ctx, t, repo, "site.changed", nil)
+
+	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 100, true)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, n, "a dry run reports exactly the set the live run would delete")
+	assert.Len(t, outboxIDs(ctx, t, repo), 4, "and removes none of it")
+}
+
+func TestPurgeOutbox_DryRunHonoursTheBatchLimit(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	old := now.Add(-40 * 24 * time.Hour)
+
+	for range 5 {
+		seedOutbox(ctx, t, repo, "site.changed", &old)
+	}
+
+	n, err := repo.PurgeOutbox(ctx, now.Add(-30*24*time.Hour), 2, true)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, n,
+		"the plan must report what one run would take, not the whole backlog, or the operator reads a "+
+			"number the live run will not match")
 }

@@ -18,14 +18,16 @@ type fakeOutboxPurger struct {
 	calls  int
 	before time.Time
 	limit  int
+	dryRun bool
 	n      int
 	err    error
 }
 
-func (f *fakeOutboxPurger) PurgeOutbox(_ context.Context, before time.Time, limit int) (int, error) {
+func (f *fakeOutboxPurger) PurgeOutbox(_ context.Context, before time.Time, limit int, dryRun bool) (int, error) {
 	f.calls++
 	f.before = before
 	f.limit = limit
+	f.dryRun = dryRun
 	return f.n, f.err
 }
 
@@ -59,16 +61,18 @@ func TestTombstonePurgeWorkflow_AlsoRetiresPublishedOutboxRows(t *testing.T) {
 		"a bounded batch keeps one night's delete off a long transaction")
 }
 
-func TestTombstonePurgeWorkflow_LeavesTheOutboxAloneOnADryRun(t *testing.T) {
+func TestTombstonePurgeWorkflow_PlansTheOutboxDeleteOnADryRun(t *testing.T) {
 	ob := &fakeOutboxPurger{}
 	def := defByName(t, gcWorkflowDefs(purgeWiring(ob, 30*24*time.Hour), true, cleanSweep),
 		worker.WorkflowTombstonePurge)
 
 	require.NoError(t, def.Handler(context.Background(), nil))
 
-	assert.Zero(t, ob.calls,
-		"CLEANUP_DRY_RUN means plan, never delete — it must cover every destructive job in the run, "+
-			"not only the tombstone half")
+	require.Equal(t, 1, ob.calls,
+		"CLEANUP_DRY_RUN is documented as compute-and-log the delete set, execute nothing; skipping the "+
+			"call entirely honours only the second half and leaves an operator blind to what a live run "+
+			"would remove")
+	assert.True(t, ob.dryRun, "and the store must be told it is planning, so it counts instead of deleting")
 }
 
 func TestTombstonePurgeWorkflow_FailsWhenTheOutboxPurgeFails(t *testing.T) {

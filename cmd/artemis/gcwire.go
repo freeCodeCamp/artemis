@@ -229,7 +229,7 @@ func gcPolicy(c config.CleanupConfig) gc.Policy {
 }
 
 type outboxPurger interface {
-	PurgeOutbox(ctx context.Context, before time.Time, limit int) (int, error)
+	PurgeOutbox(ctx context.Context, before time.Time, limit int, dryRun bool) (int, error)
 }
 
 type gcWiring struct {
