@@ -2,6 +2,21 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.9.0](https://github.com/freeCodeCamp/artemis/compare/v1.8.0...v1.9.0) (2026-08-19)
+
+
+### Features
+
+* **gc:** retire published outbox rows nightly ([945974f](https://github.com/freeCodeCamp/artemis/commit/945974f49f6ff0536276440e50d4223fa70be452))
+* **sitekey:** name the two site keyspaces ([044a3f2](https://github.com/freeCodeCamp/artemis/commit/044a3f2300a7475b48c7e2d90a80ab36344a51aa))
+
+
+### Bug Fixes
+
+* **gc:** audit the registry slug, not the dirname ([762e6de](https://github.com/freeCodeCamp/artemis/commit/762e6de3d4362477a47bccb1840c7089d16a0de4))
+* **gc:** plan the outbox delete on a dry run ([12bf89b](https://github.com/freeCodeCamp/artemis/commit/12bf89bad9e82dd341e90463d0ddfe4fdde57611))
+* **sitekey:** close the slug side of the type split ([a957585](https://github.com/freeCodeCamp/artemis/commit/a957585b964e58c2b00bc36c9dff76fc50782e9d))
+
 ## [1.8.0](https://github.com/freeCodeCamp/artemis/compare/v1.7.0...v1.8.0) (2026-08-19)
 
 
