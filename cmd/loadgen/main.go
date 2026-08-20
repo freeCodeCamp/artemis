@@ -15,6 +15,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
 
@@ -119,7 +120,7 @@ func runDeploys(ctx context.Context, cfg config, repo *pg.Repo) stageResult {
 	total := cfg.sites * cfg.deploysPerSite
 	base := time.Now().Add(-90 * 24 * time.Hour)
 	return drive("deploy_upsert", total, cfg.concurrency, func(i int) error {
-		site := siteSlug(i % cfg.sites)
+		site := siteDirname(i % cfg.sites)
 		seq := i / cfg.sites
 		id := fmt.Sprintf("%d-%08x", base.Add(time.Duration(seq)*time.Hour).Unix(), i)
 		return repo.UpsertDeploy(ctx, site, id, base.Add(time.Duration(seq)*time.Hour), 1<<20, true, "active")
@@ -128,7 +129,7 @@ func runDeploys(ctx context.Context, cfg config, repo *pg.Repo) stageResult {
 
 func runOutboxEnqueue(ctx context.Context, cfg config, repo *pg.Repo) stageResult {
 	return drive("outbox_enqueue", cfg.sites, cfg.concurrency, func(i int) error {
-		return repo.EnqueueSiteChanged(ctx, siteSlug(i))
+		return repo.EnqueueSiteChanged(ctx, siteDirname(i))
 	})
 }
 
@@ -160,12 +161,12 @@ func runGCPlan(ctx context.Context, cfg config, repo *pg.Repo) stageResult {
 		Mover:        nopMover{},
 		Policy:       gc.Policy{RecentKeep: 10, Grace: 24 * time.Hour, Retention: 30 * 24 * time.Hour, ServeCacheTTL: time.Hour},
 		BlastCap:     1000,
-		DeployPrefix: func(site, id string) string { return site + "/deploys/" + id + "/" },
-		TrashPrefix:  func(site, id string) string { return "_trash/" + site + "/" + id + "/" },
+		DeployPrefix: func(site sitekey.Dirname, id string) string { return string(site) + "/deploys/" + id + "/" },
+		TrashPrefix:  func(site sitekey.Dirname, id string) string { return "_trash/" + string(site) + "/" + id + "/" },
 		Now:          time.Now,
 	}
 	return drive("gc_plan_dryrun", cfg.sites, cfg.concurrency, func(i int) error {
-		_, err := g.Run(ctx, siteSlug(i), true)
+		_, err := g.Run(ctx, siteDirname(i), true)
 		return err
 	})
 }
@@ -236,7 +237,11 @@ func truncate(ctx context.Context, db *pg.DB) error {
 	return err
 }
 
-func siteSlug(i int) string { return fmt.Sprintf("loadgen-site-%06d.freecode.camp", i) }
+func siteSlug(i int) sitekey.Slug { return sitekey.Slug(fmt.Sprintf("loadgen-site-%06d", i)) }
+
+func siteDirname(i int) sitekey.Dirname {
+	return sitekey.Dirname(string(siteSlug(i)) + ".freecode.camp")
+}
 
 type nopPublisher struct{}
 
