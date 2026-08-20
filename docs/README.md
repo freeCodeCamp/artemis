@@ -1,6 +1,6 @@
 # Artemis — reference
 
-Audience: artemis contributors and maintainers. This reference covers the API contract, configuration, observability, the R2 layout, the sites registry, and the test suites. The [root README](../README.md) gives the project overview. [`ORIENTATION.md`](ORIENTATION.md) gives the read sequence for a new contributor. [`ARCHITECTURE.md`](ARCHITECTURE.md) describes how the service is built. [`RELEASING.md`](RELEASING.md) gives the release flow.
+Audience: artemis contributors and maintainers. This reference covers the API contract, configuration, observability, the R2 layout, the sites registry, and the test suites. The [root README](../README.md) gives the project overview. [`ORIENTATION.md`](ORIENTATION.md) gives the read sequence for a new contributor. [`ARCHITECTURE.md`](ARCHITECTURE.md) describes how the service is built. [`RELEASING.md`](RELEASING.md) gives the release flow. This file documents the surface as it stands today; [`COMPATIBILITY.md`](COMPATIBILITY.md) documents what changed under callers between releases.
 
 ## API
 

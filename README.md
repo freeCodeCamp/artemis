@@ -18,6 +18,7 @@ just                   # list every recipe
 - **[`docs/ORIENTATION.md`](docs/ORIENTATION.md)** — the read sequence for a new contributor.
 - **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — what the service does and how it is built, written from the source code.
 - **[`docs/README.md`](docs/README.md)** — API contract, configuration, observability, R2 layout, sites registry, integration testing, curl examples.
+- **[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)** — caller-visible behaviour changes between releases, with the release each one landed in.
 - **[`docs/RELEASING.md`](docs/RELEASING.md)** — versioning rule, release-please flow, image build, downstream deploy pin.
 
 ADR-016 (Universe platform repo) specifies the CLI ↔ artemis contract and the per-site authorization model.
