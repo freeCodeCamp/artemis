@@ -10,7 +10,7 @@ import (
 
 func setRequiredForSentry(t *testing.T) {
 	t.Helper()
-	configtest.Hermetic(t, map[string]string{
+	configtest.Hermetic(t, config.EnvKeys(), map[string]string{
 		"R2_ENDPOINT":          "https://acct.r2.cloudflarestorage.com",
 		"R2_ACCESS_KEY_ID":     "ak",
 		"R2_SECRET_ACCESS_KEY": "sk",

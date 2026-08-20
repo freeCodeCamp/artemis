@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestLoad_RepoDefaults(t *testing.T) {
-	hermeticEnv(t, requiredEnv())
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -20,7 +21,7 @@ func TestLoad_RepoDefaults(t *testing.T) {
 }
 
 func TestLoad_RepoOverridesAndAppCreds(t *testing.T) {
-	hermeticEnv(t, requiredEnv())
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
 	t.Setenv("GH_REPO_ORG", "ExampleUniverse")
 	t.Setenv("REPO_CREATE_AUTHZ_TEAM", "contributors")
 	t.Setenv("REPO_APPROVE_AUTHZ_TEAM", "maintainers")
@@ -40,7 +41,7 @@ func TestLoad_RepoOverridesAndAppCreds(t *testing.T) {
 }
 
 func TestLoad_RepoPartialAppConfigFails(t *testing.T) {
-	hermeticEnv(t, requiredEnv())
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
 	// App id set but installation id + key missing → partial → error.
 	t.Setenv("GH_APP_ID", "123456")
 
@@ -53,7 +54,7 @@ func TestLoad_RepoEmptyTeamOverrideFails(t *testing.T) {
 	// An explicit empty override is ignored (defaults retained), so the
 	// guard against empty teams only trips on a programmatic zero value;
 	// assert the happy default holds when the env var is blank.
-	hermeticEnv(t, requiredEnv())
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
 	t.Setenv("REPO_APPROVE_AUTHZ_TEAM", "")
 
 	cfg, err := Load()

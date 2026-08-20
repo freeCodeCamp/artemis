@@ -5,12 +5,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
-func UnreadableKeys(want map[string]string) []string {
-	known := config.EnvKeys()
+func UnreadableKeys(known []string, want map[string]string) []string {
 	var bad []string
 	for k := range want {
 		if !slices.Contains(known, k) {
@@ -21,11 +19,11 @@ func UnreadableKeys(want map[string]string) []string {
 	return bad
 }
 
-func Hermetic(t *testing.T, want map[string]string) {
+func Hermetic(t *testing.T, known []string, want map[string]string) {
 	t.Helper()
-	require.Empty(t, UnreadableKeys(want),
+	require.Empty(t, UnreadableKeys(known, want),
 		"config.Load never reads these, so setting them asserts nothing")
-	for _, k := range config.EnvKeys() {
+	for _, k := range known {
 		if _, present := os.LookupEnv(k); !present {
 			continue
 		}

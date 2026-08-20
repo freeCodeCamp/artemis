@@ -1,10 +1,12 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"regexp"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,28 +14,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var everyEnvReadInThisPackage = regexp.MustCompile(`(?:os\.LookupEnv|os\.Getenv|getEnv)\("([A-Z0-9_]+)"\)`)
+func readsEnv(name string) bool {
+	return name == "LookupEnv" || name == "Getenv" || strings.HasPrefix(name, "getEnv")
+}
+
+func calleeName(fn ast.Expr) string {
+	switch f := fn.(type) {
+	case *ast.Ident:
+		return f.Name
+	case *ast.SelectorExpr:
+		return f.Sel.Name
+	}
+	return ""
+}
 
 func envKeysReadInPackageSource(t *testing.T) map[string]bool {
 	t.Helper()
-	sources, err := filepath.Glob("*.go")
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
 	require.NoError(t, err)
 
 	read := map[string]bool{}
-	scanned := 0
-	for _, f := range sources {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
+	files := 0
+	for _, pkg := range pkgs {
+		for range pkg.Files {
+			files++
 		}
-		src, err := os.ReadFile(f)
-		require.NoError(t, err)
-		scanned++
-		for _, m := range everyEnvReadInThisPackage.FindAllStringSubmatch(string(src), -1) {
-			read[m[1]] = true
-		}
+		ast.Inspect(pkg, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || !readsEnv(calleeName(call.Fun)) {
+				return true
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				if v, err := strconv.Unquote(lit.Value); err == nil && v != "" {
+					read[v] = true
+				}
+			}
+			return true
+		})
 	}
-	require.NotZero(t, scanned, "globbed no package source at all")
-	require.NotEmpty(t, read, "the matcher found no reads, so the package changed shape")
+	require.NotZero(t, files, "parsed no package source at all")
+	require.NotEmpty(t, read, "found no environment reads, so the package changed shape")
 	return read
 }
 
@@ -44,9 +71,10 @@ func TestEnvKeys_ListsExactlyTheVariablesThePackageReads(t *testing.T) {
 	}
 
 	assert.Equal(t, sortedKeys(envKeysReadInPackageSource(t)), sortedKeys(listed),
-		"a stale list leaves the newest variable leaking in from the developer's shell, "+
-			"which is the failure it exists to prevent; every non-test file in the package is scanned, "+
-			"so moving a read to a sibling file cannot hide it")
+		"a stale list leaves the newest variable leaking in from the developer shell, "+
+			"which is the failure it exists to prevent; every non-test file in the package is parsed "+
+			"and every string argument to an env-reading call is collected, so neither a sibling file "+
+			"nor a multi-argument helper can hide a key")
 }
 
 func TestEnvKeys_HasNoDuplicates(t *testing.T) {

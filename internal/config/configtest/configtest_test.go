@@ -24,11 +24,11 @@ func requiredEnv() map[string]string {
 func TestHermetic_LeavesUndeclaredVariablesAbsentNotEmpty(t *testing.T) {
 	t.Setenv("PORT", "9999")
 
-	configtest.Hermetic(t, requiredEnv())
+	configtest.Hermetic(t, config.EnvKeys(), requiredEnv())
 
 	_, present := os.LookupEnv("PORT")
 	require.False(t, present,
-		"PORT is read without an empty-string guard, so \"\" would reach strconv and fail Load")
+		"PORT is read without an empty-string guard, so an empty value would reach strconv and fail Load")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -38,7 +38,9 @@ func TestHermetic_LeavesUndeclaredVariablesAbsentNotEmpty(t *testing.T) {
 func TestHermetic_OverridesAnAmbientValueItDeclares(t *testing.T) {
 	t.Setenv("R2_BUCKET", "leaked-from-the-shell")
 
-	configtest.Hermetic(t, withBucket("declared-by-the-test"))
+	want := requiredEnv()
+	want["R2_BUCKET"] = "declared-by-the-test"
+	configtest.Hermetic(t, config.EnvKeys(), want)
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
@@ -50,21 +52,22 @@ func TestHermetic_RestoresEveryClearedVariableWhenTheTestEnds(t *testing.T) {
 	t.Setenv("R2_BUCKET", ambient)
 
 	t.Run("inner", func(t *testing.T) {
-		configtest.Hermetic(t, requiredEnv())
+		configtest.Hermetic(t, config.EnvKeys(), requiredEnv())
 		_, present := os.LookupEnv("R2_BUCKET")
 		require.False(t, present, "the inner test must not see the ambient value")
 	})
 
 	assert.Equal(t, ambient, os.Getenv("R2_BUCKET"),
-		"clearing must be scoped to the test; leaking the clear breaks every later test in the binary")
+		"clearing must be scoped to the test; leaking it breaks every later test in the binary")
 }
 
 func TestUnreadableKeys_NamesAKeyLoadNeverReads(t *testing.T) {
 	want := requiredEnv()
 	want["DEPLOY_PREFIX_FORMATT"] = "typo"
 
-	assert.Equal(t, []string{"DEPLOY_PREFIX_FORMATT"}, configtest.UnreadableKeys(want),
-		"a typo'd key sets a variable nobody reads, so the test passes while asserting nothing")
+	assert.Equal(t, []string{"DEPLOY_PREFIX_FORMATT"},
+		configtest.UnreadableKeys(config.EnvKeys(), want),
+		"a typo sets a variable nobody reads, so the test passes while asserting nothing")
 }
 
 func TestUnreadableKeys_AcceptsEveryKeyLoadReads(t *testing.T) {
@@ -73,11 +76,5 @@ func TestUnreadableKeys_AcceptsEveryKeyLoadReads(t *testing.T) {
 		all[k] = "x"
 	}
 
-	assert.Empty(t, configtest.UnreadableKeys(all))
-}
-
-func withBucket(v string) map[string]string {
-	m := requiredEnv()
-	m["R2_BUCKET"] = v
-	return m
+	assert.Empty(t, configtest.UnreadableKeys(config.EnvKeys(), all))
 }

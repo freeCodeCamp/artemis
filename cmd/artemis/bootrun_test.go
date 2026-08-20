@@ -323,7 +323,7 @@ func TestRun_BootsFromEnvAndExitsOnSigterm(t *testing.T) {
 	dsn, valkeyAddr := startDeps(t)
 	port := freePort(t)
 
-	configtest.Hermetic(t, map[string]string{
+	configtest.Hermetic(t, config.EnvKeys(), map[string]string{
 		"PORT":                        strconv.Itoa(port),
 		"DATABASE_URL":                dsn,
 		"VALKEY_ADDR":                 valkeyAddr,

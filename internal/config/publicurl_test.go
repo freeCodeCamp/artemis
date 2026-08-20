@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,7 @@ func publicURLEnv() map[string]string {
 }
 
 func TestLoad_PublicURLFormatsDefaultToTheServedHostShapes(t *testing.T) {
-	hermeticEnv(t, publicURLEnv())
+	configtest.Hermetic(t, EnvKeys(), publicURLEnv())
 
 	c, err := Load()
 	require.NoError(t, err)
@@ -27,7 +28,7 @@ func TestLoad_PublicURLFormatsDefaultToTheServedHostShapes(t *testing.T) {
 }
 
 func TestLoad_PublicURLFormatsAreOverridable(t *testing.T) {
-	hermeticEnv(t, publicURLEnv())
+	configtest.Hermetic(t, EnvKeys(), publicURLEnv())
 	t.Setenv("PUBLIC_URL_PRODUCTION_FORMAT", "https://<site>.example.test")
 	t.Setenv("PUBLIC_URL_PREVIEW_FORMAT", "https://<site>.pre.example.test")
 
@@ -38,7 +39,7 @@ func TestLoad_PublicURLFormatsAreOverridable(t *testing.T) {
 }
 
 func TestLoad_RejectsAPublicURLFormatWithoutSiteToken(t *testing.T) {
-	hermeticEnv(t, publicURLEnv())
+	configtest.Hermetic(t, EnvKeys(), publicURLEnv())
 	t.Setenv("PUBLIC_URL_PRODUCTION_FORMAT", "https://freecode.camp")
 
 	_, err := Load()
@@ -47,7 +48,7 @@ func TestLoad_RejectsAPublicURLFormatWithoutSiteToken(t *testing.T) {
 }
 
 func TestLoad_BlastCapDefaultsToARealCeiling(t *testing.T) {
-	hermeticEnv(t, publicURLEnv())
+	configtest.Hermetic(t, EnvKeys(), publicURLEnv())
 
 	c, err := Load()
 	require.NoError(t, err)

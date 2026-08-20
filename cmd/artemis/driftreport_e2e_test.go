@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
@@ -112,7 +113,7 @@ func (f *fakeBucket) listV2(w http.ResponseWriter, prefix string) {
 
 func driftReportEnv(t *testing.T, dsn, endpoint string) {
 	t.Helper()
-	configtest.Hermetic(t, map[string]string{
+	configtest.Hermetic(t, config.EnvKeys(), map[string]string{
 		"DATABASE_URL":         dsn,
 		"R2_ENDPOINT":          endpoint,
 		"R2_BUCKET":            "artemis-test",
