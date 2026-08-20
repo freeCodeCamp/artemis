@@ -53,13 +53,15 @@ relPath := strings.TrimPrefix(r.URL.Query().Get("path"), "/")
 
 **Release:** v1.6.4. Commit `949bbd8`.
 
-**Old:** `writeUpstreamError` never inspects the error (`internal/handler/handler.go:256-264` at `v1.6.0`). A `context.Canceled` raised by the caller hanging up is logged as `upstream.error`, reported to Sentry, and recorded with the status its call site passes. Forty-two of the forty-three call sites pass `http.StatusBadGateway`, so a disconnect is recorded as `502`. The one exception is `internal/handler/repo.go:353` at `v1.6.0`, which passes `503`.
+**Old, at the call sites that reached it:** `writeUpstreamError` never inspects the error (`internal/handler/handler.go:256-264` at `v1.6.0`). A `context.Canceled` raised by the caller hanging up is logged as `upstream.error`, reported to Sentry, and recorded with the status its call site passes. Forty-two of the forty-three `writeUpstreamError` call sites pass `http.StatusBadGateway`, so a disconnect is recorded as `502`. The one exception among them is `internal/handler/repo.go:353` at `v1.6.0`, which passes `503`.
+
+**The upload path did not reach it.** A disconnect during `PUT /api/deploy/{deployId}/upload` never called `writeUpstreamError` at `v1.6.0`. `internal/handler/deploy.go:156-162` caught the `context.Canceled` returned by the R2 `PUT` first, logged `deploy.upload.canceled` at warn, and returned without writing a response — so the access log recorded the `statusWriter` default of `200` (`internal/handler/middleware.go:212`) and Sentry saw nothing. Commit `949bbd8` deleted that branch in the same change that added the `499` classification, so upload aborts now take the shared path. Weigh this above its share of the call sites: an upload body is the request most likely to be aborted mid-flight, which is why the special case existed.
 
 **New:** `writeUpstreamError` tests for `context.Canceled` first (`internal/handler/handler.go:274-299`). It logs `client.disconnect` at warn level and records `499` with error code `client_closed_request` (`internal/handler/handler.go:301`). `reportUpstream` returns early on `context.Canceled` (`internal/handler/handler.go:303-305`), so a disconnect no longer raises a Sentry event.
 
 **Read this as a classification change, not a new response.** artemis writes the `499` response body only when the request context is still live (`internal/handler/handler.go:281-283`). A caller that has genuinely hung up reads nothing. When the request context is already cancelled, artemis stamps `499` and `client_closed_request` on the access-log writer and writes no body (`internal/handler/handler.go:285-289`).
 
-**Action:** update any alert, dashboard or log query that counts `502` as an upstream failure. Client aborts now land in `499`.
+**Action:** update any alert, dashboard or log query that counts `502` as an upstream failure. Client aborts now land in `499`. Two consequences are specific to uploads. An aborted upload used to be access-logged as `200`, so an upload success-rate panel counted it as a success and will now show a new `499` band. And any query on the `deploy.upload.canceled` event has nothing left to match — move it to `client.disconnect`, the event every disconnect now emits.
 
 ## 3 — `finalize`, `promote` and `rollback` require a root `index.html`
 
