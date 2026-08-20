@@ -21,7 +21,7 @@ Loss is NOT a serving outage: the serve plane (Caddy `r2_alias` → R2) never to
 | Disk loss on the node                               | no — same as node loss                                                                |
 | R2 bucket loss (backup target)                      | out of scope here — R2 is the platform's own durability domain                        |
 
-RPO today: up to 24 h. RTO today: manual — new PVC + `psql < dump` + repoint; unrehearsed (unverified — no restore drill is recorded anywhere in this repo or the infra runbooks).
+RPO today: up to 24 h. RTO today: manual — new PVC + `psql < dump` + repoint — against a stated floor of \<= 60 min. The restore leg **is** rehearsed: `infra:docs/runbooks/08-artemis-pg-restore-drill.md` records the R8 drill PASSED on 2026-06-05, restoring the newest R2 dump into a scratch Postgres with both tenants back and 6/6 artemis tables present. What is not rehearsed is the StatefulSet re-provision that precedes it; that is the remaining wall-time inside the 60 min (runbook 08 §F).
 
 ## 3. Options scored
 
