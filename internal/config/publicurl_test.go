@@ -6,13 +6,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func publicURLEnv() map[string]string {
+	return map[string]string{
+		"GH_CLIENT_ID":         "cid",
+		"JWT_SIGNING_KEY":      "0123456789abcdef0123456789abcdef",
+		"R2_ENDPOINT":          "http://127.0.0.1:1",
+		"R2_ACCESS_KEY_ID":     "k",
+		"R2_SECRET_ACCESS_KEY": "s",
+		"VALKEY_ADDR":          "127.0.0.1:6379",
+	}
+}
+
 func TestLoad_PublicURLFormatsDefaultToTheServedHostShapes(t *testing.T) {
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("R2_ENDPOINT", "http://127.0.0.1:1")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("VALKEY_ADDR", "127.0.0.1:6379")
+	hermeticEnv(t, publicURLEnv())
 
 	c, err := Load()
 	require.NoError(t, err)
@@ -21,12 +27,7 @@ func TestLoad_PublicURLFormatsDefaultToTheServedHostShapes(t *testing.T) {
 }
 
 func TestLoad_PublicURLFormatsAreOverridable(t *testing.T) {
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("R2_ENDPOINT", "http://127.0.0.1:1")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("VALKEY_ADDR", "127.0.0.1:6379")
+	hermeticEnv(t, publicURLEnv())
 	t.Setenv("PUBLIC_URL_PRODUCTION_FORMAT", "https://<site>.example.test")
 	t.Setenv("PUBLIC_URL_PREVIEW_FORMAT", "https://<site>.pre.example.test")
 
@@ -37,12 +38,7 @@ func TestLoad_PublicURLFormatsAreOverridable(t *testing.T) {
 }
 
 func TestLoad_RejectsAPublicURLFormatWithoutSiteToken(t *testing.T) {
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("R2_ENDPOINT", "http://127.0.0.1:1")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("VALKEY_ADDR", "127.0.0.1:6379")
+	hermeticEnv(t, publicURLEnv())
 	t.Setenv("PUBLIC_URL_PRODUCTION_FORMAT", "https://freecode.camp")
 
 	_, err := Load()
@@ -51,12 +47,7 @@ func TestLoad_RejectsAPublicURLFormatWithoutSiteToken(t *testing.T) {
 }
 
 func TestLoad_BlastCapDefaultsToARealCeiling(t *testing.T) {
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("R2_ENDPOINT", "http://127.0.0.1:1")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("VALKEY_ADDR", "127.0.0.1:6379")
+	hermeticEnv(t, publicURLEnv())
 
 	c, err := Load()
 	require.NoError(t, err)

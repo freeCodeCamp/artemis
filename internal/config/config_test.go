@@ -25,9 +25,7 @@ func requiredEnv() map[string]string {
 }
 
 func TestLoad_AllDefaults(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -75,9 +73,7 @@ func TestLoad_ValkeyConnectRetryWindow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("VALKEY_CONNECT_RETRY_WINDOW", tc.value)
 
 			cfg, err := Load()
@@ -106,9 +102,7 @@ func TestLoad_PGConnectRetryWindow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("PG_CONNECT_RETRY_WINDOW", tc.value)
 
 			cfg, err := Load()
@@ -134,9 +128,7 @@ func TestLoad_GitHubAPIBaseValidation(t *testing.T) {
 	}
 	for _, base := range valid {
 		t.Run("valid/"+base, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("GH_API_BASE", base)
 			_, err := Load()
 			require.NoError(t, err)
@@ -153,9 +145,7 @@ func TestLoad_GitHubAPIBaseValidation(t *testing.T) {
 	}
 	for _, base := range invalid {
 		t.Run("invalid/"+base, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("GH_API_BASE", base)
 			_, err := Load()
 			require.Error(t, err, "GH_API_BASE %q must be rejected", base)
@@ -164,9 +154,7 @@ func TestLoad_GitHubAPIBaseValidation(t *testing.T) {
 }
 
 func TestLoad_OverridesViaEnv(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("PORT", "9090")
 	t.Setenv("R2_BUCKET", "test-bucket")
 	t.Setenv("GH_ORG", "ExampleOrg")
@@ -200,9 +188,7 @@ func TestLoad_OverridesViaEnv(t *testing.T) {
 }
 
 func TestConfigLoad(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	cfg, err := Load()
 	require.NoError(t, err)
 
@@ -218,9 +204,7 @@ func TestConfigLoad(t *testing.T) {
 }
 
 func TestConfigLoad_Overrides(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("DATABASE_URL", "postgres://artemis@pg/artemis")
 	t.Setenv("HATCHET_CLIENT_TOKEN", "ht-token")
 	t.Setenv("HATCHET_ADDR", "hatchet.svc:7077")
@@ -249,9 +233,7 @@ func TestConfigLoad_Overrides(t *testing.T) {
 }
 
 func TestConfigLoad_GraceBelowJWTTTLFails(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("JWT_TTL_SECONDS", "3600")
 	t.Setenv("CLEANUP_GRACE", "30m")
 
@@ -261,9 +243,7 @@ func TestConfigLoad_GraceBelowJWTTTLFails(t *testing.T) {
 }
 
 func TestConfigLoad_GraceBelowServeCacheTTLFails(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("JWT_TTL_SECONDS", "5")
 	t.Setenv("CLEANUP_GRACE", "10s")
 
@@ -275,9 +255,7 @@ func TestConfigLoad_GraceBelowServeCacheTTLFails(t *testing.T) {
 func TestLoad_UploadMaxBytes_RejectsNonPositive(t *testing.T) {
 	for _, bad := range []string{"0", "-1", "not-a-number", ""} {
 		t.Run("v="+bad, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("UPLOAD_MAX_BYTES", bad)
 			_, err := Load()
 			require.Error(t, err)
@@ -297,9 +275,7 @@ func TestLoad_MissingRequiredFails(t *testing.T) {
 	}
 	for _, omitted := range cases {
 		t.Run("missing "+omitted, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			require.NoError(t, os.Unsetenv(omitted))
 			_, err := Load()
 			require.Error(t, err)
@@ -309,9 +285,7 @@ func TestLoad_MissingRequiredFails(t *testing.T) {
 }
 
 func TestLoad_RejectsInvalidNumeric(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("PORT", "not-a-port")
 	_, err := Load()
 	require.Error(t, err)
@@ -319,9 +293,7 @@ func TestLoad_RejectsInvalidNumeric(t *testing.T) {
 }
 
 func TestLoad_RejectsShortSigningKey(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("JWT_SIGNING_KEY", "tooshort")
 	_, err := Load()
 	require.Error(t, err)
@@ -329,9 +301,7 @@ func TestLoad_RejectsShortSigningKey(t *testing.T) {
 }
 
 func TestLoad_LogLevelValidation(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("LOG_LEVEL", "absurd")
 	_, err := Load()
 	require.Error(t, err)
@@ -355,9 +325,7 @@ func TestLoad_RejectsMalformedDeployPrefix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for k, v := range requiredEnv() {
-				t.Setenv(k, v)
-			}
+			hermeticEnv(t, requiredEnv())
 			t.Setenv("DEPLOY_PREFIX_FORMAT", tc.fmt)
 			_, err := Load()
 			require.Error(t, err)
@@ -369,9 +337,7 @@ func TestLoad_RejectsMalformedDeployPrefix(t *testing.T) {
 }
 
 func TestLoad_AcceptsValidDeployPrefix(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/custom/<ts>-<sha>/sub/")
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -379,9 +345,7 @@ func TestLoad_AcceptsValidDeployPrefix(t *testing.T) {
 }
 
 func TestLoad_RegistryAuthzTeamRejectsWhitespace(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("REGISTRY_AUTHZ_TEAM", "  ")
 	_, err := Load()
 	require.Error(t, err)
@@ -389,9 +353,7 @@ func TestLoad_RegistryAuthzTeamRejectsWhitespace(t *testing.T) {
 }
 
 func TestValidate_RegistryAuthzTeamRejectsBlank(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, "staff", cfg.Registry.AuthzTeam)
@@ -418,9 +380,7 @@ func captureSlog(t *testing.T) *bytes.Buffer {
 // refactor could fire the warn unconditionally and bury real overrides
 // in the noise.
 func TestLoad_GHAPIBaseDefaultNoWarn(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	logs := captureSlog(t)
 	_, err := Load()
 	require.NoError(t, err)
@@ -432,9 +392,7 @@ func TestLoad_GHAPIBaseDefaultNoWarn(t *testing.T) {
 // the canonical default. The warn is the operator's only visible
 // signal that GitHub probes are routing through a non-canonical host.
 func TestLoad_GHAPIBaseOverrideWarn(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	const override = "https://evil.example.com"
 	t.Setenv("GH_API_BASE", override)
 
@@ -452,9 +410,7 @@ func TestLoad_GHAPIBaseOverrideWarn(t *testing.T) {
 }
 
 func TestLoad_RejectsNonNumericAppIDs(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("GH_APP_ID", "3.287718e+06")
 	t.Setenv("GH_APP_INSTALLATION_ID", "121700722")
 	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
@@ -465,9 +421,7 @@ func TestLoad_RejectsNonNumericAppIDs(t *testing.T) {
 }
 
 func TestLoad_RejectsNonNumericInstallationID(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("GH_APP_ID", "3287718")
 	t.Setenv("GH_APP_INSTALLATION_ID", "1.21700722e+08")
 	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
@@ -478,9 +432,7 @@ func TestLoad_RejectsNonNumericInstallationID(t *testing.T) {
 }
 
 func TestLoad_AcceptsNumericAppIDs(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	t.Setenv("GH_APP_ID", "3287718")
 	t.Setenv("GH_APP_INSTALLATION_ID", "121700722")
 	t.Setenv("GH_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----")
@@ -492,9 +444,7 @@ func TestLoad_AcceptsNumericAppIDs(t *testing.T) {
 }
 
 func TestLoad_SeedsTheOutboxRetentionDefault(t *testing.T) {
-	for k, v := range requiredEnv() {
-		t.Setenv(k, v)
-	}
+	hermeticEnv(t, requiredEnv())
 	cfg, err := Load()
 	require.NoError(t, err)
 	assert.Equal(t, 30, cfg.Cleanup.OutboxRetentionDays,
@@ -514,4 +464,51 @@ func TestLoadCleanup_ReadsTheOutboxRetentionOverride(t *testing.T) {
 	c := CleanupConfig{}
 	require.NoError(t, loadCleanup(&c))
 	assert.Equal(t, 7, c.OutboxRetentionDays)
+}
+
+func hermeticEnv(t *testing.T, want map[string]string) {
+	t.Helper()
+	known := EnvKeys()
+	for k := range want {
+		require.Contains(t, known, k,
+			"Load never reads %s, so setting it asserts nothing", k)
+	}
+	for _, k := range known {
+		if _, present := os.LookupEnv(k); !present {
+			continue
+		}
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
+	}
+	for k, v := range want {
+		t.Setenv(k, v)
+	}
+}
+
+func TestHermeticEnv_LeavesUndeclaredVariablesAbsentNotEmpty(t *testing.T) {
+	t.Setenv("PORT", "9999")
+
+	hermeticEnv(t, requiredEnv())
+
+	_, present := os.LookupEnv("PORT")
+	require.False(t, present,
+		"PORT is read without an empty-string guard, so setting it to \"\" would reach strconv and fail Load")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.Port, "an undeclared variable must fall back to the default")
+}
+
+func TestHermeticEnv_RestoresEveryClearedVariableWhenTheTestEnds(t *testing.T) {
+	const ambient = "ambient-value-set-outside"
+	t.Setenv("R2_BUCKET", ambient)
+
+	t.Run("inner", func(t *testing.T) {
+		hermeticEnv(t, requiredEnv())
+		_, present := os.LookupEnv("R2_BUCKET")
+		require.False(t, present, "the inner test must not see the ambient value")
+	})
+
+	assert.Equal(t, ambient, os.Getenv("R2_BUCKET"),
+		"clearing must be scoped to the test; leaking it breaks every later test in the binary")
 }

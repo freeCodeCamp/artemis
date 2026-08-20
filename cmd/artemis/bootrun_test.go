@@ -20,6 +20,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	vkstore "github.com/freeCodeCamp/artemis/internal/registry/valkey"
 )
@@ -322,22 +323,24 @@ func TestRun_BootsFromEnvAndExitsOnSigterm(t *testing.T) {
 	dsn, valkeyAddr := startDeps(t)
 	port := freePort(t)
 
-	t.Setenv("PORT", strconv.Itoa(port))
-	t.Setenv("DATABASE_URL", dsn)
-	t.Setenv("VALKEY_ADDR", valkeyAddr)
-	t.Setenv("R2_ENDPOINT", "http://127.0.0.1:1")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("R2_BUCKET", "b")
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>.example.test/deploys/<ts>-<sha>/")
-	t.Setenv("ALIAS_PRODUCTION_KEY_FORMAT", "<site>.example.test/production")
-	t.Setenv("ALIAS_PREVIEW_KEY_FORMAT", "<site>.example.test/preview")
-	t.Setenv("LOG_LEVEL", "error")
-	t.Setenv("SENTRY_DSN", "https://publickey@o0.ingest.sentry.io/0")
-	t.Setenv("ENVIRONMENT", "test")
-	t.Setenv("SENTRY_TRACES_SAMPLE_RATE", "0")
+	configtest.Hermetic(t, map[string]string{
+		"PORT":                        strconv.Itoa(port),
+		"DATABASE_URL":                dsn,
+		"VALKEY_ADDR":                 valkeyAddr,
+		"R2_ENDPOINT":                 "http://127.0.0.1:1",
+		"R2_ACCESS_KEY_ID":            "k",
+		"R2_SECRET_ACCESS_KEY":        "s",
+		"R2_BUCKET":                   "b",
+		"GH_CLIENT_ID":                "cid",
+		"JWT_SIGNING_KEY":             "0123456789abcdef0123456789abcdef",
+		"DEPLOY_PREFIX_FORMAT":        "<site>.example.test/deploys/<ts>-<sha>/",
+		"ALIAS_PRODUCTION_KEY_FORMAT": "<site>.example.test/production",
+		"ALIAS_PREVIEW_KEY_FORMAT":    "<site>.example.test/preview",
+		"LOG_LEVEL":                   "error",
+		"SENTRY_DSN":                  "https://publickey@o0.ingest.sentry.io/0",
+		"ENVIRONMENT":                 "test",
+		"SENTRY_TRACES_SAMPLE_RATE":   "0",
+	})
 
 	done := make(chan error, 1)
 	go func() { done <- run() }()

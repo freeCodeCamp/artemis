@@ -1,27 +1,23 @@
 package config_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"github.com/stretchr/testify/require"
 )
 
-// setRequiredForSentry sets the minimum required env for Load() to
-// succeed and clears every SENTRY_* var, so each test starts from a
-// known baseline regardless of the developer's shell.
 func setRequiredForSentry(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"SENTRY_DSN", "ENVIRONMENT", "SENTRY_TRACES_SAMPLE_RATE", "SENTRY_DEBUG"} {
-		_ = os.Unsetenv(k)
-	}
-	t.Setenv("R2_ENDPOINT", "https://acct.r2.cloudflarestorage.com")
-	t.Setenv("R2_ACCESS_KEY_ID", "ak")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "sk")
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("VALKEY_ADDR", "localhost:6379")
+	configtest.Hermetic(t, map[string]string{
+		"R2_ENDPOINT":          "https://acct.r2.cloudflarestorage.com",
+		"R2_ACCESS_KEY_ID":     "ak",
+		"R2_SECRET_ACCESS_KEY": "sk",
+		"GH_CLIENT_ID":         "cid",
+		"JWT_SIGNING_KEY":      "0123456789abcdef0123456789abcdef",
+		"VALKEY_ADDR":          "localhost:6379",
+	})
 }
 
 func TestLoad_SentryDefaultsOff(t *testing.T) {

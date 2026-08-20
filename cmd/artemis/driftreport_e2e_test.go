@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"github.com/freeCodeCamp/artemis/internal/pg"
-
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
@@ -112,15 +112,17 @@ func (f *fakeBucket) listV2(w http.ResponseWriter, prefix string) {
 
 func driftReportEnv(t *testing.T, dsn, endpoint string) {
 	t.Helper()
-	t.Setenv("DATABASE_URL", dsn)
-	t.Setenv("R2_ENDPOINT", endpoint)
-	t.Setenv("R2_BUCKET", "artemis-test")
-	t.Setenv("R2_ACCESS_KEY_ID", "k")
-	t.Setenv("R2_SECRET_ACCESS_KEY", "s")
-	t.Setenv("DEPLOY_PREFIX_FORMAT", "<site>/deploys/<ts>-<sha>/")
-	t.Setenv("GH_CLIENT_ID", "cid")
-	t.Setenv("JWT_SIGNING_KEY", "0123456789abcdef0123456789abcdef")
-	t.Setenv("VALKEY_ADDR", "127.0.0.1:1")
+	configtest.Hermetic(t, map[string]string{
+		"DATABASE_URL":         dsn,
+		"R2_ENDPOINT":          endpoint,
+		"R2_BUCKET":            "artemis-test",
+		"R2_ACCESS_KEY_ID":     "k",
+		"R2_SECRET_ACCESS_KEY": "s",
+		"DEPLOY_PREFIX_FORMAT": "<site>/deploys/<ts>-<sha>/",
+		"GH_CLIENT_ID":         "cid",
+		"JWT_SIGNING_KEY":      "0123456789abcdef0123456789abcdef",
+		"VALKEY_ADDR":          "127.0.0.1:1",
+	})
 }
 
 func seedDriftFixture(t *testing.T, dsn string, site sitekey.Dirname, deployID string) {
