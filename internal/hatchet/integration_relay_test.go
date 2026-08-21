@@ -69,7 +69,7 @@ func (m *memOutbox) outstanding() int {
 func TestR5OutboxRelayAtLeastOnceAcrossRestart(t *testing.T) {
 	obs := newObserver()
 	h := startHarness(t, obs, map[string]worker.Handler{
-		worker.WorkflowFinalize: instrumented(obs, 0, nil),
+		harnessWorkflowA: instrumented(obs, 0, nil),
 	})
 
 	const n = 6
@@ -79,7 +79,7 @@ func TestR5OutboxRelayAtLeastOnceAcrossRestart(t *testing.T) {
 		sites[i] = fmt.Sprintf("r5-relay-%02d", i)
 		events[i] = pg.OutboxEvent{
 			ID:      int64(i + 1),
-			Topic:   worker.WorkflowFinalize,
+			Topic:   harnessWorkflowA,
 			Payload: []byte(fmt.Sprintf(`{"site":%q}`, sites[i])),
 		}
 	}
@@ -101,7 +101,7 @@ func TestR5OutboxRelayAtLeastOnceAcrossRestart(t *testing.T) {
 	require.Zero(t, src.outstanding(), "relay must drain the outbox after engine recovers")
 
 	for _, site := range sites {
-		h.waitStarts(t, site, 1)
+		h.waitStarts(t, site, 1, "the relayed event never reached the engine after the restart")
 		require.GreaterOrEqual(t, obs.startsFor(site), 1,
 			"site %s must be delivered at least once across the restart", site)
 	}
