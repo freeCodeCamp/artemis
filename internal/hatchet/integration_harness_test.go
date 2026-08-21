@@ -13,16 +13,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hatchet-dev/hatchet/pkg/client/rest"
-
-	hsdk "github.com/hatchet-dev/hatchet/sdks/go"
-
 	hatchetadapter "github.com/freeCodeCamp/artemis/internal/hatchet"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
 
 const (
-	siteKey         = "input.site"
+	harnessWorkflowA = "artemis.it.workflow-a"
+	harnessWorkflowB = "artemis.it.workflow-b"
+	harnessWorkflowC = "artemis.it.workflow-c"
+)
+
+const (
 	pollInterval    = 250 * time.Millisecond
 	startupTimeout  = 30 * time.Second
 	runReadyTimeout = 90 * time.Second
@@ -46,7 +47,6 @@ To run against a live engine:
 
 type harness struct {
 	pub      worker.Publisher
-	client   *hsdk.Client
 	observed *observer
 }
 
@@ -131,7 +131,7 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 		WorkerName: "artemis-it-" + shortID(),
 	})
 
-	for _, def := range deployDefs(obs, handlers) {
+	for _, def := range harnessDefs(obs, handlers) {
 		require.NoError(t, adapter.Register(def))
 	}
 
@@ -143,9 +143,6 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 
 	waitPublishable(t, adapter)
 
-	client, err := hsdk.NewClient()
-	require.NoError(t, err)
-
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -154,11 +151,11 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 		}
 	})
 
-	return &harness{pub: adapter, client: client, observed: obs}
+	return &harness{pub: adapter, observed: obs}
 }
 
-func deployDefs(obs *observer, handlers map[string]worker.Handler) []worker.WorkflowDef {
-	names := []string{worker.WorkflowFinalize, worker.WorkflowPromote, worker.WorkflowRollback}
+func harnessDefs(obs *observer, handlers map[string]worker.Handler) []worker.WorkflowDef {
+	names := []string{harnessWorkflowA, harnessWorkflowB, harnessWorkflowC}
 	defs := make([]worker.WorkflowDef, 0, len(names))
 	for _, name := range names {
 		h := handlers[name]
@@ -209,7 +206,7 @@ func (h *harness) fire(t *testing.T, topic, site string) {
 	require.NoError(t, h.pub.Publish(context.Background(), topic, payload))
 }
 
-func (h *harness) waitStarts(t *testing.T, site string, want int) {
+func (h *harness) waitStarts(t *testing.T, site string, want int, why string) {
 	t.Helper()
 	deadline := time.Now().Add(runReadyTimeout)
 	for time.Now().Before(deadline) {
@@ -218,32 +215,8 @@ func (h *harness) waitStarts(t *testing.T, site string, want int) {
 		}
 		time.Sleep(pollInterval)
 	}
-	t.Fatalf("site=%s: got %d starts, want >= %d within %s",
-		site, h.observed.startsFor(site), want, runReadyTimeout)
-}
-
-func (h *harness) waitRunStatus(t *testing.T, runID string, target rest.V1TaskStatus) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), runReadyTimeout)
-	defer cancel()
-	for {
-		details, err := h.client.Runs().GetDetails(ctx, uuid.MustParse(runID))
-		if err == nil {
-			if details.Status == target {
-				return
-			}
-			for _, tr := range details.TaskRuns {
-				if tr.Status == target {
-					return
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("run %s did not reach status %s within %s", runID, target, runReadyTimeout)
-		case <-time.After(pollInterval):
-		}
-	}
+	t.Fatalf("site=%s: got %d starts, want >= %d within %s: %s",
+		site, h.observed.startsFor(site), want, runReadyTimeout, why)
 }
 
 func shortID() string {
