@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.9.2](https://github.com/freeCodeCamp/artemis/compare/v1.9.1...v1.9.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **handler:** unpublish first, audit every purge ([b201e6a](https://github.com/freeCodeCamp/artemis/commit/b201e6a5c0142b3c2086081e169cd925ed8d7582))
+
 ## [1.9.1](https://github.com/freeCodeCamp/artemis/compare/v1.9.0...v1.9.1) (2026-08-20)
 
 
