@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
@@ -99,4 +100,51 @@ func TestSitePromote_ClientAbort_StillWritesIndex(t *testing.T) {
 
 	require.Len(t, idx.aliased, 1,
 		"alias landed in R2, so the alias row must survive the client abort")
+}
+
+type ctxAwareRegistry struct {
+	*fakeRegistry
+}
+
+func (c *ctxAwareRegistry) GetSite(ctx context.Context, slug sitekey.Slug) (registry.Site, error) {
+	if err := ctx.Err(); err != nil {
+		return registry.Site{}, err
+	}
+	return c.fakeRegistry.GetSite(ctx, slug)
+}
+
+func (c *ctxAwareRegistry) UpdateTeams(ctx context.Context, slug sitekey.Slug, teams []string) (registry.Site, error) {
+	if err := ctx.Err(); err != nil {
+		return registry.Site{}, err
+	}
+	return c.fakeRegistry.UpdateTeams(ctx, slug, teams)
+}
+
+func TestSiteUpdate_ClientAbort_StillWritesTeams(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	reg := &ctxAwareRegistry{fakeRegistry: newFakeRegistry()}
+	h.Registry = reg
+
+	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
+	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
+
+	ctx, cancel := context.WithCancel(contextWithLogin(context.Background(), "alice", "tok"))
+	cancel()
+
+	updBody, _ := json.Marshal(SiteUpdateRequest{Teams: []string{"news-editors"}})
+	w := withChiRoute(http.MethodPatch, "/api/site/{slug}",
+		"/api/site/example", updBody,
+		map[string]string{},
+		h.SiteUpdate,
+		ctx,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "news-editors",
+		"an empty body also records 200 on a ResponseRecorder, so the body must carry the new row")
+
+	after, err := reg.GetSite(context.Background(), sitekey.Slug("example"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"news-editors"}, after.Teams,
+		"949bbd8 detached every other commit path so a client hangup cannot cancel a half-finished "+
+			"mutation with the advisory lock held; SiteUpdate was the one it missed")
 }
