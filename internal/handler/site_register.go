@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -165,10 +166,12 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 		site      registry.Site
 		wrote     bool
 	)
-	lockErr := h.withSiteLock(r.Context(), h.DeployPrefix.SiteDirname(slug), func() error {
-		before, beforeErr = h.Registry.GetSite(r.Context(), slug)
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancel()
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func() error {
+		before, beforeErr = h.Registry.GetSite(opCtx, slug)
 		var err error
-		site, err = h.Registry.UpdateTeams(r.Context(), slug, req.Teams)
+		site, err = h.Registry.UpdateTeams(opCtx, slug, req.Teams)
 		if err != nil {
 			switch {
 			case errors.Is(err, registry.ErrNotFound):
@@ -202,19 +205,25 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, row)
 }
 
-// SiteDelete implements DELETE /api/site/{slug} — removes a slug
-// from the registry. R2 deploy bytes are NOT touched (those age out
-// via the post-GA cleanup cron). Authz: caller in
-// h.RegistryAuthzTeam.
+// SiteDelete implements DELETE /api/site/{slug}. Without ?purge=true it
+// removes the registry row only: the R2 bytes and the public alias both
+// survive, so the site keeps serving. With ?purge=true it moves the two
+// aliases into the trash prefix first — which takes the site off the
+// internet in seconds regardless of its size — then the rest of the site
+// prefix, then the registry row. Authz: caller in h.RegistryAuthzTeam.
 //
 // Status matrix:
 //
-//	204 No Content     — deleted
+//	200 OK             — purged
+//	204 No Content     — deregistered, bytes and alias left in place
 //	400 Bad Request    — invalid slug
 //	403 Forbidden      — caller not in authz team
-//	404 Not Found      — slug not registered
-//	502 Bad Gateway    — registry write failed
-//	503 Service Unavail — github membership probe upstream error
+//	404 Not Found      — slug not registered; a purge instead treats an
+//	                     absent row as satisfied and returns 200
+//	502 Bad Gateway    — tombstone write, R2 move, R2 verify or registry
+//	                     write failed
+//	503 Service Unavail — github membership probe upstream error, or no
+//	                     tombstone store configured
 func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireRegistryAuthz(w, r); err != nil {
 		return
@@ -252,31 +261,65 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	var (
 		moved   int
 		success bool
+		wrote   bool
 	)
+	auditPurgeFailure := func(stage string) {
+		wrote = true
+		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+		h.auditFromScope(r.Context(), "site.purge", "failure",
+			map[string]any{"stage": stage, "moved": moved})
+	}
 	lockErr := h.withSiteLock(opCtx, dirname, func() error {
 		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
+			auditPurgeFailure("tombstone")
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
 			return nil
 		}
-		var err error
-		moved, err = h.R2.MovePrefix(opCtx, string(dirname)+"/", base+string(dirname)+"/")
+		for _, mode := range []string{"production", "preview"} {
+			aliasKey := h.aliasKey(slug, mode)
+			n, err := h.R2.MovePrefix(opCtx, aliasKey, base+aliasKey)
+			moved += n
+			if err != nil {
+				auditPurgeFailure("unpublish")
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-unpublish", err)
+				return nil
+			}
+		}
+		n, err := h.R2.MovePrefix(opCtx, string(dirname)+"/", base+string(dirname)+"/")
+		moved += n
 		if err != nil {
+			auditPurgeFailure("move")
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
 			return nil
 		}
-		if err := h.Registry.Delete(opCtx, slug); err != nil {
+		remaining, err := h.R2.HasPrefix(opCtx, string(dirname)+"/")
+		if err != nil {
+			auditPurgeFailure("verify")
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_verify_failed", "r2.verify.site-purge", err)
+			return nil
+		}
+		if remaining {
+			auditPurgeFailure("incomplete")
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_incomplete", "r2.verify.site-purge",
+				fmt.Errorf("site prefix %s/ still lists objects after moving %d", dirname, moved))
+			return nil
+		}
+		if err := h.Registry.Delete(opCtx, slug); err != nil && !errors.Is(err, registry.ErrNotFound) {
+			auditPurgeFailure("registry")
 			writeRegistryDeleteError(w, r, err)
 			return nil
 		}
 		success = true
 		return nil
 	})
-	if lockErr != nil {
-		writeLockError(w, r, lockErr)
+	if !success {
+		if lockErr != nil && !wrote {
+			writeLockError(w, r, lockErr)
+		}
 		return
 	}
-	if !success {
-		return
+	if lockErr != nil {
+		slog.WarnContext(r.Context(), "site.purge.unlock_failed", "site", slug, "err", lockErr)
 	}
 
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")

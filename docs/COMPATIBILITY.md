@@ -1,4 +1,4 @@
-# Artemis — caller-visible behaviour changes, v1.6.0 → v1.9.1
+# Artemis — caller-visible behaviour changes, v1.6.0 → unreleased
 
 Audience: a staff engineer who integrates with the artemis HTTP API, or who runs an artemis deployment other than freeCodeCamp production.
 
@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 12, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Eight entries: five change a response an API caller reads, one changes how a client disconnect is logged and metered, one changes a value stored in the audit trail, and one changes operator configuration.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Twelve entries: seven change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, and one changes operator configuration.
 
 ## Summary
 
@@ -30,6 +30,10 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 6 | `promote`, `rollback` and `finalize` commit on a detached context | v1.6.4 | API callers |
 | 7 | GC audit rows key on the registry slug, not the storage dirname | v1.9.0 | Audit-trail readers |
 | 8 | `CLEANUP_BLAST_CAP` gains a default, and an explicit `0` inverts | v1.8.0 | Operators |
+| 9 | A purge whose registry row is already absent returns `200`, not `404` | unreleased | API callers |
+| 10 | A purge can now fail with `r2_verify_failed` or `r2_move_incomplete` | unreleased | API callers |
+| 11 | `audit_log.outcome` gains `failure`, and a failed purge is recorded | unreleased | Audit-trail readers |
+| 12 | `PATCH /api/site/{slug}` commits on a detached context | unreleased | API callers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -204,3 +208,61 @@ The validation message tracks the flip. `v1.6.0` reads `must be non-negative int
 **Scope widened.** `v1.6.0` applies the cap to site GC only (`internal/gc/gcsite.go:76` at `v1.6.0`). `v1.9.1` also applies it to tombstone purge (`internal/gc/tombstone.go:79-89`) and to reconcile repairs (`internal/gc/reconcile.go:217-237`).
 
 **Action:** set `CLEANUP_BLAST_CAP` explicitly. An operator who set `0` to mean "no ceiling" now gets "delete nothing". An operator who never set it gets a ceiling of 10 rather than none.
+
+## 9 — A purge whose registry row is already absent returns `200`, not `404`
+
+**Release:** unreleased. Commit `ff32268`.
+
+**Old:** `DELETE /api/site/{slug}?purge=true` ran `RecordSitePurge`, then `MovePrefix`, then `Registry.Delete`. An absent registry row made the last call return `ErrNotFound`, and the handler answered `404` — *after* the destructive work had already landed. It also skipped the audit write, so the destruction left no `audit_log` row at all.
+
+Proven on production 2026-08-21. A purge of `e2e-probe-20260513b` answered `404` while the alias rows went 2 to 0, the public URL went `200` to `404`, a tombstone landed, the deploy rows vanished, and `audit_log` recorded nothing.
+
+An orphaned site has no registry row by definition, so this was the normal path for exactly the sites that need purging, not an edge case.
+
+**New:** `ErrNotFound` from `Registry.Delete` satisfies the purge. The handler answers `200 {"slug","status":"purged","moved"}` and writes the audit row (`internal/handler/site_register.go`).
+
+**The bare `DELETE` is unchanged.** Without `?purge=true` an absent slug still returns `404`.
+
+**Action:** stop treating `404` from a purge as "nothing happened". On `v1.9.1` and earlier it meant the opposite.
+
+## 10 — A purge can now fail with `r2_verify_failed` or `r2_move_incomplete`
+
+**Release:** unreleased. Commit `ff32268`.
+
+**Old:** `MovePrefix` copies and deletes one object at a time inside a 10-minute `destructiveMoveTimeout` (`internal/handler/deploy_delete.go:17`), which caps a purge at roughly 215 objects. Measured on production: `languagegames` moved 218 of 799 and stopped; `prd-with-scaffolding` moved 214 of 906. Because the alias objects sort after `deploys/`, a stalled move never reached them and **the site kept serving**.
+
+**New:** two changes.
+
+The two alias objects move first, so the site stops serving within the 15-second serve-cache TTL whatever its size. A stalled bulk move no longer leaves a public site.
+
+After the bulk move the handler probes `HasPrefix(<dirname>/)`. A probe error answers `502 r2_verify_failed`; a prefix that still lists objects answers `502 r2_move_incomplete`. Neither reaches the `200` or the `Registry.Delete`.
+
+**Consequence:** a large site may now need several `DELETE ?purge=true` calls. The operation is idempotent — `RecordSitePurge` is `ON CONFLICT DO UPDATE` (`internal/pg/repo.go:183-184`) and `MovePrefix` re-lists the source each time — so repeating the request resumes it. Each retry resets `trashed_at`, restarting the recovery clock.
+
+**Action:** treat `502 r2_move_incomplete` as "call again", not as an error to escalate. Do not infer completion from a single `200` on a large site; the `moved` count in the body is authoritative for that call only.
+
+## 11 — `audit_log.outcome` gains `failure`, and a failed purge is recorded
+
+**Release:** unreleased. Commit `ff32268`.
+
+**Old:** a purge wrote one audit row, and only when the whole sequence succeeded.
+
+**New:** every purge that reaches R2 writes exactly one row. Either `outcome=success` with `detail.moved`, or `outcome=failure` with `detail.stage` and `detail.moved` naming what was already destroyed. `stage` is one of `tombstone`, `unpublish`, `move`, `verify`, `incomplete`, `registry`.
+
+A purge refused before it reaches R2 — by the site lock, or by a missing tombstone store — changes nothing and writes no row.
+
+**`outcome` is unconstrained `TEXT`** (`internal/pg/migrations/0006_audit_log.sql:8`), so no migration is needed, and `failure` is not the first non-`success` value: `repo.approve` already writes `approved_failed`. The only closed-set consumer is `DeployActors` (`internal/pg/audit.go:94`), which filters `action='deploy.finalize' AND outcome='success'` and is unaffected.
+
+**Action:** any dashboard or query over `audit_log` that assumes `outcome='success'` needs a look. Filter explicitly rather than relying on a single value.
+
+## 12 — `PATCH /api/site/{slug}` commits on a detached context
+
+**Release:** unreleased. Commit `ff32268`. This completes entry 6.
+
+**Old:** `SiteUpdate` was the only handler that took the per-site advisory lock on `r.Context()`. The `GetSite` read and the `UpdateTeams` write inside the lock ran on it too. A client disconnecting between the two cancelled the operation with the lock held.
+
+**New:** the same pattern as entry 6 — `context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)`, 60 seconds.
+
+**Consequence:** as in entry 6, the server may complete an update the client believes it cancelled. The blast radius is smaller: this is a registry team-list write, not an R2 alias flip, so a cancelled update never left a site serving the wrong bytes.
+
+**Action:** read the row back with `GET /api/sites` rather than inferring the team list from a cancelled request.

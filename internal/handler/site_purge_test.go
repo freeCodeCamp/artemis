@@ -90,7 +90,7 @@ func TestSitePurge_SurvivesRequestCancellation(t *testing.T) {
 	assert.Equal(t, []string{"example"}, tomb.purged, "site purge recorded, not skipped")
 }
 
-func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
+func TestSitePurge_FailedUnpublishKeepsSiteRetryable(t *testing.T) {
 	store := &flakyMoveR2{fakeR2: newFakeR2(), failMovesRemaining: 1}
 	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 
@@ -108,7 +108,9 @@ func TestSitePurge_FailedMoveKeepsSiteRetryable(t *testing.T) {
 		contextWithLogin(context.Background(), "alice", "tok"),
 	)
 	require.Equal(t, http.StatusBadGateway, failW.Code, failW.Body.String())
-	assert.Contains(t, failW.Body.String(), "r2_move_failed")
+	assert.Contains(t, failW.Body.String(), "r2_move_failed",
+		"failMovesRemaining=1 fails the FIRST MovePrefix, which is the production-alias move; "+
+			"TestSitePurge_FailedBulkMoveKeepsSiteRetryable covers the bulk stage")
 
 	listW := callSitesList(h, "alice", "tok")
 	require.Equal(t, http.StatusOK, listW.Code)
