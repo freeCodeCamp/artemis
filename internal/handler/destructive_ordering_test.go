@@ -48,12 +48,7 @@ func registerExample(t *testing.T, h *Handlers) {
 }
 
 func callPurge(h *Handlers) *httptest.ResponseRecorder {
-	return withChiRoute(http.MethodDelete, "/api/site/{slug}",
-		"/api/site/example?purge=true", nil,
-		map[string]string{},
-		h.SiteDelete,
-		contextWithLogin(context.Background(), "alice", "tok"),
-	)
+	return callPurgeSlug(h, "example")
 }
 
 func TestSitePurge_RecordsTheSiteTombstoneBeforeMovingBytes(t *testing.T) {
