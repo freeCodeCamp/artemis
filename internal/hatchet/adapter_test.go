@@ -37,3 +37,22 @@ func TestAdapterConnectBadAddr(t *testing.T) {
 	err := a.Start(context.Background())
 	require.Error(t, err)
 }
+
+func TestAdapterRegisterPreservesTriggerAndConcurrency(t *testing.T) {
+	a := New(Config{Token: "tok", Addr: "hatchet.svc:7077"})
+
+	noop := func(context.Context, map[string]any) error { return nil }
+	require.NoError(t, a.Register(worker.WorkflowDef{
+		Name:           "round-trip",
+		ConcurrencyKey: "some-key",
+		EventTriggers:  []string{"some.topic"},
+		Handler:        noop,
+	}))
+
+	regd := a.Registered()
+	require.Len(t, regd, 1)
+	require.Equal(t, "some-key", regd[0].ConcurrencyKey,
+		"Registered() must return the ConcurrencyKey it was given, not drop it")
+	require.Equal(t, []string{"some.topic"}, regd[0].EventTriggers,
+		"Registered() must return the EventTriggers it was given, not drop them")
+}

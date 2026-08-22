@@ -64,7 +64,7 @@ integration-help:
     @echo "    SITE=test ROOT_DOMAIN=freecode.camp \\"
     @echo "    just integration"
 
-# Real-Hatchet suite: spins up hatchet-lite via compose, mints a token, runs R2/R3/R4/R5
+# Real-Hatchet suite: spins up hatchet-lite via compose, mints a token, runs R3/R4/R5
 hatchet-integration:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -83,6 +83,9 @@ hatchet-integration:
 # go vet (the only linter CI runs)
 lint:
     {{go}} vet {{pkg}}
+    {{go}} vet -tags=load {{pkg}}
+    {{go}} vet -tags=e2e {{pkg}}
+    {{go}} vet -tags=integration {{pkg}}
 
 # Boot artemis locally — expects .env (loaded by direnv)
 run:
