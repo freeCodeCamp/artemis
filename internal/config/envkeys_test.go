@@ -4,7 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,18 +31,20 @@ func calleeName(fn ast.Expr) string {
 func envKeysReadInPackageSource(t *testing.T) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 
 	read := map[string]bool{}
 	files := 0
-	for _, pkg := range pkgs {
-		for range pkg.Files {
-			files++
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
-		ast.Inspect(pkg, func(n ast.Node) bool {
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		require.NoError(t, err)
+		files++
+		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || !readsEnv(calleeName(call.Fun)) {
 				return true
