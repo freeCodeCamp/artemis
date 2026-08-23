@@ -9,6 +9,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -435,8 +436,17 @@ func (c *Config) validate() error {
 	if _, ok := validLogLevels[c.LogLevel]; !ok {
 		return fmt.Errorf("invalid LOG_LEVEL %q: must be one of debug, info, warn, error", c.LogLevel)
 	}
-	if err := validateDeployPrefixFormat(c.DeployPrefixFormat); err != nil {
+	deploySeg, err := validateDeployPrefixFormat(c.DeployPrefixFormat)
+	if err != nil {
 		return err
+	}
+	for _, a := range []struct{ env, format string }{
+		{"ALIAS_PRODUCTION_KEY_FORMAT", c.Aliases.ProductionKeyFormat},
+		{"ALIAS_PREVIEW_KEY_FORMAT", c.Aliases.PreviewKeyFormat},
+	} {
+		if err := validateAliasKeyFormat(a.env, a.format, deploySeg); err != nil {
+			return err
+		}
 	}
 	for env, f := range map[string]string{
 		"PUBLIC_URL_PRODUCTION_FORMAT": c.Aliases.ProductionURLFormat,
@@ -502,7 +512,7 @@ func (c *Config) validate() error {
 // validateDeployPrefixFormat asserts the deploy-key template contains
 // both required placeholders. Both must be present so the per-deploy
 // prefix is unambiguous and the site-prefix can be derived for listing.
-func validateDeployPrefixFormat(fmtStr string) error {
+func validateDeployPrefixFormat(fmtStr string) (string, error) {
 	required := []string{"<site>", "<ts>-<sha>"}
 	var missing []string
 	for _, tok := range required {
@@ -511,10 +521,52 @@ func validateDeployPrefixFormat(fmtStr string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: must contain %s",
+		return "", fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: must contain %s",
 			fmtStr, strings.Join(missing, " and "))
 	}
+	seg, err := keyFormatSiteSegment(fmtStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: %w", fmtStr, err)
+	}
+	if !strings.Contains(seg, "<site>") {
+		return "", fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: the site segment %q before the first "+
+			"'/' must contain <site>, or every site collapses onto one storage prefix", fmtStr, seg)
+	}
+	for _, tok := range []string{"<ts>", "<sha>"} {
+		if strings.Contains(seg, tok) {
+			return "", fmt.Errorf("invalid DEPLOY_PREFIX_FORMAT %q: the site segment %q must render "+
+				"from the slug alone, but contains %s", fmtStr, seg, tok)
+		}
+	}
+	return seg, nil
+}
+
+func validateAliasKeyFormat(env, format, deploySeg string) error {
+	if !strings.Contains(format, "<site>") {
+		return fmt.Errorf("invalid %s %q: must contain <site>", env, format)
+	}
+	seg, err := keyFormatSiteSegment(format)
+	if err != nil {
+		return fmt.Errorf("invalid %s %q: %w", env, format, err)
+	}
+	if seg != deploySeg {
+		return fmt.Errorf("invalid %s %q: site segment %q must equal DEPLOY_PREFIX_FORMAT's %q, "+
+			"or the alias is unreachable for every site and a whole-site purge cannot find it",
+			env, format, seg, deploySeg)
+	}
+	if strings.Contains(format[len(seg)+1:], "<site>") {
+		return fmt.Errorf("invalid %s %q: keeps a <site> token after its site segment, which is "+
+			"fetched literally rather than rendered", env, format)
+	}
 	return nil
+}
+
+func keyFormatSiteSegment(format string) (string, error) {
+	slash := strings.IndexByte(format, '/')
+	if slash < 0 {
+		return "", errors.New("must contain '/' after the site segment")
+	}
+	return format[:slash], nil
 }
 
 func validateGitHubAPIBase(raw string) error {

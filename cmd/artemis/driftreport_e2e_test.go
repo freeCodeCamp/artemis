@@ -209,8 +209,9 @@ func TestRunDriftReport_RefusesAnUnusableDeployPrefixFormat(t *testing.T) {
 
 	err := runDriftReport(context.Background(), &bytes.Buffer{})
 
-	require.ErrorContains(t, err, "wire gc",
-		"a layout with no site segment would point every sweep at the wrong keyspace")
+	require.ErrorContains(t, err, "DEPLOY_PREFIX_FORMAT",
+		"a layout with no site segment would point every sweep at the wrong keyspace; config.Load "+
+			"now rejects it at boot, before the gc wiring that used to be the first to notice")
 }
 
 func TestRunDriftReport_RefusesAnUnreachableDatabase(t *testing.T) {
