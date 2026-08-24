@@ -30,6 +30,15 @@ const (
 
 func (s Site) IsReserved() bool { return s.State == StateReserved }
 
+type Reservation struct {
+	Slug           sitekey.Slug
+	ReservedAt     time.Time
+	ReservedUntil  time.Time
+	ReservedBy     string
+	PrevProduction string
+	PrevPreview    string
+}
+
 // Sentinel errors returned by Writer operations. Callers compare with
 // errors.Is.
 var (
