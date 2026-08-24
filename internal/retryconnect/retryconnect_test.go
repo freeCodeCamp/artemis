@@ -12,13 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type target struct{ name string }
-
 func TestDoSucceedsAfterTransientFailures(t *testing.T) {
 	var attempts atomic.Int32
-	want := &target{}
+	want := new(int)
 	got, err := Do(context.Background(), Policy{Window: 5 * time.Second, Base: time.Millisecond, Max: 10 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			if attempts.Add(1) < 3 {
 				return nil, errors.New("dial error: connection refused")
 			}
@@ -31,9 +29,9 @@ func TestDoSucceedsAfterTransientFailures(t *testing.T) {
 
 func TestDoImmediateSuccess(t *testing.T) {
 	var attempts atomic.Int32
-	want := &target{}
+	want := new(int)
 	got, err := Do(context.Background(), Policy{Window: 5 * time.Second, Base: time.Millisecond, Max: 10 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			return want, nil
 		})
@@ -47,7 +45,7 @@ func TestDoWindowExhausted(t *testing.T) {
 	connectErr := errors.New("dial error: connection refused")
 	start := time.Now()
 	got, err := Do(context.Background(), Policy{Window: 80 * time.Millisecond, Base: 10 * time.Millisecond, Max: 20 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			return nil, connectErr
 		})
@@ -62,7 +60,7 @@ func TestDoZeroWindowSingleAttempt(t *testing.T) {
 	var attempts atomic.Int32
 	connectErr := errors.New("dial error: connection refused")
 	got, err := Do(context.Background(), Policy{Base: 10 * time.Millisecond, Max: 20 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			return nil, connectErr
 		})
@@ -79,7 +77,7 @@ func TestDoCtxCanceled(t *testing.T) {
 	}()
 	start := time.Now()
 	got, err := Do(ctx, Policy{Window: 10 * time.Second, Base: 10 * time.Millisecond, Max: 20 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			return nil, errors.New("dial error: connection refused")
 		})
 	require.Nil(t, got)
@@ -92,7 +90,7 @@ func TestDoCtxCanceledBySignalCause(t *testing.T) {
 	cancel(errors.New("terminated signal received"))
 	var attempts atomic.Int32
 	got, err := Do(ctx, Policy{Window: 10 * time.Second, Base: 10 * time.Millisecond, Max: 20 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			return nil, errors.New("dial error: connection refused")
 		})
@@ -103,9 +101,9 @@ func TestDoCtxCanceledBySignalCause(t *testing.T) {
 }
 
 func TestDoLateSuccessBeatsDeadlineCheck(t *testing.T) {
-	want := &target{}
+	want := new(int)
 	got, err := Do(context.Background(), Policy{Window: 5 * time.Millisecond, Base: 100 * time.Millisecond, Max: 200 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			return want, nil
 		})
 	require.NoError(t, err, "a successful connect must never be discarded as a timeout")
@@ -115,7 +113,7 @@ func TestDoLateSuccessBeatsDeadlineCheck(t *testing.T) {
 func TestDoBlockedAttemptDoesNotConsumeTheWindow(t *testing.T) {
 	var attempts atomic.Int32
 	got, err := Do(context.Background(), Policy{Window: 200 * time.Millisecond, Attempt: 20 * time.Millisecond, Base: time.Millisecond, Max: 5 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			<-ctx.Done()
 			return nil, ctx.Err()
@@ -129,9 +127,9 @@ func TestDoBlockedAttemptDoesNotConsumeTheWindow(t *testing.T) {
 func TestDoZeroAttemptFallsBackToWindow(t *testing.T) {
 	var attempts atomic.Int32
 	var seen error
-	want := &target{}
+	want := new(int)
 	got, err := Do(context.Background(), Policy{Window: time.Second, Base: time.Millisecond, Max: 5 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			attempts.Add(1)
 			if err := ctx.Err(); err != nil {
 				seen = err
@@ -153,7 +151,7 @@ func TestDoLogsTheCallerEvent(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
 
 	_, err := Do(context.Background(), Policy{Event: "pg.connect.retrying", Window: 100 * time.Millisecond, Base: time.Millisecond, Max: 5 * time.Millisecond},
-		func(ctx context.Context) (*target, error) {
+		func(ctx context.Context) (*int, error) {
 			return nil, errors.New("dial error: connection refused")
 		})
 
