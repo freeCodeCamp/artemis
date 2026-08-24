@@ -37,6 +37,7 @@ func (blockingR2) GetAlias(context.Context, string) (string, error)     { return
 func (blockingR2) ListPrefix(context.Context, string) ([]string, error) { return nil, nil }
 func (blockingR2) HasPrefix(context.Context, string) (bool, error)      { return false, nil }
 func (blockingR2) HasObject(context.Context, string) (bool, error)      { return false, nil }
+func (blockingR2) Ping(context.Context) error                           { return nil }
 func (blockingR2) VerifyDeployComplete(context.Context, string, []string) error {
 	return nil
 }

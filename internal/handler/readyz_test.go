@@ -80,7 +80,7 @@ func TestReadyzDegraded_ValkeyDownHardFailsEvenIfPGUp(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ReadyZ(w, r)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code, "Valkey/R2 down = hard down even when PG ok")
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, "Valkey down = hard down even when PG ok")
 }
 
 func TestReadyZ_ValkeyDown_Returns503_ValkeyUnreachable(t *testing.T) {
@@ -97,7 +97,7 @@ func TestReadyZ_ValkeyDown_Returns503_ValkeyUnreachable(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
 }
 
-func TestReadyZ_R2Down_Returns503_R2Unreachable(t *testing.T) {
+func TestReadyZ_R2Down_Returns200Degraded_PodStaysReady(t *testing.T) {
 	r2 := newFakeR2()
 	r2.listErr = errors.New("s3: bucket not found")
 	h := &Handlers{
@@ -109,8 +109,41 @@ func TestReadyZ_R2Down_Returns503_R2Unreachable(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ReadyZ(w, r)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"r2_unreachable"`)
+	require.Equal(t, http.StatusOK, w.Code,
+		"all replicas share one bucket, so a 503 here empties the Service on a single correlated R2 fault")
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String())
+}
+
+func TestReadyZ_R2AndPGDown_Returns200Degraded(t *testing.T) {
+	r2 := newFakeR2()
+	r2.listErr = errors.New("s3: bucket not found")
+	h := &Handlers{
+		Health:   &fakeHealth{},
+		R2:       r2,
+		PGHealth: &fakeHealth{err: errors.New("dial tcp artemis-postgresql:5432: i/o timeout")},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String(),
+		"two degradable upstreams down still produce exactly one body carrying one degraded marker")
+}
+
+func TestReadyZ_R2Degraded_LogsAtWarn(t *testing.T) {
+	cap := captureAccessLog(t)
+	r2 := newFakeR2()
+	r2.listErr = errors.New("s3: bucket not found")
+	h := &Handlers{Health: &fakeHealth{}, R2: r2}
+
+	w := httptest.NewRecorder()
+	h.ReadyZ(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, slog.LevelWarn, cap.levelOf(t, "readyz.r2.degraded"),
+		"the 200-tolerated degraded path must log at Warn, not out-rank the failing check")
 }
 
 func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
@@ -170,21 +203,22 @@ func TestReadyz_SingleFailure_DoesNotPage(t *testing.T) {
 	require.Empty(t, ft.events, "a single readyz failure is a blip (streak < threshold) — must not page")
 }
 
-func TestReadyz_SustainedHang_PagesAtThreshold(t *testing.T) {
+func TestReadyZ_R2SustainedFailure_PagesAtThreshold(t *testing.T) {
 	hub, ft := newHubWithTransport(t)
 	r2 := newFakeR2()
-	r2.listErr = fmt.Errorf("r2 has_prefix: %w", context.DeadlineExceeded) // wedged/black-holed upstream
+	r2.listErr = fmt.Errorf("r2 ping: %w", context.DeadlineExceeded) // wedged/black-holed upstream
 	h := &Handlers{Health: &fakeHealth{}, R2: r2}
 
 	for i := 0; i < readyzPageThreshold+5; i++ {
-		require.Equal(t, http.StatusServiceUnavailable, readyzProbe(t, h, hub).Code)
+		require.Equal(t, http.StatusOK, readyzProbe(t, h, hub).Code,
+			"paging and readiness are independent: the pod stays in the Service for the whole outage")
 	}
 	hub.Flush(time.Second)
 
 	require.Len(t, ft.events, 1,
 		"a SUSTAINED hang must page EXACTLY ONCE at the threshold crossing (edge-triggered) — not on every probe for the whole outage")
-	assert.Equal(t, "r2.has_prefix", ft.events[0].Tags["op"])
-	assert.Equal(t, []string{"readyz", "r2.has_prefix"}, ft.events[0].Fingerprint)
+	assert.Equal(t, "r2.ping", ft.events[0].Tags["op"])
+	assert.Equal(t, []string{"readyz", "r2.ping"}, ft.events[0].Fingerprint)
 }
 
 func TestReadyz_SuccessResetsStreak(t *testing.T) {
@@ -254,7 +288,7 @@ func TestReadyz_DualOutageThenValkeyHeals_R2StillPages(t *testing.T) {
 	for _, e := range ft.events {
 		ops[e.Tags["op"]]++
 	}
-	require.Equal(t, 1, ops["r2.has_prefix"],
+	require.Equal(t, 1, ops["r2.ping"],
 		"an ongoing R2 outage must page once even after being masked by a valkey outage that healed — latch dead-zone fix")
 }
 
