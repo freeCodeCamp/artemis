@@ -3,6 +3,7 @@
 go := env_var_or_default("GO", "go")
 goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
+staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
 bin := "bin/artemis"
 image := env_var_or_default("IMAGE", "ghcr.io/freecodecamp/artemis")
 version := `git rev-parse --short HEAD 2>/dev/null || echo dev`
@@ -96,12 +97,19 @@ hatchet-integration:
         HATCHET_COMPOSE_FILE="$PWD/compose.hatchet.yaml" \
         {{go}} test -tags=integration -count=1 -timeout=10m ../../../internal/hatchet/...
 
-# go vet (the only linter CI runs)
+# go vet under every build tag CI vets
 lint:
     {{go}} vet {{pkg}}
     {{go}} vet -tags=load {{pkg}}
     {{go}} vet -tags=e2e {{pkg}}
     {{go}} vet -tags=integration {{pkg}}
+
+# staticcheck under every build tag; version pinned, no go.mod entry
+staticcheck:
+    {{go}} run {{staticcheck}} {{pkg}}
+    {{go}} run {{staticcheck}} -tags=load {{pkg}}
+    {{go}} run {{staticcheck}} -tags=e2e {{pkg}}
+    {{go}} run {{staticcheck}} -tags=integration {{pkg}}
 
 # Boot artemis locally — expects .env (loaded by direnv)
 run:
