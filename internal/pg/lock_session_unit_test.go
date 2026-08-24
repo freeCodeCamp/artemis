@@ -25,6 +25,8 @@ func (f *fakeSessionConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 	return pgconn.CommandTag{}, nil
 }
 
+func (f *fakeSessionConn) Ping(context.Context) error { return nil }
+
 func (f *fakeSessionConn) Close(context.Context) error { f.closed++; return nil }
 
 var errClosureVerdict = errors.New("the closure's own verdict")

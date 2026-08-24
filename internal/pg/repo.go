@@ -16,7 +16,8 @@ import (
 )
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	lockSessionLost func()
 }
 
 func NewRepo(db *DB) *Repo {

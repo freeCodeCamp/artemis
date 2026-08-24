@@ -36,16 +36,38 @@ func (r *Repo) NewLockSession(ctx context.Context) (gc.LockSession, error) {
 		}
 		return nil, fmt.Errorf("lock session: set lock_timeout: %w", err)
 	}
-	return &lockSession{conn: conn}, nil
+	return &lockSession{conn: conn, onLost: r.onLockSessionLost}, nil
+}
+
+// OnLockSessionLost is called when the connection holding a per-site
+// advisory lock stops answering while its closure is still running.
+// Postgres has already released the lock at that point, so the work in
+// flight has no mutual exclusion. Wiring this is how an operator learns.
+func (r *Repo) OnLockSessionLost(fn func()) { r.lockSessionLost = fn }
+
+func (r *Repo) onLockSessionLost() {
+	if r.lockSessionLost != nil {
+		r.lockSessionLost()
+	}
 }
 
 type sessionConn interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Ping(ctx context.Context) error
 	Close(ctx context.Context) error
 }
 
 type lockSession struct {
-	conn sessionConn
+	conn      sessionConn
+	onLost    func()
+	heartbeat time.Duration
+}
+
+func (s *lockSession) beat() time.Duration {
+	if s.heartbeat > 0 {
+		return s.heartbeat
+	}
+	return defaultLockHeartbeat
 }
 
 func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
@@ -62,7 +84,47 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 			ccancel()
 		}
 	}()
+
+	stop := s.watchLiveness(ctx, site)
+	defer stop()
 	return fn()
+}
+
+// lockHeartbeat is how often the session re-checks that the connection
+// holding the advisory lock is still alive. Postgres releases every lock
+// held by a backend the instant that backend dies, and nothing tells the
+// closure. Without this the closure keeps running with no mutual
+// exclusion until its deferred unlock fails on the way out.
+const defaultLockHeartbeat = 5 * time.Second
+
+func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) func() {
+	if s.onLost == nil {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		beat := s.beat()
+		t := time.NewTicker(beat)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				pingCtx, cancel := context.WithTimeout(ctx, beat)
+				err := s.conn.Ping(pingCtx)
+				cancel()
+				if err != nil && ctx.Err() == nil {
+					slog.WarnContext(ctx, "lock.site.session_lost", "site", site, "err", err)
+					s.onLost()
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 func (s *lockSession) Close(ctx context.Context) {

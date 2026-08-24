@@ -243,7 +243,14 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 
 	var gcw *gcWiring
 	if pgDB != nil {
-		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client)
+		lockRepo := pg.NewRepo(pgDB)
+		lockRepo.OnLockSessionLost(func() {
+			observability.CaptureBackground("lock.session_lost",
+				errors.New("the connection holding a per-site advisory lock stopped answering while its "+
+					"closure was still running; postgres released the lock and the work in flight had no "+
+					"mutual exclusion"))
+		})
+		gcw, err = newGCWiring(cfg, lockRepo, r2Client)
 		if gcw != nil {
 			reg := pg.NewRegistryStore(pgDB)
 			gcw.Reservations = reg
