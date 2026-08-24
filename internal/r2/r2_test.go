@@ -944,3 +944,25 @@ func TestListPrefix_ListErrorIsWrapped(t *testing.T) {
 	assert.Contains(t, err.Error(), "r2 list",
 		"the list error must be wrapped with the list context")
 }
+
+func TestClient_DeleteAlias_RemovesTheKey(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	require.NoError(t, c.PutAlias(context.Background(), "www/production", "20260420-141522-abc1234"))
+
+	require.NoError(t, c.DeleteAlias(context.Background(), "www/production"))
+
+	fake.mu.Lock()
+	_, present := fake.objects["b/www/production"]
+	fake.mu.Unlock()
+	assert.False(t, present, "alias object must be gone after DeleteAlias")
+}
+
+func TestClient_DeleteAlias_AbsentKeyIsNotAnError(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	require.NoError(t, c.DeleteAlias(context.Background(), "www/production"))
+	require.NoError(t, c.DeleteAlias(context.Background(), "www/production"),
+		"a retried unpublish must stay idempotent")
+}

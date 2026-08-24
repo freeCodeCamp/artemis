@@ -57,6 +57,7 @@ type RegistryWriter = registry.Writer
 type R2Store interface {
 	PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error
 	PutAlias(ctx context.Context, aliasKey, deployID string) error
+	DeleteAlias(ctx context.Context, aliasKey string) error
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 	HasPrefix(ctx context.Context, prefix string) (bool, error)

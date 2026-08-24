@@ -33,6 +33,7 @@ func (blockingR2) PutObject(ctx context.Context, _ string, _ io.Reader, _ string
 	return ctx.Err()
 }
 func (blockingR2) PutAlias(context.Context, string, string) error       { return nil }
+func (blockingR2) DeleteAlias(context.Context, string) error            { return nil }
 func (blockingR2) GetAlias(context.Context, string) (string, error)     { return "", nil }
 func (blockingR2) ListPrefix(context.Context, string) ([]string, error) { return nil, nil }
 func (blockingR2) HasPrefix(context.Context, string) (bool, error)      { return false, nil }

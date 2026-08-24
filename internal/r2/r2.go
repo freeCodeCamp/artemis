@@ -133,6 +133,10 @@ func (c *Client) PutAlias(ctx context.Context, aliasKey, deployID string) error 
 	return c.PutObject(ctx, aliasKey, strings.NewReader(deployID), "text/plain", int64(len(deployID)))
 }
 
+func (c *Client) DeleteAlias(ctx context.Context, aliasKey string) error {
+	return c.DeleteObject(ctx, aliasKey)
+}
+
 // GetAlias returns the body of the alias key — i.e. the deploy id it
 // currently points at. Returns ErrNotFound if the alias hasn't been
 // written yet.
