@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -40,4 +43,50 @@ func TestIsTransient(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsTransient_UnexpectedEOFIsTransient(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, IsTransient(io.ErrUnexpectedEOF))
+	require.True(t, IsTransient(fmt.Errorf("pg registry list: %w", io.ErrUnexpectedEOF)))
+}
+
+func TestIsTransient_DNSTemporaryIsTransient(t *testing.T) {
+	t.Parallel()
+
+	dnsErr := &net.DNSError{
+		Err:         "server misbehaving",
+		Name:        "artemis-postgresql",
+		Server:      "10.11.0.10:53",
+		IsTemporary: true,
+	}
+	live := fmt.Errorf("pg registry list: %w", errors.Join(fmt.Errorf("failed to connect: %w", dnsErr)))
+
+	require.True(t, IsTransient(dnsErr))
+	require.True(t, IsTransient(live), "errors.As must reach the DNSError through fmt.wrapError and errors.joinError")
+}
+
+func TestIsTransient_DNSTimeoutIsTransient(t *testing.T) {
+	t.Parallel()
+
+	dnsErr := &net.DNSError{Err: "i/o timeout", IsTimeout: true, IsTemporary: false}
+
+	require.True(t, IsTransient(dnsErr), "the gate is the Temporary() method (IsTimeout || IsTemporary), not the IsTemporary field")
+}
+
+func TestIsTransient_DNSNotFoundIsNotTransient(t *testing.T) {
+	t.Parallel()
+
+	dnsErr := &net.DNSError{Err: "no such host", Name: "artemis-postgresql", IsNotFound: true}
+
+	require.False(t, IsTransient(dnsErr), "NXDOMAIN is permanent for a misconfigured hostname; it pages in its own bucket")
+	require.False(t, IsTransient(fmt.Errorf("failed to connect: %w", dnsErr)))
+}
+
+func TestIsTransient_PlainEOFIsNotTransient(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, IsTransient(io.EOF), "a clean end-of-stream is a control value, not a fault")
+	require.False(t, IsTransient(fmt.Errorf("relay: %w", io.EOF)))
 }

@@ -16,7 +16,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 13, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Thirteen entries: eight change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, and one changes operator configuration.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Fifteen entries: nine change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, one changes operator configuration, and one changes how errors group in Sentry.
 
 ## Summary
 
@@ -37,6 +37,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 13 | A lock-release failure no longer fails the request it followed | unreleased | API callers |
 | 14 | `finalize` retries its index write and audits a partial commit | unreleased | API callers and audit-trail readers |
 | 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
+| 16 | Background Sentry issues re-bucket by error class | unreleased | Sentry and alert-rule readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -313,3 +314,25 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 **Paging is unchanged.** R2 still reaches Sentry once per outage at `readyzPageThreshold` (3) consecutive failures, but the fingerprint moves from `[readyz r2.has_prefix]` to `[readyz r2.ping]`, so the existing Sentry issue stops receiving events and a new one opens on the first post-release R2 fault.
 
 **Action:** an operator grepping `readyz.probe.unavailable` for R2 must switch to `readyz.r2.degraded`; that key is Warn, so `LOG_LEVEL=error` drops it entirely. A rollout no longer wedges on a broken R2 endpoint, a revoked token or a wrong bucket — new pods become Ready immediately — so the postdeploy check is now the gate on R2 credentials, not a confirmation of one.
+
+## 16 — Background Sentry issues re-bucket by error class, and transient escalation is first-occurrence
+
+**Release:** unreleased.
+
+**This is an operational change, not an API one.** No status code, error code, validation rule, stored value or cancellation guarantee moves. The audience is the operator reading Sentry, not the API caller.
+
+**Old:** `CaptureBackground` fingerprinted on the op alone — `scope.SetFingerprint([]string{op})` at `internal/observability/sentry.go:410`, and `[]string{op, "sustained"}` at `:402` for the escalated transient branch. Every cause on one op collapsed into a single Sentry issue.
+
+**New:** the fingerprint is `{op, class}` for a non-transient error and `{op, "transient", class}` for an escalated transient, where `class` is a closed token drawn from `errorClass` (`internal/observability/errorclass.go`). The token set is the named classes — `ctx.canceled`, `ctx.deadline`, `grpc.canceled`, `grpc.deadline`, `grpc.<Code>`, `pg.in_recovery`, `pg.lock_timeout`, `pg.conn_closed`, `io.unexpected_eof`, `net.dns_temporary`, `net.dns` — plus `pg.<SQLSTATE>` for any other Postgres error and `unclassified` for the rest. It is derived from the error class, never from the message, so hosts, ports, ids and durations cannot multiply the bucket count.
+
+**This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, 1 × `net.DNSError` — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
+
+**Tag rename:** `transient_sustained: "true"` is replaced by `transient: "true"` plus a new `error_class` tag carrying the token. Any saved search or alert rule filtering on `transient_sustained` stops matching.
+
+**Escalation change:** an environmental background transient now creates an issue on its **first** occurrence, per pod, per op, per class, per 24 hours, instead of after three occurrences inside one process. The old counter could not measure a fleet-wide rate: workflows rotate across pods, so a fault failing once per pod never reached the threshold, and a rolling deploy reset the count. A `context.Canceled` or gRPC-`Canceled` transient now creates **no** issue at all — previously three inside 26 hours escalated one. A stuck process context is covered by pod-restart alerting, and the failure remains a `WARN` log line under the unchanged message `background.transient`, which reaches Sentry Logs at the live `LOG_LEVEL=info`.
+
+**One formerly-silent case now pages, by name:** a Postgres `55P03` lock timeout raised by `gc-site` was pinned silent by an earlier wave (`cmd/artemis/gcworkflows_test.go:314`). It now raises one issue under `{gc.site.run, transient, pg.lock_timeout}`. Lock contention is a low-severity fault, not self-inflicted cancellation, so it does not qualify for the shutdown exemption; suppressing it outright would mean *sustained* contention never escalates, which is worse than the behaviour being replaced. If the operator wants it silent again, the lever is `shutdownClasses` in `internal/observability/errorclass.go` — not a return to a per-process counter.
+
+**Expect a bounded spike on the first incident after release.** A Postgres StatefulSet replacement can now raise roughly one event per pod per op per class in the window — on the order of tens of events across around a dozen issues, against roughly zero today. That is the intended trade and it is self-limiting.
+
+**Action:** expect new issue IDs for background failures. Re-point any alert rule, saved search or dashboard keyed on `ARTEMIS-5`, `ARTEMIS-7` or the `transient_sustained` tag. Enumerate those rules before the release, not after.

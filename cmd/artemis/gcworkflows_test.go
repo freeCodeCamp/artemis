@@ -311,7 +311,7 @@ func (t *gcRecordingTransport) Flush(time.Duration) bool              { return t
 func (t *gcRecordingTransport) FlushWithContext(context.Context) bool { return true }
 func (t *gcRecordingTransport) Close()                                {}
 
-func TestGCSiteWorkflow_LockTimeoutDoesNotPage(t *testing.T) {
+func TestGCSiteWorkflow_LockTimeoutPagesOnceInItsOwnBucket(t *testing.T) {
 	rt := &gcRecordingTransport{}
 	client, err := sentry.NewClient(sentry.ClientOptions{
 		Dsn:       "https://public@example.test/1",
@@ -337,8 +337,11 @@ func TestGCSiteWorkflow_LockTimeoutDoesNotPage(t *testing.T) {
 	require.Error(t, runErr, "SiteGC.Run failure still propagates to the workflow engine for retry/backoff")
 
 	sentry.CurrentHub().Flush(time.Second)
-	assert.Empty(t, rt.events,
-		"a pg 55P03 lock-timeout from gc.site.run must not create a Sentry issue (T13 regression)")
+	require.Len(t, rt.events, 1,
+		"lock contention is a low-severity fault, not self-inflicted cancellation: it pages once per pod per cause per 24h, in its own bucket")
+	assert.Equal(t, "true", rt.events[0].Tags["transient"])
+	assert.Equal(t, "pg.lock_timeout", rt.events[0].Tags["error_class"])
+	assert.Equal(t, []string{"gc.site.run", "transient", "pg.lock_timeout"}, rt.events[0].Fingerprint)
 }
 
 type captureEngine struct{ defs []worker.WorkflowDef }

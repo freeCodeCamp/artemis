@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func pgCode(err error) (string, bool) {
+func SQLState(err error) (string, bool) {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		return pgErr.Code, true
@@ -15,12 +15,12 @@ func pgCode(err error) (string, bool) {
 }
 
 func IsLockTimeout(err error) bool {
-	code, ok := pgCode(err)
+	code, ok := SQLState(err)
 	return ok && code == "55P03"
 }
 
 func IsInRecovery(err error) bool {
-	code, ok := pgCode(err)
+	code, ok := SQLState(err)
 	return ok && code == "57P03"
 }
 

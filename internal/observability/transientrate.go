@@ -5,57 +5,33 @@ import (
 	"time"
 )
 
-const (
-	defaultTransientRateThreshold = 3
-	defaultTransientResetWindow   = 26 * time.Hour
-	defaultTransientReescalateGap = 24 * time.Hour
-)
-
-type transientOpState struct {
-	count       int
-	lastSeen    time.Time
-	escalatedAt time.Time
-}
+const transientEscalateCooldown = 24 * time.Hour
 
 type transientRateTracker struct {
-	mu          sync.Mutex
-	clock       func() time.Time
-	resetWindow time.Duration
-	reescalate  time.Duration
-	threshold   int
-	states      map[string]*transientOpState
+	mu        sync.Mutex
+	clock     func() time.Time
+	cooldown  time.Duration
+	escalated map[string]time.Time
 }
 
-func newTransientRateTracker(clock func() time.Time, resetWindow time.Duration, threshold int) *transientRateTracker {
+func newTransientRateTracker(clock func() time.Time, cooldown time.Duration) *transientRateTracker {
 	return &transientRateTracker{
-		clock:       clock,
-		resetWindow: resetWindow,
-		reescalate:  defaultTransientReescalateGap,
-		threshold:   threshold,
-		states:      make(map[string]*transientOpState),
+		clock:     clock,
+		cooldown:  cooldown,
+		escalated: make(map[string]time.Time),
 	}
 }
 
-func (t *transientRateTracker) observe(op string, now time.Time) bool {
+func (t *transientRateTracker) observe(op, class string, now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	st, ok := t.states[op]
-	if !ok {
-		st = &transientOpState{}
-		t.states[op] = st
+	key := op + "\x00" + class
+	if last, ok := t.escalated[key]; ok && now.Sub(last) < t.cooldown {
+		return false
 	}
-	if !st.lastSeen.IsZero() && now.Sub(st.lastSeen) > t.resetWindow {
-		st.count = 0
-		st.escalatedAt = time.Time{}
-	}
-	st.count++
-	st.lastSeen = now
-	if st.count >= t.threshold && (st.escalatedAt.IsZero() || now.Sub(st.escalatedAt) >= t.reescalate) {
-		st.escalatedAt = now
-		return true
-	}
-	return false
+	t.escalated[key] = now
+	return true
 }
 
-var backgroundTransientRate = newTransientRateTracker(time.Now, defaultTransientResetWindow, defaultTransientRateThreshold)
+var backgroundTransientRate = newTransientRateTracker(time.Now, transientEscalateCooldown)

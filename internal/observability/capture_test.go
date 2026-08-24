@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,14 +79,15 @@ func TestCaptureFatal_FlushesSynchronously(t *testing.T) {
 	require.Len(t, bt.events, 1, "event delivered via flush, not transport goodwill")
 }
 
-func TestCaptureBackground_TagsAndFingerprintGroupOnOp(t *testing.T) {
+func TestCaptureBackground_FingerprintCarriesOpAndCause(t *testing.T) {
 	rt := bindRecordingHub(t)
 
 	CaptureBackground("registry.refresh", errString("x"))
 
 	require.Len(t, rt.events, 1)
 	require.Equal(t, "registry.refresh", rt.events[0].Tags["op"])
-	require.Equal(t, []string{"registry.refresh"}, rt.events[0].Fingerprint)
+	require.Equal(t, "unclassified", rt.events[0].Tags["error_class"])
+	require.Equal(t, []string{"registry.refresh", "unclassified"}, rt.events[0].Fingerprint)
 }
 
 func TestCaptureBackground_DistinctOpsGroupSeparately(t *testing.T) {
@@ -94,20 +98,76 @@ func TestCaptureBackground_DistinctOpsGroupSeparately(t *testing.T) {
 	sentry.CurrentHub().Flush(time.Second)
 
 	require.Len(t, rt.events, 2)
-	require.Equal(t, []string{"registry.refresh"}, rt.events[0].Fingerprint)
-	require.Equal(t, []string{"token.rotate"}, rt.events[1].Fingerprint)
+	require.Equal(t, []string{"registry.refresh", "unclassified"}, rt.events[0].Fingerprint)
+	require.Equal(t, []string{"token.rotate", "unclassified"}, rt.events[1].Fingerprint)
 }
 
-func TestCaptureBackground_SuppressesTransient(t *testing.T) {
+func TestCaptureBackground_ShutdownCancelNeverEscalates(t *testing.T) {
 	rt := bindRecordingHub(t)
+	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return cur })
 
-	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
-	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
-	CaptureBackground("registry.refresh", fmt.Errorf("hatchet: publish site.reconcile: %w", status.Error(codes.DeadlineExceeded, "context deadline exceeded")))
-	CaptureBackground("gc.site.run", fmt.Errorf("site lock x: %w", &pgconn.PgError{Code: "55P03"}))
+	for range 5 {
+		CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
+		cur = cur.Add(24 * time.Hour)
+	}
+	CaptureBackground("gc.site.run", fmt.Errorf("hatchet: publish x: %w", status.Error(codes.Canceled, "canceled")))
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.Empty(t, rt.events, "canceled, 57P03, gRPC DeadlineExceeded, and 55P03 blips on tracker-gated ops must not create Sentry issues; cron-shaped ops escalate by design")
+	require.Empty(t, rt.events, "SIGTERM cancellation is self-inflicted; pod-restart alerting covers a stuck context, and the Warn line still reaches Sentry Logs")
+}
+
+func TestCaptureBackground_FirstEnvironmentalTransientEscalates(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 1, "a per-process streak cannot measure a fleet-wide rate: once per pod never reaches a threshold above 1")
+	require.Equal(t, "true", rt.events[0].Tags["transient"])
+	require.Equal(t, "pg.in_recovery", rt.events[0].Tags["error_class"])
+	require.Equal(t, []string{"relay.run", "transient", "pg.in_recovery"}, rt.events[0].Fingerprint)
+}
+
+func TestCaptureBackground_CooldownIsPerCauseNotPerOp(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	CaptureBackground("relay.run", fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	CaptureBackground("relay.run", fmt.Errorf("relay: %w", pgconn.ErrConnClosed))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 2, "one cause's cooldown must not swallow a different cause on the same op")
+	require.Len(t, fingerprintSet(rt.events), 2)
+}
+
+func TestCaptureBackground_Artemis7ShapesDoNotShareABucket(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	const op = "pg.registry.list"
+	CaptureBackground(op, fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	CaptureBackground(op, fmt.Errorf("pg registry list: %w", io.ErrUnexpectedEOF))
+	CaptureBackground(op, fmt.Errorf("relay: %w", pgconn.ErrConnClosed))
+	CaptureBackground(op, fmt.Errorf("pg registry list: %w", errors.Join(fmt.Errorf("failed to connect: %w", &net.DNSError{
+		Err:         "server misbehaving",
+		Name:        "artemis-postgresql",
+		Server:      "10.11.0.10:53",
+		IsTemporary: true,
+	}))))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 4)
+	require.Len(t, fingerprintSet(rt.events), 4, "the four shapes merged into ARTEMIS-7 must each get their own issue")
+	classes := make(map[string]bool, len(rt.events))
+	for _, ev := range rt.events {
+		classes[ev.Tags["error_class"]] = true
+	}
+	require.Len(t, classes, 4)
 }
 
 func withTransientClock(t *testing.T, now func() time.Time) {
@@ -115,25 +175,14 @@ func withTransientClock(t *testing.T, now func() time.Time) {
 	backgroundTransientRate.mu.Lock()
 	prevClock := backgroundTransientRate.clock
 	backgroundTransientRate.clock = now
-	backgroundTransientRate.states = make(map[string]*transientOpState)
+	backgroundTransientRate.escalated = make(map[string]time.Time)
 	backgroundTransientRate.mu.Unlock()
 	t.Cleanup(func() {
 		backgroundTransientRate.mu.Lock()
 		backgroundTransientRate.clock = prevClock
-		backgroundTransientRate.states = make(map[string]*transientOpState)
+		backgroundTransientRate.escalated = make(map[string]time.Time)
 		backgroundTransientRate.mu.Unlock()
 	})
-}
-
-func TestCaptureBackground_SingleTransientStaysSuppressed(t *testing.T) {
-	rt := bindRecordingHub(t)
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	withTransientClock(t, func() time.Time { return base })
-
-	CaptureBackground("gc.site.run", fmt.Errorf("tombstone-move: %w", context.Canceled))
-	sentry.CurrentHub().Flush(time.Second)
-
-	require.Empty(t, rt.events, "a single transient blip must stay suppressed")
 }
 
 func TestCaptureBackground_SustainedTransientEscalatesOnce(t *testing.T) {
@@ -153,8 +202,9 @@ func TestCaptureBackground_SustainedTransientEscalatesOnce(t *testing.T) {
 
 	require.Len(t, rt.events, 1, "3rd consecutive transient must escalate exactly once")
 	require.Equal(t, "relay.run", rt.events[0].Tags["op"])
-	require.Equal(t, "true", rt.events[0].Tags["transient_sustained"])
-	require.Equal(t, []string{"relay.run", "sustained"}, rt.events[0].Fingerprint)
+	require.Equal(t, "true", rt.events[0].Tags["transient"])
+	require.Equal(t, "pg.in_recovery", rt.events[0].Tags["error_class"])
+	require.Equal(t, []string{"relay.run", "transient", "pg.in_recovery"}, rt.events[0].Fingerprint)
 }
 
 func TestCaptureBackground_LowCadenceTransientStillEscalates(t *testing.T) {
@@ -171,23 +221,7 @@ func TestCaptureBackground_LowCadenceTransientStillEscalates(t *testing.T) {
 	sentry.CurrentHub().Flush(time.Second)
 
 	require.Len(t, rt.events, 3, "a cron-shaped op escalates every occurrence; the cron cadence is the rate limit")
-	require.Equal(t, []string{"drift.sweep", "sustained"}, rt.events[0].Fingerprint)
-}
-
-func TestCaptureBackground_GapBeyondResetWindowRearms(t *testing.T) {
-	rt := bindRecordingHub(t)
-	cur := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	withTransientClock(t, func() time.Time { return cur })
-
-	transientErr := fmt.Errorf("outbox fetch: %w", context.Canceled)
-	CaptureBackground("relay.run", transientErr)
-	cur = cur.Add(time.Hour)
-	CaptureBackground("relay.run", transientErr)
-	cur = cur.Add(27 * time.Hour)
-	CaptureBackground("relay.run", transientErr)
-	sentry.CurrentHub().Flush(time.Second)
-
-	require.Empty(t, rt.events, "a gap beyond resetWindow must reset the streak, not escalate")
+	require.Equal(t, []string{"drift.sweep", "transient", "ctx.deadline"}, rt.events[0].Fingerprint)
 }
 
 func TestCaptureBackground_CapturesRealError(t *testing.T) {
@@ -258,7 +292,51 @@ func TestCaptureBackground_CronOpEscalatesEveryOccurrence(t *testing.T) {
 	require.Len(t, rt.events, days,
 		"a daily cron failing every day must escalate every day — the cron cadence IS the rate limit")
 	for _, ev := range rt.events {
-		require.Equal(t, []string{"drift.sweep", "sustained"}, ev.Fingerprint,
-			"all occurrences must group into one Sentry issue")
+		require.Equal(t, []string{"drift.sweep", "transient", "ctx.deadline"}, ev.Fingerprint,
+			"all occurrences of one cause must group into one Sentry issue")
 	}
+}
+
+func fingerprintSet(events []*sentry.Event) map[string]bool {
+	set := make(map[string]bool, len(events))
+	for _, ev := range events {
+		set[strings.Join(ev.Fingerprint, "\x00")] = true
+	}
+	return set
+}
+
+func TestCaptureBackground_UnlikeCausesGetDistinctFingerprints(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	const op = "tombstone.purge"
+	CaptureBackground(op, fmt.Errorf("outbox fetch: %w", &pgconn.PgError{Code: "57P03"}))
+	CaptureBackground(op, fmt.Errorf("site lock x: %w", &pgconn.PgError{Code: "55P03"}))
+	CaptureBackground(op, fmt.Errorf("hatchet: publish x: %w", status.Error(codes.Unavailable, "backend down")))
+	CaptureBackground(op, errors.New("genuine purge failure"))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 4)
+	for _, ev := range rt.events {
+		require.Contains(t, []int{2, 3}, len(ev.Fingerprint))
+		require.Equal(t, op, ev.Fingerprint[0])
+	}
+	require.Len(t, fingerprintSet(rt.events), 4, "four unlike causes on one op must not share a Sentry issue")
+}
+
+func TestCaptureBackground_SameClassDifferentHostsShareOneBucket(t *testing.T) {
+	rt := bindRecordingHub(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	withTransientClock(t, func() time.Time { return base })
+
+	first := &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql", Server: "10.11.0.10:53", IsTemporary: true}
+	second := &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql-1", Server: "10.11.0.11:53", IsTemporary: true}
+	CaptureBackground("drift.sweep", fmt.Errorf("failed to connect: %w", first))
+	CaptureBackground("drift.sweep", fmt.Errorf("failed to connect: %w", second))
+	sentry.CurrentHub().Flush(time.Second)
+
+	require.Len(t, rt.events, 2)
+	require.Len(t, fingerprintSet(rt.events), 1, "the discriminator is the class; hosts, ports and ids must not multiply buckets")
+	require.Equal(t, []string{"drift.sweep", "transient", "net.dns_temporary"}, rt.events[0].Fingerprint)
 }

@@ -18,8 +18,8 @@ func TestCronShapedOps_CoverEveryNightlyDriftVerdict(t *testing.T) {
 		"tombstone.purge",
 	} {
 		assert.True(t, cronShapedOps[op],
-			"%s fires at most once a night, so the transient-rate tracker (threshold 3, 26h reset) would "+
-				"swallow it for two nights before escalating — and an in-memory count resets on every pod "+
-				"restart, so it may never escalate at all", op)
+			"%s fires once a night, so its 24h gap sits exactly on the 24h escalation cooldown: ordinary "+
+				"cron jitter (03:00:11 one night, 03:00:00 the next) would suppress a night. The "+
+				"short-circuit removes the boundary", op)
 	}
 }

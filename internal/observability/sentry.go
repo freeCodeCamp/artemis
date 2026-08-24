@@ -32,12 +32,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/getsentry/sentry-go"
 	"github.com/getsentry/sentry-go/attribute"
 	sentryslog "github.com/getsentry/sentry-go/slog"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const flushTimeout = 2 * time.Second
@@ -373,6 +370,7 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 		}
 	}
 	return sentryslog.Option{
+		//lint:ignore SA1019 v0.48.0 removes EventLevel and the whole event path with no replacement, so migration needs the dependency bump; on the pinned v0.46.2 a nil EventLevel defaults to {Error,Fatal}. https://github.com/getsentry/sentry-go/blob/slog/v0.48.0/slog/sentryslog.go
 		EventLevel: []slog.Level{},
 		LogLevel:   logLevels,
 	}.NewSentryHandler(context.Background())
@@ -393,13 +391,18 @@ var cronShapedOps = map[string]bool{
 // (e.g. the registry refresh goroutine). op becomes a tag and the
 // fingerprint so the failures group on their own. No-op when disabled.
 func CaptureBackground(op string, err error) {
-	if IsTransient(err) {
+	class := errorClass(err)
+	if transientClasses[class] {
 		slog.Warn("background.transient", "op", op, "err", err)
-		if cronShapedOps[op] || backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
+		if shutdownClasses[class] {
+			return
+		}
+		if cronShapedOps[op] || backgroundTransientRate.observe(op, class, backgroundTransientRate.clock()) {
 			sentry.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", op)
-				scope.SetTag("transient_sustained", "true")
-				scope.SetFingerprint([]string{op, "sustained"})
+				scope.SetTag("error_class", class)
+				scope.SetTag("transient", "true")
+				scope.SetFingerprint([]string{op, "transient", class})
 				sentry.CaptureException(err)
 			})
 		}
@@ -407,20 +410,10 @@ func CaptureBackground(op string, err error) {
 	}
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("op", op)
-		scope.SetFingerprint([]string{op})
+		scope.SetTag("error_class", class)
+		scope.SetFingerprint([]string{op, class})
 		sentry.CaptureException(err)
 	})
-}
-
-func IsTransient(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	switch status.Code(err) {
-	case codes.Canceled, codes.DeadlineExceeded:
-		return true
-	}
-	return pg.IsInRecovery(err) || pg.IsLockTimeout(err) || pg.IsConnClosed(err)
 }
 
 func CaptureWorkflowPanic(recovered any) {
