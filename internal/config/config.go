@@ -443,12 +443,12 @@ func (c *Config) validate() error {
 	if _, err := c.aliasKeyTails(deploySeg); err != nil {
 		return err
 	}
-	for env, f := range map[string]string{
-		"PUBLIC_URL_PRODUCTION_FORMAT": c.Aliases.ProductionURLFormat,
-		"PUBLIC_URL_PREVIEW_FORMAT":    c.Aliases.PreviewURLFormat,
+	for _, u := range []struct{ env, format string }{
+		{"PUBLIC_URL_PRODUCTION_FORMAT", c.Aliases.ProductionURLFormat},
+		{"PUBLIC_URL_PREVIEW_FORMAT", c.Aliases.PreviewURLFormat},
 	} {
-		if !strings.Contains(f, "<site>") {
-			return fmt.Errorf("invalid %s %q: must contain <site>", env, f)
+		if !strings.Contains(u.format, "<site>") {
+			return fmt.Errorf("invalid %s %q: must contain <site>", u.env, u.format)
 		}
 	}
 	if err := validateGitHubAPIBase(c.GitHub.APIBase); err != nil {
