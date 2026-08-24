@@ -261,10 +261,8 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	var (
 		moved   int
 		success bool
-		wrote   bool
 	)
 	auditPurgeFailure := func(stage string) {
-		wrote = true
 		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 		h.auditFromScope(r.Context(), "site.purge", "failure",
 			map[string]any{"stage": stage, "moved": moved})
@@ -312,14 +310,12 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		success = true
 		return nil
 	})
-	if !success {
-		if lockErr != nil && !wrote {
-			writeLockError(w, r, lockErr)
-		}
+	if lockErr != nil {
+		writeLockError(w, r, lockErr)
 		return
 	}
-	if lockErr != nil {
-		slog.WarnContext(r.Context(), "site.purge.unlock_failed", "site", slug, "err", lockErr)
+	if !success {
+		return
 	}
 
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")

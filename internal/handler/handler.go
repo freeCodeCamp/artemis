@@ -164,7 +164,17 @@ func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn
 	if h.Locker == nil {
 		return fn()
 	}
-	return h.Locker.WithSiteLock(ctx, dirname, fn)
+	var closureErr error
+	var closureRan bool
+	lockerErr := h.Locker.WithSiteLock(ctx, dirname, func() error {
+		closureRan = true
+		closureErr = fn()
+		return closureErr
+	})
+	if closureRan {
+		return closureErr
+	}
+	return lockerErr
 }
 
 func (h *Handlers) auditFromScope(ctx context.Context, action, outcome string, detail map[string]any) {
