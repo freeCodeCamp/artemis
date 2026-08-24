@@ -241,14 +241,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("purge") != "true" {
-		if err := h.Registry.Delete(r.Context(), slug); err != nil {
-			writeRegistryDeleteError(w, r, err)
-			return
-		}
-		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
-		h.logAction(r.Context(), "site.delete", "success")
-		h.auditFromScope(r.Context(), "site.delete", "success", nil)
-		w.WriteHeader(http.StatusNoContent)
+		h.siteDeleteReserving(w, r, slug)
 		return
 	}
 
@@ -386,4 +379,58 @@ func (h *Handlers) requireRegistryAuthz(w http.ResponseWriter, r *http.Request) 
 		return errBadRequest
 	}
 	return nil
+}
+
+func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, slug sitekey.Slug) {
+	if h.Reservations == nil {
+		if err := h.Registry.Delete(r.Context(), slug); err != nil {
+			writeRegistryDeleteError(w, r, err)
+			return
+		}
+		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+		h.logAction(r.Context(), "site.delete", "success")
+		h.auditFromScope(r.Context(), "site.delete", "success", nil)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	dirname := h.DeployPrefix.SiteDirname(slug)
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancel()
+
+	auditDeleteFailure := func(stage string) {
+		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+		h.auditFromScope(r.Context(), "site.delete", "failure", map[string]any{"stage": stage})
+	}
+
+	var wrote bool
+	lockErr := h.withSiteLock(opCtx, dirname, func() error {
+		for _, mode := range []string{"production", "preview"} {
+			if err := h.R2.DeleteAlias(opCtx, h.aliasKey(slug, mode)); err != nil {
+				auditDeleteFailure("unpublish")
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_delete_failed", "r2.delete.alias", err)
+				wrote = true
+				return nil
+			}
+		}
+		until := h.Now().UTC().Add(h.ReservationGrace)
+		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context())); err != nil {
+			auditDeleteFailure("reserve")
+			writeRegistryDeleteError(w, r, err)
+			wrote = true
+			return nil
+		}
+		return nil
+	})
+	if wrote {
+		return
+	}
+	if lockErr != nil {
+		writeLockError(w, r, lockErr)
+		return
+	}
+	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+	h.logAction(r.Context(), "site.delete", "success")
+	h.auditFromScope(r.Context(), "site.delete", "success", nil)
+	w.WriteHeader(http.StatusNoContent)
 }

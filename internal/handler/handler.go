@@ -93,6 +93,12 @@ type PendingDeployWriter interface {
 	BeginDeploy(ctx context.Context, site sitekey.Dirname, deployID string, mtime time.Time) error
 }
 
+// ReservationStore holds a deleted site's name for a grace period so
+// the next claimant cannot inherit the previous owner's live bytes.
+type ReservationStore interface {
+	Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname, until time.Time, by string) (registry.Reservation, error)
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
 }
@@ -123,6 +129,8 @@ type Handlers struct {
 	PublicProductionURLFmt string // e.g. "https://<site>.freecode.camp"
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
 	Tombstones             TombstoneStore
+	Reservations           ReservationStore
+	ReservationGrace       time.Duration
 	TrashPrefixBase        string // e.g. "_trash/"
 	Trash                  TrashStore
 	TrashRecovery          time.Duration

@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 18, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 19, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Eighteen entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Nineteen entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
 ## Summary
 
@@ -40,6 +40,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 16 | Background Sentry issues re-bucket by error class | unreleased | Sentry and alert-rule readers |
 | 17 | Alias and deploy key formats are validated at boot, not at first use | unreleased | Operators |
 | 18 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | unreleased | Sentry and alert-rule readers |
+| 19 | `DELETE /api/site/{slug}` takes the site dark and reserves its name | unreleased | API callers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -385,3 +386,23 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 **Bucket moves.** NXDOMAIN opens a new issue under `net.dns_notfound`; any existing issue under `net.dns` goes stale and Sentry offers no redirect, exactly as in entry 16.
 
 **Action:** re-point saved searches and alert rules keyed on `error_class:net.dns`. There is no longer a token by that name.
+
+## 19 — `DELETE /api/site/{slug}` takes the site dark and reserves its name
+
+**Release:** unreleased. Commit `TBD`. Implements steps 1-4 of `docs/design/0006-unpublish-is-not-reclaim.md`.
+
+**This is the headline behaviour change of the release.**
+
+**Old:** a `DELETE` without `?purge=true` removed the registry row and nothing else. The R2 alias objects survived, and because the serve plane is Caddy reading those objects directly and never consulting the registry, **the site kept serving**. Seven such orphans were found live on 2026-08-22 and purged by hand. The name also freed instantly, so the next claimant of the slug inherited the previous owner's production bytes.
+
+**New:** a `DELETE` first removes both alias objects, then flips the registry row to `reserved` with an expiry of `SITE_RESERVATION_GRACE` (default 72h). The site is dark as soon as the aliases are gone — subject to the 15-second serve-cache TTL — and the name is held for the grace period rather than freed.
+
+**The ordering is the safety property and it is pinned by a test.** Aliases are removed *before* the registry state flips, inside the per-site advisory lock. If alias removal fails the operation ABORTS: the site stays registered and published, which is visible and retryable. No ordering produces deregistered-and-still-serving, which is the failure the whole design exists to prevent. `TestSiteDelete_AliasFailureAbortsAndLeavesTheSiteRegistered` fails if the two steps are transposed.
+
+**Status codes:** `204` on success, unchanged. A failure to remove an alias is `502 r2_delete_failed`. A failure to reserve keeps the existing registry-delete error mapping.
+
+**`audit_log`:** `site.delete` now writes an `outcome=failure` row carrying `detail.stage`, one of `unpublish` or `reserve`. As in entries 11 and 14, `outcome` is unconstrained `TEXT` so no migration is needed.
+
+**Not yet implemented, and tracked:** `undelete` (step 5), blocking registration of a reserved name (step 6), and retiring `?purge=true` in favour of an approver-gated release endpoint (step 7). Until step 6 lands, a reserved name is held in the registry but the register path's enforcement is incomplete — see `.scratchpad/dossier/2026-08-24-artemis-zero-debt/ADR-0006-STATE.md`.
+
+**Action:** any caller that relied on `DELETE` freeing the slug immediately must wait out the grace period or use the release path once step 7 ships. Any caller that relied on `DELETE` leaving the site serving was relying on the defect this fixes.
