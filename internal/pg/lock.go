@@ -36,20 +36,10 @@ func (r *Repo) NewLockSession(ctx context.Context) (gc.LockSession, error) {
 		}
 		return nil, fmt.Errorf("lock session: set lock_timeout: %w", err)
 	}
-	return &lockSession{conn: conn, onLost: r.onLockSessionLost}, nil
+	return &lockSession{conn: conn, onLost: r.lockSessionLost}, nil
 }
 
-// OnLockSessionLost is called when the connection holding a per-site
-// advisory lock stops answering while its closure is still running.
-// Postgres has already released the lock at that point, so the work in
-// flight has no mutual exclusion. Wiring this is how an operator learns.
 func (r *Repo) OnLockSessionLost(fn func()) { r.lockSessionLost = fn }
-
-func (r *Repo) onLockSessionLost() {
-	if r.lockSessionLost != nil {
-		r.lockSessionLost()
-	}
-}
 
 type sessionConn interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -90,11 +80,6 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 	return fn()
 }
 
-// lockHeartbeat is how often the session re-checks that the connection
-// holding the advisory lock is still alive. Postgres releases every lock
-// held by a backend the instant that backend dies, and nothing tells the
-// closure. Without this the closure keeps running with no mutual
-// exclusion until its deferred unlock fails on the way out.
 const defaultLockHeartbeat = 5 * time.Second
 
 func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) func() {
@@ -126,10 +111,8 @@ func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) f
 			}
 		}
 	}()
-	// Join, do not merely signal. *pgx.Conn is not safe for concurrent use
-	// (pgx v5 conn.go: "Conn is a PostgreSQL connection handle. It is not
-	// safe for concurrent usage"), and a Ping still in flight when the
-	// deferred pg_advisory_unlock runs collides on the same connection.
+	// pgx v5 conn.go: "Conn is a PostgreSQL connection handle. It is not
+	// safe for concurrent usage" — stop() must join, not merely signal.
 	return func() {
 		close(done)
 		<-exited

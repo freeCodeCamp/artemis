@@ -118,3 +118,35 @@ func TestWithSiteLock_UnlockNeverRunsBesideAnInFlightPing(t *testing.T) {
 		"*pgx.Conn is not safe for concurrent use; an unlock racing a heartbeat ping returns "+
 			"conn busy and forces the session closed")
 }
+
+func TestNewLockSession_CarriesNoHookWhenTheRepoHasNoneRegistered(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	sess, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { sess.Close(ctx) })
+
+	inner, ok := sess.(*lockSession)
+	require.True(t, ok)
+	assert.Nil(t, inner.onLost,
+		"a method value is never nil, so wrapping the hook made every site lock pay for a heartbeat "+
+			"nobody could receive")
+}
+
+func TestNewLockSession_CarriesTheHookTheRepoRegistered(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	var paged atomic.Bool
+	repo.OnLockSessionLost(func() { paged.Store(true) })
+
+	sess, err := repo.NewLockSession(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { sess.Close(ctx) })
+
+	inner, ok := sess.(*lockSession)
+	require.True(t, ok)
+	require.NotNil(t, inner.onLost)
+	inner.onLost()
+	assert.True(t, paged.Load())
+}

@@ -39,7 +39,6 @@ type Config struct {
 	SecretAccessKey string
 	Bucket          string
 	Region          string // default "auto"
-	ProbeTimeout    time.Duration
 }
 
 // Client is the narrowed wrapper over s3.Client used by Artemis.
@@ -62,10 +61,6 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Region == "" {
 		cfg.Region = "auto"
 	}
-	if cfg.ProbeTimeout <= 0 {
-		cfg.ProbeTimeout = defaultProbeTimeout
-	}
-
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(cfg.Region),
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, "")),
@@ -82,7 +77,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	return &Client{
 		s3:        cli,
 		bucket:    cfg.Bucket,
-		probeHTTP: awshttp.NewBuildableClient().WithTimeout(cfg.ProbeTimeout),
+		probeHTTP: awshttp.NewBuildableClient().WithTimeout(defaultProbeTimeout),
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -398,9 +399,9 @@ func newClientWithProbeTimeout(t *testing.T, fake *fakeS3, probe time.Duration) 
 		SecretAccessKey: "sk",
 		Bucket:          fake.bucket,
 		Region:          "auto",
-		ProbeTimeout:    probe,
 	})
 	require.NoError(t, err)
+	c.probeHTTP = awshttp.NewBuildableClient().WithTimeout(probe)
 	return c
 }
 
