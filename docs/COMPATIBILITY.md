@@ -266,3 +266,33 @@ A purge refused before it reaches R2 — by the site lock, or by a missing tombs
 **Consequence:** as in entry 6, the server may complete an update the client believes it cancelled. The blast radius is smaller: this is a registry team-list write, not an R2 alias flip, so a cancelled update never left a site serving the wrong bytes.
 
 **Action:** read the row back with `GET /api/sites` rather than inferring the team list from a cancelled request.
+
+## 13 — A lock-release failure no longer fails the request it followed
+
+**Release:** unreleased. Commits `469ce44`, `fd9260d`.
+
+**Old:** the deferred unlock inside `lockSession.WithSiteLock` overwrote the named return whenever `pg_advisory_unlock` failed — `if err == nil { err = fmt.Errorf("site unlock %s: %w", …) }`. Seven endpoints read that error as "the work failed" before checking whether their own closure had already succeeded, so committed work could answer `502 site_lock_failed` with no audit row: `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}?purge=true`, `DELETE /api/site/{site}/deploys/{id}`, `POST …/deploys/{id}/restore`, `POST …/promote`, `POST …/rollback` and `POST /api/deploy/{id}/finalize`. On the first four the closure had already written its own JSON body, so the response carried **two concatenated JSON objects**. On promote, rollback and finalize the alias was already in R2 and Caddy was already serving the new deploy while the caller was told `502`.
+
+**New:** two changes, one per layer.
+
+The advisory lock is session-scoped on a dedicated connection, and a failed unlock closes that connection (`internal/pg/lock.go:55-66`), which terminates the backend session and releases every lock it held. The unlock error is therefore informational and is now reported only through the existing `lock.site.unlock_failed` warn line. A non-nil return from `WithSiteLock` means either the closure ran and returned that error, or the closure never ran because acquisition failed.
+
+`Handlers.withSiteLock` (`internal/handler/handler.go:163`) now returns the closure's own verdict whenever the closure ran, and the locker's error only when it did not. The `SiteLocker` interface cannot express the contract in its type, so the handler layer no longer depends on it.
+
+**Consequence:** all seven endpoints return their documented success status, exactly one JSON body and exactly one audit row once the work commits. A `409 site_locked` on lock **acquisition** is unchanged. `DELETE ?purge=true` loses its bespoke `site.purge.unlock_failed` warn line; the generic `lock.site.unlock_failed` covers it.
+
+**Action:** callers that treated `502 site_lock_failed` as "the operation definitely did not happen" were already wrong on the six broken paths and may stop compensating. Any client that tolerated a double JSON body on `PATCH`, `DELETE …/deploys/{id}` or `…/restore` can drop that tolerance.
+
+## 14 — `finalize` retries its index write and audits a partial commit
+
+**Release:** unreleased. Commit `bd227fb`.
+
+**Old:** `DeployFinalize` wrote the R2 marker, published the alias, then wrote the Postgres row once. A fault on that last leg answered `502 pg_write_failed` and wrote **no audit row at all**, leaving a marked and published deploy with no index row — the `reindex` class `drift-detect` reports and only `artemis reconcile --apply` repairs. `promote` and `rollback` had the identical R2-then-Postgres window, and nothing reconciles R2 aliases against the `aliases` table.
+
+**New:** the Postgres leg of `finalize`, `promote` and `rollback` is retried up to `indexCommitAttempts` (3) times with a 150 ms backoff that doubles. Retrying is safe because both writes are idempotent end to end — `ON CONFLICT (site, id) DO UPDATE` for the deploy row and `ON CONFLICT (site, name) DO UPDATE` for the alias row (`internal/pg/saga.go:16-19`, `:48-52`). Worst-case added hold on the per-site advisory lock is 450 ms, against a `lock_timeout` of 30 s and a 60 s commit budget.
+
+`finalize` also writes a `deploy.finalize` audit row with `outcome=failure` and `detail.stage` on every path that has already committed something to R2. `stage` is one of `registry`, `alias`, `index`. A `410 site_gone` commits nothing beyond the marker and is a caller error, so it writes no row.
+
+**Consequence:** `audit_log` now carries `deploy.finalize` rows with `outcome=failure`. As in entry 11, `outcome` is unconstrained `TEXT` so no migration is needed, and the only closed-set consumer, `Repo.DeployActors`, filters `action='deploy.finalize' AND outcome='success'` (`internal/pg/audit.go:91-96`) and is unaffected. A retried commit whose acknowledgement was lost can enqueue a duplicate `site.changed` outbox row; `gc-site` is idempotent and keyed by site, so this is benign.
+
+**Action:** any dashboard counting `deploy.finalize` rows must filter on `outcome`. A `502 pg_write_failed` from finalize now means the write failed three times, not once.

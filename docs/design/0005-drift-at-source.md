@@ -150,6 +150,37 @@ Effect: the tombstone/orphan drift class — 32 of the 37 items in the current r
 
 ______________________________________________________________________
 
+### P2b — The reindex backstop is manual and lossy (2026-08-24)
+
+Line 133 above leans on `ReindexDeploy` as the repair for "the marker was written and the process
+died". That reliance is real but conditional, and both conditions are load-bearing. Re-probed
+2026-08-24.
+
+**It is manual.** `drift-detect` builds a verdict and never mutates. `gcWorkflowDefs` calls
+`sweepDrift` then `alertOnDrift` (`cmd/artemis/gcworkflows.go:114-121`), and the sweeper it is
+given substitutes `readOnlyStore` — whose `ReindexDeploy`, `RecordTombstone` and `PruneDeploy` all
+return `errReadOnlyViolation` — plus `readOnlyMover` (`cmd/artemis/driftreport.go:23-51`). Repair
+happens only when an operator runs `artemis reconcile <site> --apply`; without `--apply` the CLI
+takes the same read-only sweeper and prints `dry run: pass --apply to repair`
+(`cmd/artemis/reconcilecli.go:112-129`).
+
+**It is lossy.** `Repo.ReindexDeploy` (`internal/pg/repo.go:44-57`) inserts `bytes = 0`, writes no
+`aliases` row and enqueues no `site.changed` outbox event. `FinalizeAtomic`
+(`internal/pg/saga.go:13-28`) does all three. Its `ON CONFLICT (site, id) DO UPDATE` touches only
+`has_marker` and `state`, so a row adopted by reindex — or seeded pending by `BeginDeploy`
+(`internal/pg/pending.go:16-20`) and promoted later — keeps `bytes = 0` for good, and GC byte
+accounting (`res.BytesReclaimed += d.Bytes`, `internal/gc/gcsite.go:148`) understates it.
+
+**What T8 changed, and what it did not.** `DeployFinalize` now retries the Postgres leg
+(`retryIdempotentCommit`, `internal/handler/deploy.go`) and writes a `deploy.finalize|failure`
+audit row naming the stage that failed, so a transient fault on the last leg no longer strands a
+published deploy and a durable one is at least recorded. The window did not close: a process death
+between the marker PUT and the index write still relies on this backstop. Closing the two holes
+above — automatic repair, and a reindex that carries bytes and aliases — belongs to the
+reconcile/drift workstream, not to T8.
+
+______________________________________________________________________
+
 ### P3 — Then, and only then, re-tune the alerting
 
 This is the answer to "what should we do about the CRON".
