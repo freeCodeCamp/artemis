@@ -137,8 +137,30 @@ Make it true at the write; prove it stayed true in batch. The serve plane is nev
 - **Undelete has to exist**, at least as a staff-run path, or the grace period promises something
   nobody can deliver.
 
-## Open, deliberately
+## Closed 2026-08-24
 
-Whether the grace clock is stored per-site or derived from the tombstone rows, and whether
-`?purge=true` survives as "release now" or is replaced by an explicit approver-gated endpoint.
-Both are implementation choices that do not change the model above.
+Both open choices are now decided. Neither changes the model above.
+
+**The grace clock is stored per-site, not derived from tombstone rows.** Deriving it looked cheaper
+— no new state — and it is wrong on three counts. A reserved name may carry no tombstone at all,
+because a purge that fails before `RecordSitePurge` still deregisters nothing and a purge that is
+never requested reserves the name anyway; the reservation and the byte-reclamation are different
+lifecycles with different clocks. `trashed_at` is also already contested: it is rewritten by every
+retry of an idempotent upsert (`internal/pg/repo.go:183-184`), so reading a reservation deadline
+from it would restart the name-hold on each retry of an unrelated operation. And `tombstone-purge`
+reads that table for reclamation; overloading it makes one table answer two questions and couples
+the two jobs. A reservation carries its own expiry.
+
+**`?purge=true` is retired. Early release becomes an approver-gated endpoint.** Once a plain
+`DELETE` unpublishes and reserves, `?purge=true` no longer means "do the delete properly" — it
+means "skip the grace period and destroy the bytes now", which is the single irreversible action in
+this design. A query parameter that silently escalates an operation from reversible to final,
+sharing a URL and a permission with the safe form, is precisely the trap this note exists to
+remove. Authorization also differs: `REGISTRY_AUTHZ_TEAM` (`staff`) may delete; only
+`REPO_APPROVE_AUTHZ_TEAM` (`gh-artemis-approvers`) may release early. Two authorization levels on
+one endpoint, selected by a query string, cannot be read from a route table.
+
+The flag is a documented breaking change: callers passing `?purge=true` get the new reversible
+delete, not a purge. That is safe by construction — the destructive reading fails closed — and
+`universe-cli` omits the flag entirely today (`src/lib/proxy-client.ts:667-674`), so no shipped
+caller relies on it.
