@@ -404,6 +404,8 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **`audit_log`:** `site.delete` now writes an `outcome=failure` row carrying `detail.stage`, one of `unpublish` or `reserve`. As in entries 11 and 14, `outcome` is unconstrained `TEXT` so no migration is needed.
 
+**`undelete` refuses a reservation past its deadline.** `POST /api/site/{slug}/undelete` answers `404` once `reserved_until` has passed, rather than restoring the row. From that moment the nightly sweep owns the name: it trashes the origin bytes and then frees the row, and a restore landing between those two steps would return a site to service whose bytes were already moving. Both the refusal and the sweep's release compare against Postgres `now()`, not a Go clock, so the handler pod and the GC worker cannot disagree about the deadline.
+
 **Steps 5, 6 and 7 land in entry 20.**
 
 **Action:** any caller that relied on `DELETE` freeing the slug immediately must wait out the grace period or use the release path once step 7 ships. Any caller that relied on `DELETE` leaving the site serving was relying on the defect this fixes.
@@ -415,6 +417,8 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 **`?purge=true` no longer reclaims.** Once a delete unpublishes and reserves, the flag would have meant "skip the grace period and destroy the bytes now" — the one irreversible action in this design, sharing a URL and a permission with the safe form. A query parameter that silently escalates an operation from reversible to final cannot be read from a route table, and the two forms need different authorization: `REGISTRY_AUTHZ_TEAM` may delete, only `REPO_APPROVE_AUTHZ_TEAM` may release early. The flag is now accepted and ignored: a `DELETE` with it behaves exactly like a `DELETE` without it.
 
 **This fails closed.** The destructive reading of the flag is the one that stops working, so a caller that sent it gets *less* destruction than it asked for, never more. `universe-cli` never sent it (`src/lib/proxy-client.ts:667-674`), so no shipped caller is affected.
+
+The pre-ADR-0006 purge code still stands in `internal/handler/site_register.go`, unreachable rather than removed. It needs `Handlers.Tombstones` set while `Handlers.Reservations` is nil, and both are wired from the same `DATABASE_URL`, so no boot configuration produces that pair — `TestWiring_NoBootConfigurationReachesTheLegacyPurge` pins it. Its 23 tests carry invariant-I3 audit coverage that deleting the branch at freeze would take with it.
 
 **Registering a reserved name is `409 site_reserved`, not `502`.** `internal/pg/registry.go:56` already returned `registry.ErrReserved`; the handler's error switch did not name it and fell through to a generic upstream failure. A caller can act on the difference between "someone holds this name for another two days" and "the registry is broken". This closes lifecycle gap E, where re-registering a deleted slug inherited the previous owner's live production bytes.
 

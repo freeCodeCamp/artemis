@@ -96,3 +96,30 @@ func TestSiteDelete_AliasFailureAbortsAndLeavesTheSiteRegistered(t *testing.T) {
 	assert.Equal(t, "failure", fa.events[0].Outcome)
 	assert.Equal(t, "unpublish", fa.events[0].Detail["stage"])
 }
+
+func TestSiteDelete_ReserveFailureAfterTheUnpublishAuditsItsOwnStage(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["www/production"] = "20260420-141522-abc1234"
+	store.aliases["www/preview"] = "20260420-141522-abc1234"
+	h, res, fa := reserveHandlers(t, store)
+	res.err = errors.New("pg down")
+
+	w := callDeleteSite(t, h)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
+	assert.Equal(t, "reserve", fa.events[0].Detail["stage"],
+		"the site is already dark; only the stage tells an operator whether the name is held")
+}
+
+func TestSiteDelete_RepeatingADeleteOverAbsentAliasesStillReachesReserve(t *testing.T) {
+	store := newFakeR2()
+	h, res, _ := reserveHandlers(t, store)
+
+	w := callDeleteSite(t, h)
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, res.calls, 1,
+		"a retry after a reserve failure must not stall on aliases the first attempt already removed")
+}

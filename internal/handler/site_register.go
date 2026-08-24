@@ -213,25 +213,25 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, row)
 }
 
-// SiteDelete implements DELETE /api/site/{slug}. Without ?purge=true it
-// removes the registry row only: the R2 bytes and the public alias both
-// survive, so the site keeps serving. With ?purge=true it moves the two
-// aliases into the trash prefix first — which takes the site off the
-// internet in seconds regardless of its size — then the rest of the site
-// prefix, then the registry row. Authz: caller in h.RegistryAuthzTeam.
+// SiteDelete implements DELETE /api/site/{slug} per ADR 0006: remove both
+// R2 alias objects, then reserve the name for h.ReservationGrace. Authz:
+// caller in h.RegistryAuthzTeam. ?purge=true is retired — it is accepted
+// and ignored.
 //
 // Status matrix:
 //
-//	200 OK             — purged
-//	204 No Content     — deregistered, bytes and alias left in place
+//	204 No Content     — unpublished, name reserved
 //	400 Bad Request    — invalid slug
 //	403 Forbidden      — caller not in authz team
-//	404 Not Found      — slug not registered; a purge instead treats an
-//	                     absent row as satisfied and returns 200
-//	502 Bad Gateway    — tombstone write, R2 move, R2 verify or registry
-//	                     write failed
-//	503 Service Unavail — github membership probe upstream error, or no
-//	                     tombstone store configured
+//	404 Not Found      — slug not registered
+//	502 Bad Gateway    — R2 alias delete or registry write failed
+//	503 Service Unavail — github membership probe upstream error
+//
+// The ?purge=true block below is the pre-ADR-0006 path, live only for a
+// deployment with no DATABASE_URL. TestWiring_NoBootConfigurationReaches
+// TheLegacyPurge pins that no boot configuration reaches its R2 moves:
+// Tombstones and Reservations arrive from the same DATABASE_URL, and the
+// block needs the first without the second.
 func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireRegistryAuthz(w, r); err != nil {
 		return
@@ -243,8 +243,6 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ADR 0006 retires ?purge=true. Every delete unpublishes and reserves;
-	// reclaiming early is an approver-gated release, not a query flag.
 	if h.Reservations != nil {
 		h.siteDeleteReserving(w, r, slug)
 		return

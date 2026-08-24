@@ -57,3 +57,29 @@ func TestBuildHandlers_LeavesReservationsNilForAWriterWithoutIt(t *testing.T) {
 	assert.Nil(t, h.Reservations,
 		"a valkey-only deployment has no reservation table; it must keep the legacy delete rather than panic")
 }
+
+func TestWiring_NoBootConfigurationReachesTheLegacyPurge(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Registry.ReservationGrace = 72 * time.Hour
+	cfg.Aliases.ProductionKeyFormat = "<site>/production"
+	cfg.Aliases.PreviewKeyFormat = "<site>/preview"
+
+	cases := []struct {
+		name     string
+		registry handler.RegistryWriter
+		repo     *pg.Repo
+	}{
+		{"postgres backed", reservingRegistry{}, &pg.Repo{}},
+		{"valkey only", legacyOnlyRegistry{}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := buildHandlers(cfg, handlerDeps{registry: tc.registry})
+			wirePGRepo(h, tc.repo)
+
+			assert.Equal(t, h.Reservations != nil, h.Tombstones != nil,
+				"SiteDelete's ?purge=true block runs only with Tombstones set and Reservations nil; "+
+					"both arrive from the same DATABASE_URL, so that pair cannot exist")
+		})
+	}
+}
