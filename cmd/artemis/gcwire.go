@@ -197,6 +197,7 @@ type gcWiring struct {
 	Purge           *gc.TombstonePurge
 	Reservations    expiredReservationSource
 	NameReleaser    reservationReleaser
+	Reclaim         reclaimDeps
 	Outbox          outboxPurger
 	OutboxRetention time.Duration
 }
@@ -221,7 +222,13 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 		outbox = repo
 	}
 	return &gcWiring{
-		Repo:            repo,
+		Repo: repo,
+		Reclaim: reclaimDeps{
+			Mover:     r2c,
+			Tombstone: repo,
+			Dirname:   tmpl.SiteDirname,
+			TrashBase: cfg.Cleanup.TrashPrefix,
+		},
 		Outbox:          outbox,
 		OutboxRetention: time.Duration(cfg.Cleanup.OutboxRetentionDays) * 24 * time.Hour,
 		SiteGC: &gc.SiteGC{

@@ -424,6 +424,10 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **A reserved name is freed by the nightly `tombstone-purge` run.** `sweepExpiredReservations` (`cmd/artemis/reservationsweep.go`) selects names whose `reserved_until` has passed and deletes their registry row, releasing the slug. It runs inside the existing 03:00 UTC workflow, honours `CLEANUP_DRY_RUN`, is capped at 50 names per run and logs `reservation.sweep.capped` when it hits that cap. So the grace period is a ceiling as well as a floor: a name is held for `SITE_RESERVATION_GRACE` and then released, with no operator action.
 
-**Still open, tracked as `#54` and `#55`:** the sweep frees the *name*; the *bytes* are reclaimed on the tombstone path, which does not yet sweep the origin prefix. An approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today.
+**The same run reclaims the bytes.** Before freeing the name, the sweep records a tombstone for the site and moves everything remaining under `<dirname>/` into `_trash/<dirname>/`, which is what makes `tombstone-purge` responsible for collecting it. The order matters and is pinned: bytes first, name second. Freeing the name while its objects are still at the origin is exactly how a new owner inherits a stranger's site, and `TestSweepExpiredReservations_KeepsTheNameWhenTheReclaimFails` fails if the two are transposed.
+
+An origin-prefix move is only safe because the reservation has expired and the register path answers `409` for a reserved name, so the slug cannot have been re-claimed in the window. That guard is the precondition; do not lift this sweep out of the reservation flow and point it at arbitrary prefixes.
+
+**Still open, tracked as `#54`:** a site above roughly 215 objects cannot finish its move inside one `destructiveMoveTimeout`. The sweep is idempotent and re-lists on every run, so it completes across nights rather than in one. An approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today.
 
 **Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
