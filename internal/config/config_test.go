@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"github.com/freeCodeCamp/artemis/internal/config/configtest"
+	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"log/slog"
 	"os"
 	"strings"
@@ -58,6 +59,11 @@ func TestLoad_AllDefaults(t *testing.T) {
 	assert.Equal(t, 5*time.Second, cfg.Registry.Valkey.RetryWindow)
 
 	assert.Equal(t, 45*time.Second, cfg.PGConnectRetryWindow)
+}
+
+func TestDefaultValkeyRetryWindowFitsThreeDialAttempts(t *testing.T) {
+	require.GreaterOrEqual(t, defaultValkeyRetryWindow, 3*valkey.DialTimeout,
+		"a retry window equal to the dial timeout spends itself on one hung dial; keep it a multiple")
 }
 
 func TestLoad_ValkeyConnectRetryWindow(t *testing.T) {

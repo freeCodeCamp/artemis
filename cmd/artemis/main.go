@@ -429,12 +429,12 @@ func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, fun
 	if cfg.Registry.Valkey.Addr == "" {
 		return nil, func() {}, nil
 	}
-	client, err := valkey.RetryConnect(ctx, cfg.Registry.Valkey.RetryWindow, valkey.RetryBackoffBase, valkey.RetryBackoffMax,
+	client, err := valkey.RetryConnect(ctx, cfg.Registry.Valkey.RetryWindow, valkey.DialTimeout, valkey.RetryBackoffBase, valkey.RetryBackoffMax,
 		func(ctx context.Context) (*redis.Client, error) {
-			c := redis.NewClient(&redis.Options{
+			c := redis.NewClient(valkey.ClientOptions(valkey.Config{
 				Addr:     cfg.Registry.Valkey.Addr,
 				Password: cfg.Registry.Valkey.Password,
-			})
+			}))
 			if err := c.Ping(ctx).Err(); err != nil {
 				_ = c.Close()
 				return nil, fmt.Errorf("teamcache ping %s: %w", cfg.Registry.Valkey.Addr, err)
