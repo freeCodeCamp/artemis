@@ -40,12 +40,9 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		outcome   string
 	)
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
-		if _, err := h.Registry.GetSite(opCtx, site); err != nil {
-			if errors.Is(err, registry.ErrNotFound) {
-				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be restored")
-				return nil
-			}
-			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.restore", err)
+		if row, err := h.requireWritableSite(opCtx, site); err != nil {
+			h.writeFenceError(w, r, "registry.get.restore",
+				"site was deleted; deploy cannot be restored", row, err)
 			return nil
 		}
 

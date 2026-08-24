@@ -96,6 +96,16 @@ func (f *fakeRegistry) Delete(_ context.Context, slug sitekey.Slug) error {
 	return nil
 }
 
+func (f *fakeRegistry) reserve(slug sitekey.Slug, until time.Time) {
+	site, ok := f.bySite[slug]
+	if !ok {
+		site = registry.Site{Slug: slug}
+	}
+	site.State = registry.StateReserved
+	site.ReservedUntil = until
+	f.bySite[slug] = site
+}
+
 func (f *fakeRegistry) GetSite(_ context.Context, slug sitekey.Slug) (registry.Site, error) {
 	if f.getErr != nil {
 		return registry.Site{}, f.getErr

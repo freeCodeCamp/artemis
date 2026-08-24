@@ -179,6 +179,31 @@ func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn
 	return lockerErr
 }
 
+func (h *Handlers) requireWritableSite(ctx context.Context, slug sitekey.Slug) (registry.Site, error) {
+	site, err := h.Registry.GetSite(ctx, slug)
+	if err != nil {
+		return registry.Site{}, err
+	}
+	if site.IsReserved() {
+		return site, registry.ErrReserved
+	}
+	return site, nil
+}
+
+func (h *Handlers) writeFenceError(w http.ResponseWriter, r *http.Request, op, goneMessage string,
+	site registry.Site, err error) {
+	switch {
+	case errors.Is(err, registry.ErrReserved):
+		writeErrorDetail(w, http.StatusConflict, "site_reserved",
+			"site name is reserved after a delete; undelete it or wait for the reclaim",
+			map[string]any{"reservedUntil": site.ReservedUntil.UTC().Format(time.RFC3339)})
+	case errors.Is(err, registry.ErrNotFound):
+		writeError(w, http.StatusGone, "site_gone", goneMessage)
+	default:
+		writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", op, err)
+	}
+}
+
 func (h *Handlers) auditFromScope(ctx context.Context, action, outcome string, detail map[string]any) {
 	sc := telemetry.FromContext(ctx)
 	h.audit(ctx, pg.AuditEvent{

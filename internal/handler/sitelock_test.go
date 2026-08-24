@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -53,6 +54,21 @@ func (r *loggingR2) PutAlias(ctx context.Context, key, deployID string) error {
 func (r *loggingR2) GetAlias(ctx context.Context, key string) (string, error) {
 	r.log.add("getAlias:" + key)
 	return r.fakeR2.GetAlias(ctx, key)
+}
+
+func (r *loggingR2) DeleteAlias(ctx context.Context, key string) error {
+	r.log.add("deleteAlias:" + key)
+	return r.fakeR2.DeleteAlias(ctx, key)
+}
+
+func (r *loggingR2) PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error {
+	r.log.add("put:" + key)
+	return r.fakeR2.PutObject(ctx, key, body, contentType, contentLength)
+}
+
+func (r *loggingR2) PrefixBytes(ctx context.Context, prefix string) (int64, error) {
+	r.log.add("bytes:" + prefix)
+	return r.fakeR2.PrefixBytes(ctx, prefix)
 }
 
 func (r *loggingR2) HasPrefix(ctx context.Context, prefix string) (bool, error) {
