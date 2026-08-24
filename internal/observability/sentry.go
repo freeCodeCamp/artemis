@@ -370,6 +370,7 @@ func NewSlogHandler(minLevel slog.Level) slog.Handler {
 		}
 	}
 	return sentryslog.Option{
+		//lint:ignore SA1019 v0.48.0 removes EventLevel and the whole event path with no replacement, so migration needs the dependency bump; on the pinned v0.46.2 a nil EventLevel defaults to {Error,Fatal}. https://github.com/getsentry/sentry-go/blob/slog/v0.48.0/slog/sentryslog.go
 		EventLevel: []slog.Level{},
 		LogLevel:   logLevels,
 	}.NewSentryHandler(context.Background())
