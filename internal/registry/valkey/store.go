@@ -84,10 +84,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.Addr == "" {
 		return nil, errors.New("valkey: empty Addr")
 	}
-	c := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-	})
+	c := redis.NewClient(ClientOptions(cfg))
 	if err := c.Ping(ctx).Err(); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("valkey: ping %s: %w", cfg.Addr, err)
@@ -96,29 +93,46 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 }
 
 const (
+	DialTimeout      = 1 * time.Second
 	RetryBackoffBase = 500 * time.Millisecond
 	RetryBackoffMax  = 5 * time.Second
 )
 
+func ClientOptions(cfg Config) *redis.Options {
+	return &redis.Options{
+		Addr:        cfg.Addr,
+		Password:    cfg.Password,
+		DialTimeout: DialTimeout,
+	}
+}
+
 func NewWithRetry(ctx context.Context, cfg Config, window time.Duration) (*Store, error) {
-	return RetryConnect(ctx, window, RetryBackoffBase, RetryBackoffMax,
+	return RetryConnect(ctx, window, DialTimeout, RetryBackoffBase, RetryBackoffMax,
 		func(ctx context.Context) (*Store, error) {
 			return New(ctx, cfg)
 		})
 }
 
-func RetryConnect[T any](ctx context.Context, window, base, max time.Duration, connect func(context.Context) (T, error)) (T, error) {
+func connectWithin[T any](ctx context.Context, deadline time.Time, attempt time.Duration, connect func(context.Context) (T, error)) (T, error) {
+	budget := time.Until(deadline)
+	if attempt > 0 && attempt < budget {
+		budget = attempt
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return connect(attemptCtx)
+}
+
+func RetryConnect[T any](ctx context.Context, window, attempt, base, max time.Duration, connect func(context.Context) (T, error)) (T, error) {
 	if window <= 0 {
 		return connect(ctx)
 	}
 
 	deadline := time.Now().Add(window)
-	attemptCtx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
 
 	backoff := base
-	for attempt := 1; ; attempt++ {
-		v, err := connect(attemptCtx)
+	for n := 1; ; n++ {
+		v, err := connectWithin(ctx, deadline, attempt, connect)
 		if err == nil {
 			return v, nil
 		}
@@ -131,7 +145,7 @@ func RetryConnect[T any](ctx context.Context, window, base, max time.Duration, c
 			return zero, err
 		}
 		slog.Warn("valkey.connect.retrying",
-			"attempt", attempt,
+			"attempt", n,
 			"backoff", backoff,
 			"err", err)
 		timer := time.NewTimer(backoff)

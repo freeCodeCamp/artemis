@@ -399,6 +399,12 @@ func (f *fakeR2) HasPrefix(_ context.Context, prefix string) (bool, error) {
 	return false, nil
 }
 
+func (f *fakeR2) Ping(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listErr
+}
+
 func (f *fakeR2) HasObject(_ context.Context, key string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

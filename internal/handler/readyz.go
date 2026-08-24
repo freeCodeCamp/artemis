@@ -10,19 +10,10 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-// readyZProbePrefix is intentionally non-matching: HasPrefix on a key
-// that cannot exist still exercises the R2 round-trip without pulling
-// real listings, and returns (false, nil) when the bucket is reachable.
-const readyZProbePrefix = "_artemis_readyz_probe_no_match"
-
 const readyZProbeTimeout = 5 * time.Second
 
 const readyzPageThreshold = 3
 
-// ReadyZ implements GET /readyz. Returns {"ready":true} when both
-// Valkey and R2 are reachable, otherwise 503 with a code naming the
-// failing upstream. No auth, no cache; intended for k8s readiness
-// probes.
 func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	var valkeyErr, r2Err, pgErr error
@@ -43,7 +34,7 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(r.Context(), readyZProbeTimeout)
 			defer cancel()
-			_, r2Err = h.R2.HasPrefix(ctx, readyZProbePrefix)
+			r2Err = h.R2.Ping(ctx)
 		}()
 	}
 
@@ -63,25 +54,36 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch {
-	case valkeyErr != nil:
+	if valkeyErr != nil {
 		page := h.readyzValkey.observe(true, true)
 		h.readyzR2.observe(r2Err != nil, false)
 		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, page)
-	case r2Err != nil:
-		h.readyzValkey.observe(false, false)
-		page := h.readyzR2.observe(true, true)
-		writeProbeUnavailable(w, r, "r2_unreachable", "r2.has_prefix", r2Err, page)
-	case pgErr != nil:
-		h.readyzValkey.observe(false, false)
-		h.readyzR2.observe(false, false)
-		slog.WarnContext(r.Context(), "readyz.postgres.degraded", "err", pgErr)
-		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
-	default:
-		h.readyzValkey.observe(false, false)
-		h.readyzR2.observe(false, false)
-		writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
+		return
 	}
+	h.readyzValkey.observe(false, false)
+
+	var degraded bool
+
+	if r2Err != nil {
+		degraded = true
+		if h.readyzR2.observe(true, true) {
+			captureProbeFailure(r, "r2_unreachable", "r2.ping", r2Err)
+		}
+		slog.WarnContext(r.Context(), "readyz.r2.degraded", "err", r2Err)
+	} else {
+		h.readyzR2.observe(false, false)
+	}
+
+	if pgErr != nil {
+		degraded = true
+		slog.WarnContext(r.Context(), "readyz.postgres.degraded", "err", pgErr)
+	}
+
+	if degraded {
+		writeJSON(w, http.StatusOK, map[string]bool{"ready": true, "degraded": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ready": true})
 }
 
 type probeState struct {
@@ -106,20 +108,26 @@ func (p *probeState) observe(failed, report bool) bool {
 	return false
 }
 
+func captureProbeFailure(r *http.Request, code, op string, err error) {
+	hub := sentry.GetHubFromContext(r.Context())
+	if hub == nil {
+		return
+	}
+	hub.WithScope(func(scope *sentry.Scope) {
+		scope.SetTag("op", op)
+		scope.SetTag("error_code", code)
+		scope.SetFingerprint([]string{"readyz", op})
+		hub.CaptureException(err)
+	})
+}
+
 func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error, page bool) {
 	slog.ErrorContext(r.Context(), "readyz.probe.unavailable",
 		"op", op,
 		"err", err,
 	)
 	if page {
-		if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
-			hub.WithScope(func(scope *sentry.Scope) {
-				scope.SetTag("op", op)
-				scope.SetTag("error_code", code)
-				scope.SetFingerprint([]string{"readyz", op})
-				hub.CaptureException(err)
-			})
-		}
+		captureProbeFailure(r, code, op, err)
 	}
 	writeError(w, http.StatusServiceUnavailable, code, "upstream call failed")
 }

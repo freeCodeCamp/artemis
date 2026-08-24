@@ -20,12 +20,17 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithy "github.com/aws/smithy-go"
 )
+
+const defaultProbeTimeout = 3 * time.Second
+
+const probeNoMatchPrefix = "_artemis_readyz_probe_no_match"
 
 // Config carries the R2 (S3-compatible) target.
 type Config struct {
@@ -34,12 +39,14 @@ type Config struct {
 	SecretAccessKey string
 	Bucket          string
 	Region          string // default "auto"
+	ProbeTimeout    time.Duration
 }
 
 // Client is the narrowed wrapper over s3.Client used by Artemis.
 type Client struct {
-	s3     *s3.Client
-	bucket string
+	s3        *s3.Client
+	bucket    string
+	probeHTTP *awshttp.BuildableClient
 }
 
 // New returns a configured client. Uses path-style addressing because R2
@@ -55,6 +62,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.Region == "" {
 		cfg.Region = "auto"
 	}
+	if cfg.ProbeTimeout <= 0 {
+		cfg.ProbeTimeout = defaultProbeTimeout
+	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
 		awsconfig.WithRegion(cfg.Region),
@@ -69,7 +79,26 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		o.UsePathStyle = true
 	})
 
-	return &Client{s3: cli, bucket: cfg.Bucket}, nil
+	return &Client{
+		s3:        cli,
+		bucket:    cfg.Bucket,
+		probeHTTP: awshttp.NewBuildableClient().WithTimeout(cfg.ProbeTimeout),
+	}, nil
+}
+
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  awsv2.String(c.bucket),
+		Prefix:  awsv2.String(probeNoMatchPrefix),
+		MaxKeys: awsv2.Int32(1),
+	}, func(o *s3.Options) {
+		o.Retryer = awsv2.NopRetryer{}
+		o.HTTPClient = c.probeHTTP
+	})
+	if err != nil {
+		return fmt.Errorf("r2 ping: %w", err)
+	}
+	return nil
 }
 
 // PutObject streams body into <bucket>/<key>.

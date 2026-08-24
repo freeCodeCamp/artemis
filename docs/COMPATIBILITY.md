@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 12, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 13, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Twelve entries: seven change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, and one changes operator configuration.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Thirteen entries: eight change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, and one changes operator configuration.
 
 ## Summary
 
@@ -34,6 +34,9 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 10 | A purge can now fail with `r2_verify_failed` or `r2_move_incomplete` | unreleased | API callers |
 | 11 | `audit_log.outcome` gains `failure`, and a failed purge is recorded | unreleased | Audit-trail readers |
 | 12 | `PATCH /api/site/{slug}` commits on a detached context | unreleased | API callers |
+| 13 | A lock-release failure no longer fails the request it followed | unreleased | API callers |
+| 14 | `finalize` retries its index write and audits a partial commit | unreleased | API callers and audit-trail readers |
+| 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -296,3 +299,17 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 **Consequence:** `audit_log` now carries `deploy.finalize` rows with `outcome=failure`. As in entry 11, `outcome` is unconstrained `TEXT` so no migration is needed, and the only closed-set consumer, `Repo.DeployActors`, filters `action='deploy.finalize' AND outcome='success'` (`internal/pg/audit.go:91-96`) and is unaffected. A retried commit whose acknowledgement was lost can enqueue a duplicate `site.changed` outbox row; `gc-site` is idempotent and keyed by site, so this is benign.
 
 **Action:** any dashboard counting `deploy.finalize` rows must filter on `outcome`. A `502 pg_write_failed` from finalize now means the write failed three times, not once.
+
+## 15 — `GET /readyz` with R2 unreachable returns `200` degraded, not `503`
+
+**Release:** unreleased.
+
+**Old:** an R2 probe failure returned `503` with `{"code":"r2_unreachable"}` and logged `readyz.probe.unavailable` at Error, tagged `op=r2.has_prefix`. Kubernetes removed the pod from the Service after three consecutive failures.
+
+**New:** an R2 probe failure returns `200 {"ready":true,"degraded":true}` and logs `readyz.r2.degraded` at Warn (`internal/handler/readyz.go:67-75`). The pod stays in the Service. Valkey is now the only upstream that produces a `503`.
+
+**Why:** all replicas share one bucket, one token and one endpoint, so an R2 fault is correlated across every pod and the `503` emptied the Service rather than shedding load onto a healthy replica. The endpoints that need R2 already fail per request with `r2_put_failed`, `r2_list_failed`, `r2_get_failed`, `r2_move_failed` and `r2_has_prefix_failed`, which name the failing operation; an empty Service returns a connection failure with no code, no request id and no audit row.
+
+**Paging is unchanged.** R2 still reaches Sentry once per outage at `readyzPageThreshold` (3) consecutive failures, but the fingerprint moves from `[readyz r2.has_prefix]` to `[readyz r2.ping]`, so the existing Sentry issue stops receiving events and a new one opens on the first post-release R2 fault.
+
+**Action:** an operator grepping `readyz.probe.unavailable` for R2 must switch to `readyz.r2.degraded`; that key is Warn, so `LOG_LEVEL=error` drops it entirely. A rollout no longer wedges on a broken R2 endpoint, a revoked token or a wrong bucket — new pods become Ready immediately — so the postdeploy check is now the gate on R2 credentials, not a confirmation of one.
