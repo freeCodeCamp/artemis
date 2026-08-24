@@ -33,7 +33,7 @@ func callFinalize(t *testing.T, h *Handlers, jwt *fakeJWT, deployID string) *htt
 	)
 }
 
-func newFinalizeHandlers(t *testing.T, store R2Store, deployID string) (*Handlers, *fakeJWT, *fakeAudit) {
+func newFinalizeHandlers(t *testing.T, store R2Store) (*Handlers, *fakeJWT, *fakeAudit) {
 	t.Helper()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
 	fa := &fakeAudit{}
@@ -45,7 +45,7 @@ func TestDeployFinalize_RetriesTheIndexWriteInsideTheCommitWindow(t *testing.T) 
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
-	h, jwt, fa := newFinalizeHandlers(t, store, deployID)
+	h, jwt, fa := newFinalizeHandlers(t, store)
 	idx := &fakeIndex{failTimes: 2}
 	h.Index = idx
 
@@ -65,7 +65,7 @@ func TestDeployFinalize_StopsRetryingTheIndexWriteAtTheCap(t *testing.T) {
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
-	h, jwt, _ := newFinalizeHandlers(t, store, deployID)
+	h, jwt, _ := newFinalizeHandlers(t, store)
 	idx := &fakeIndex{failTimes: 99}
 	h.Index = idx
 
@@ -81,7 +81,7 @@ func TestDeployFinalize_AuditsThePartialCommitWhenTheIndexWriteFails(t *testing.
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
-	h, jwt, fa := newFinalizeHandlers(t, store, deployID)
+	h, jwt, fa := newFinalizeHandlers(t, store)
 	h.Index = &fakeIndex{fail: true}
 
 	w := callFinalize(t, h, jwt, deployID)
@@ -103,7 +103,7 @@ func TestDeployFinalize_AuditsTheAliasFailure(t *testing.T) {
 	base := newFakeR2()
 	base.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	store := &failAliasPutR2{fakeR2: base}
-	h, jwt, fa := newFinalizeHandlers(t, store, deployID)
+	h, jwt, fa := newFinalizeHandlers(t, store)
 
 	w := callFinalize(t, h, jwt, deployID)
 
