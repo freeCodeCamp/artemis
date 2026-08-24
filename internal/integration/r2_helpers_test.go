@@ -42,7 +42,7 @@ test. Override via env when the deployment uses non-default formats:
   ALIAS_PREVIEW_KEY_FORMAT='<site>.<root>/preview'
 `
 
-// errAliasNotFound is returned by r2Probe.getAlias / .headObject when
+// errAliasNotFound is returned by r2Probe.getAlias when
 // the alias key does not exist. Callers distinguish via errors.Is.
 var errAliasNotFound = errors.New("r2 probe: alias key not found")
 
@@ -148,27 +148,6 @@ func (r r2Probe) getAlias(ctx context.Context, key string) (string, error) {
 		return "", fmt.Errorf("r2 read %s: %w", key, err)
 	}
 	return string(body), nil
-}
-
-// headObject reports whether key exists. Returns nil for 2xx, an error
-// otherwise. Wraps NotFound as errAliasNotFound so callers can branch
-// via errors.Is.
-func (r r2Probe) headObject(ctx context.Context, key string) error {
-	_, err := r.s3.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: awsv2.String(r.bucket),
-		Key:    awsv2.String(key),
-	})
-	if err != nil {
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
-			switch apiErr.ErrorCode() {
-			case "NoSuchKey", "NotFound":
-				return errAliasNotFound
-			}
-		}
-		return fmt.Errorf("r2 head %s: %w", key, err)
-	}
-	return nil
 }
 
 // TestR2ProbeWiring is the wiring proof for the T1 helper: confirms
