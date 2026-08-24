@@ -92,5 +92,3 @@ func errorClass(err error) string {
 	}
 	return classUnclassified
 }
-
-func isTransient(err error) bool { return transientClasses[errorClass(err)] }
