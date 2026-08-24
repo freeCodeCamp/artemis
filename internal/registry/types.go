@@ -13,12 +13,22 @@ import (
 // handlers; backends are responsible for marshalling to/from their
 // wire encodings (e.g. Valkey hash fields).
 type Site struct {
-	Slug      sitekey.Slug
-	Teams     []string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	CreatedBy string
+	Slug          sitekey.Slug
+	Teams         []string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	CreatedBy     string
+	State         string
+	ReservedUntil time.Time
+	ReservedBy    string
 }
+
+const (
+	StateActive   = "active"
+	StateReserved = "reserved"
+)
+
+func (s Site) IsReserved() bool { return s.State == StateReserved }
 
 // Sentinel errors returned by Writer operations. Callers compare with
 // errors.Is.
@@ -30,6 +40,8 @@ var (
 	// ErrNotFound is returned when an operation targets a slug that
 	// is not in the registry. The HTTP layer maps this to 404.
 	ErrNotFound = errors.New("registry: site not found")
+
+	ErrReserved = errors.New("registry: site name is reserved")
 )
 
 // Writer is the registry contract handlers depend on for both reads

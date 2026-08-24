@@ -33,7 +33,8 @@ func TestSiteKeyTypesMarshalAsPlainJSONStrings(t *testing.T) {
 		`"Teams":["staff","universe-devs"],` +
 		`"CreatedAt":"2026-04-20T14:15:22Z",` +
 		`"UpdatedAt":"2026-08-19T09:30:00Z",` +
-		`"CreatedBy":"octocat"}`
+		`"CreatedBy":"octocat",` +
+		`"State":"","ReservedUntil":"0001-01-01T00:00:00Z","ReservedBy":""}`
 
 	cases := []struct {
 		name  string

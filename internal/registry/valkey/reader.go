@@ -139,6 +139,9 @@ func (r *Reader) Refresh(ctx context.Context) error {
 	}
 	bySite := make(map[sitekey.Slug][]string, len(sites))
 	for _, s := range sites {
+		if s.IsReserved() {
+			continue
+		}
 		teams := make([]string, len(s.Teams))
 		copy(teams, s.Teams)
 		bySite[s.Slug] = teams
