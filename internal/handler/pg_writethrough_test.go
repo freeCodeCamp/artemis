@@ -20,10 +20,17 @@ type fakeIndex struct {
 	finalizedBytes int64
 	aliased        []string
 	fail           bool
+	failTimes      int
+	attempts       int
+}
+
+func (f *fakeIndex) refuse() bool {
+	f.attempts++
+	return f.fail || f.attempts <= f.failTimes
 }
 
 func (f *fakeIndex) FinalizeAtomic(_ context.Context, site sitekey.Dirname, deployID, mode string, _ time.Time, bytes int64) error {
-	if f.fail {
+	if f.refuse() {
 		return errors.New("pg down")
 	}
 	f.finalized = append(f.finalized, string(site)+"/"+deployID+"/"+mode)
@@ -32,7 +39,7 @@ func (f *fakeIndex) FinalizeAtomic(_ context.Context, site sitekey.Dirname, depl
 }
 
 func (f *fakeIndex) AliasAtomic(_ context.Context, site sitekey.Dirname, name, deployID string, _ time.Time) error {
-	if f.fail {
+	if f.refuse() {
 		return errors.New("pg down")
 	}
 	f.aliased = append(f.aliased, string(site)+"/"+name+"/"+deployID)

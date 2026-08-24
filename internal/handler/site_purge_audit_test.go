@@ -199,8 +199,8 @@ func TestSitePurge_AuditsSuccessWhenTheUnlockFails(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	require.Len(t, fa.events, 1,
-		"pg/lock.go:63-65 promotes an unlock error over a nil fn() result, so a purge that fully "+
-			"succeeded would report failure and audit nothing — defect #35 in a second disguise")
+		"Handlers.withSiteLock returns the closure's verdict, not the locker's, so a purge that "+
+			"fully succeeded is never reported as a failure by a late unlock error")
 	assert.Equal(t, "site.purge", fa.events[0].Action)
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }

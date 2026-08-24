@@ -267,6 +267,11 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	aliasKey := h.aliasKey(claims.Site, mode)
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
+	auditFinalizeFailure := func(stage string) {
+		telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
+		h.auditFromScope(r.Context(), "deploy.finalize", "failure",
+			map[string]any{"stage": stage, "mode": mode})
+	}
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		if _, err := h.Registry.GetSite(commitCtx, claims.Site); err != nil {
@@ -274,19 +279,24 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be finalized")
 				return errAliasWriteHandled
 			}
+			auditFinalizeFailure("registry")
 			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.finalize", err)
 			return errAliasWriteHandled
 		}
 		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.finalize", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, aliasKey, deployID)
 		}); err != nil {
+			auditFinalizeFailure("alias")
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
-				return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
+				return retryIdempotentCommit(ctx, func(ctx context.Context) error {
+					return h.Index.FinalizeAtomic(ctx, h.DeployPrefix.SiteDirname(claims.Site), deployID, mode, time.Now().UTC(), deployBytes)
+				})
 			}); err != nil {
+				auditFinalizeFailure("index")
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.finalize.index", err)
 				return errAliasWriteHandled
 			}
@@ -308,6 +318,29 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		"deployId": deployID,
 		"mode":     mode,
 	})
+}
+
+const indexCommitAttempts = 3
+
+const indexCommitBackoff = 150 * time.Millisecond
+
+func retryIdempotentCommit(ctx context.Context, commit func(context.Context) error) error {
+	backoff := indexCommitBackoff
+	var err error
+	for attempt := 1; ; attempt++ {
+		err = commit(ctx)
+		if err == nil || attempt >= indexCommitAttempts {
+			return err
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return err
+		case <-timer.C:
+		}
+		backoff *= 2
+	}
 }
 
 const rootIndexKey = "index.html"

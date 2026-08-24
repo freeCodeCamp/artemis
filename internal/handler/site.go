@@ -153,7 +153,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC()); err != nil {
+			if err := retryIdempotentCommit(commitCtx, func(ctx context.Context) error {
+				return h.Index.AliasAtomic(ctx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC())
+			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.promote", err)
 				return errAliasWriteHandled
 			}
@@ -270,7 +272,9 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.Index != nil {
-			if err := h.Index.AliasAtomic(commitCtx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC()); err != nil {
+			if err := retryIdempotentCommit(commitCtx, func(ctx context.Context) error {
+				return h.Index.AliasAtomic(ctx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC())
+			}); err != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "pg_write_failed", "pg.alias.rollback", err)
 				return errAliasWriteHandled
 			}

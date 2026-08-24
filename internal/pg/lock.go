@@ -48,7 +48,7 @@ type lockSession struct {
 	conn sessionConn
 }
 
-func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) (err error) {
+func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
 	if _, lockErr := s.conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); lockErr != nil {
 		return fmt.Errorf("site lock %s: %w", site, lockErr)
 	}
@@ -60,9 +60,6 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 			closeCtx, ccancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			_ = s.conn.Close(closeCtx)
 			ccancel()
-			if err == nil {
-				err = fmt.Errorf("site unlock %s: %w", site, unlockErr)
-			}
 		}
 	}()
 	return fn()
