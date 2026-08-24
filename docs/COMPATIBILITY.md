@@ -16,7 +16,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 13, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Fifteen entries: nine change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, one changes operator configuration, and one changes how errors group in Sentry.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Seventeen entries: nine change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, one changes operator configuration, and three change how errors group in Sentry.
 
 ## Summary
 
@@ -38,6 +38,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 14 | `finalize` retries its index write and audits a partial commit | unreleased | API callers and audit-trail readers |
 | 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
 | 16 | Background Sentry issues re-bucket by error class | unreleased | Sentry and alert-rule readers |
+| 17 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | unreleased | Sentry and alert-rule readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -323,7 +324,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 **Old:** `CaptureBackground` fingerprinted on the op alone — `scope.SetFingerprint([]string{op})` at `internal/observability/sentry.go:410`, and `[]string{op, "sustained"}` at `:402` for the escalated transient branch. Every cause on one op collapsed into a single Sentry issue.
 
-**New:** the fingerprint is `{op, class}` for a non-transient error and `{op, "transient", class}` for an escalated transient, where `class` is a closed token drawn from `errorClass` (`internal/observability/errorclass.go`). The token set is the named classes — `ctx.canceled`, `ctx.deadline`, `grpc.canceled`, `grpc.deadline`, `grpc.<Code>`, `pg.in_recovery`, `pg.lock_timeout`, `pg.conn_closed`, `io.unexpected_eof`, `net.dns_temporary`, `net.dns` — plus `pg.<SQLSTATE>` for any other Postgres error and `unclassified` for the rest. It is derived from the error class, never from the message, so hosts, ports, ids and durations cannot multiply the bucket count.
+**New:** the fingerprint is `{op, class}` for a non-transient error and `{op, "transient", class}` for an escalated transient, where `class` is a closed token drawn from `errorClass` (`internal/observability/errorclass.go`). The token set is the named classes — `ctx.canceled`, `ctx.deadline`, `grpc.canceled`, `grpc.deadline`, `grpc.<Code>`, `pg.in_recovery`, `pg.lock_timeout`, `pg.conn_closed`, `io.unexpected_eof`, `net.dns_temporary`, `net.dns_resolver`, `net.dns_notfound` — plus `pg.<SQLSTATE>` for any other Postgres error and `unclassified` for the rest. It is derived from the error class, never from the message, so hosts, ports, ids and durations cannot multiply the bucket count.
 
 **This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, 1 × `net.DNSError` — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
 
@@ -336,3 +337,27 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 **Expect a bounded spike on the first incident after release.** A Postgres StatefulSet replacement can now raise roughly one event per pod per op per class in the window — on the order of tens of events across around a dozen issues, against roughly zero today. That is the intended trade and it is self-limiting.
 
 **Action:** expect new issue IDs for background failures. Re-point any alert rule, saved search or dashboard keyed on `ARTEMIS-5`, `ARTEMIS-7` or the `transient_sustained` tag. Enumerate those rules before the release, not after.
+
+## 17 — DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient
+
+**Release:** unreleased.
+
+**This is an operational change, not an API one.** Like entry 16 it moves no status code, error code, validation rule, stored value or cancellation guarantee. The audience is the operator reading Sentry.
+
+**Old:** `errorClass` split every `*net.DNSError` two ways on `Temporary()` — `net.dns_temporary` (transient) when `IsTimeout || IsTemporary`, and `net.dns` (**not** transient, so it pages on every event) for everything else. That draws the line where the Go standard library happens to put a flag, not where the remedy changes. A SERVFAIL answer becomes `errServerTemporarilyMisbehaving`, a `*temporaryError` (`net/dnsclient_unix.go:53,247`), so `newDNSError` sets `IsTemporary` (`net/net.go:686-714`) and the fault classifies transient. A REFUSED, NOTIMP or FORMERR answer becomes `errServerMisbehaving`, a plain `errors.errorString` (`net/dnsclient_unix.go:49,249`), so the same fault classifies permanent. **Both stringify as `server misbehaving`**, so two events with an identical Sentry title were classified oppositely, and nothing recorded in Sentry can tell an operator which of the two arrived.
+
+**New:** three tokens, split on `IsNotFound` first (`internal/observability/errorclass.go`):
+
+| Token | Shape | Transient? |
+| --- | --- | --- |
+| `net.dns_notfound` | NXDOMAIN — the name will not resolve however long you wait | no; pages on every event |
+| `net.dns_temporary` | SERVFAIL, DNS timeout, and anything else the resolver marks temporary | yes (unchanged) |
+| `net.dns_resolver` | every other DNS fault — REFUSED, NOTIMP, FORMERR, lame referral, unmarshalable response, socket error | **yes — this is the change** |
+
+NXDOMAIN is the only DNS answer that names a configuration fault, so it keeps its own class and its own page. Everything else is a resolver-side or transport fault that a retry can clear.
+
+**Consequence for grouping.** A non-NXDOMAIN resolver fault moves from fingerprint `{op, "net.dns"}` to `{op, "transient", "net.dns_resolver"}` and becomes subject to the per-pod, per-op, per-class 24-hour cooldown at `internal/observability/sentry.go:400`. `registry.refresh` is not in `cronShapedOps` (`internal/observability/sentry.go:381-388`), so the cooldown applies to it. ARTEMIS-8's three events on the morning of 2026-08-23 would be one event under this release. The trade is symmetric and deliberate: a **sustained** resolver outage now pages less loudly than it does today. A sustained outage also fails the readyz Valkey probe and empties the Service, which pod alerting covers.
+
+**Bucket moves.** NXDOMAIN opens a new issue under `net.dns_notfound`; any existing issue under `net.dns` goes stale and Sentry offers no redirect, exactly as in entry 16.
+
+**Action:** re-point saved searches and alert rules keyed on `error_class:net.dns`. There is no longer a token by that name.
