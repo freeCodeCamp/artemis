@@ -5,85 +5,47 @@ import (
 	"time"
 )
 
-func TestTransientRateTracker_EdgeTriggeredEscalation(t *testing.T) {
+func TestTransientRateTracker_FirstObserveEscalates(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
+	tr := newTransientRateTracker(func() time.Time { return base }, 24*time.Hour)
 
-	if tr.observe("op", base) {
-		t.Fatal("1st observe must not escalate")
+	if !tr.observe("op", classPGInRecovery, base) {
+		t.Fatal("1st observe must escalate: a per-process streak cannot measure a fleet-wide rate")
 	}
-	if tr.observe("op", base.Add(time.Hour)) {
-		t.Fatal("2nd observe must not escalate")
-	}
-	if !tr.observe("op", base.Add(2*time.Hour)) {
-		t.Fatal("3rd observe must escalate")
-	}
-	if tr.observe("op", base.Add(3*time.Hour)) {
-		t.Fatal("4th observe must not re-escalate: edge-triggered")
+	if tr.observe("op", classPGInRecovery, base) {
+		t.Fatal("an immediate repeat must stay latched")
 	}
 }
 
-func TestTransientRateTracker_LowCadenceStillEscalates(t *testing.T) {
+func TestTransientRateTracker_ReescalatesAfterCooldown(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
+	tr := newTransientRateTracker(func() time.Time { return base }, 24*time.Hour)
 
-	if tr.observe("reconcile.schedule", base) {
-		t.Fatal("1st observe must not escalate")
+	if !tr.observe("op", classPGInRecovery, base) {
+		t.Fatal("1st observe must escalate")
 	}
-	if tr.observe("reconcile.schedule", base.Add(24*time.Hour)) {
-		t.Fatal("2nd observe (24h later) must not escalate")
+	if tr.observe("op", classPGInRecovery, base.Add(23*time.Hour)) {
+		t.Fatal("re-escalation inside the cooldown must stay latched")
 	}
-	if !tr.observe("reconcile.schedule", base.Add(48*time.Hour)) {
-		t.Fatal("3rd observe spaced 24h apart must still escalate despite the fixed-window bug")
+	if !tr.observe("op", classPGInRecovery, base.Add(24*time.Hour)) {
+		t.Fatal("the boundary is >= cooldown, which is why a cron-shaped op short-circuits the tracker")
 	}
 }
 
-func TestTransientRateTracker_GapResetsStreak(t *testing.T) {
+func TestTransientRateTracker_DistinctCausesIndependent(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
+	tr := newTransientRateTracker(func() time.Time { return base }, 24*time.Hour)
 
-	if tr.observe("op", base) {
-		t.Fatal("1st observe must not escalate")
+	if !tr.observe("relay.run", classPGInRecovery, base) {
+		t.Fatal("1st observe must escalate")
 	}
-	if tr.observe("op", base.Add(time.Hour)) {
-		t.Fatal("2nd observe must not escalate")
+	if !tr.observe("relay.run", classPGConnClosed, base) {
+		t.Fatal("a second cause on the same op keeps its own cooldown")
 	}
-	afterGap := base.Add(time.Hour).Add(27 * time.Hour)
-	if tr.observe("op", afterGap) {
-		t.Fatal("streak reset by gap: 3rd raw observe must not escalate")
+	if !tr.observe("gc.site.run", classPGInRecovery, base) {
+		t.Fatal("the same cause on a second op keeps its own cooldown")
 	}
-	if tr.observe("op", afterGap.Add(time.Hour)) {
-		t.Fatal("2nd observe of the new streak must not escalate")
-	}
-	if !tr.observe("op", afterGap.Add(2*time.Hour)) {
-		t.Fatal("3rd observe of the new streak must escalate")
-	}
-}
-
-func TestTransientRateTracker_DistinctOpsIndependent(t *testing.T) {
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
-
-	tr.observe("a", base)
-	tr.observe("a", base)
-	if tr.observe("b", base) {
-		t.Fatal("a fresh op must start its own count")
-	}
-}
-
-func TestTransientRateTracker_ReescalatesAfterGap(t *testing.T) {
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	tr := newTransientRateTracker(func() time.Time { return base }, 26*time.Hour, 3)
-
-	tr.observe("op", base)
-	tr.observe("op", base.Add(time.Hour))
-	if !tr.observe("op", base.Add(2*time.Hour)) {
-		t.Fatal("3rd observe must escalate")
-	}
-	if tr.observe("op", base.Add(3*time.Hour)) {
-		t.Fatal("re-escalation inside the 24h gap must stay latched")
-	}
-	if !tr.observe("op", base.Add(2*time.Hour+24*time.Hour)) {
-		t.Fatal("a sustained failure must re-escalate once the 24h gap has passed")
+	if tr.observe("relay.run", classPGInRecovery, base) {
+		t.Fatal("the first cause stays latched")
 	}
 }

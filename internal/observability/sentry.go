@@ -393,7 +393,10 @@ func CaptureBackground(op string, err error) {
 	class := errorClass(err)
 	if transientClasses[class] {
 		slog.Warn("background.transient", "op", op, "err", err)
-		if cronShapedOps[op] || backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
+		if shutdownClasses[class] {
+			return
+		}
+		if cronShapedOps[op] || backgroundTransientRate.observe(op, class, backgroundTransientRate.clock()) {
 			sentry.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", op)
 				scope.SetTag("error_class", class)
