@@ -313,7 +313,7 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		}()
 
 		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
-		go runRelayLoop(rootCtx, relay, relayInterval)
+		go runRelayLoop(rootCtx, relay, pgRepo, relayInterval)
 		slog.Info("outbox.relay.started", "interval", relayInterval)
 	}
 
