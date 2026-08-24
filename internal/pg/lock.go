@@ -102,7 +102,9 @@ func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) f
 		return func() {}
 	}
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		beat := s.beat()
 		t := time.NewTicker(beat)
 		defer t.Stop()
@@ -124,7 +126,14 @@ func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) f
 			}
 		}
 	}()
-	return func() { close(done) }
+	// Join, do not merely signal. *pgx.Conn is not safe for concurrent use
+	// (pgx v5 conn.go: "Conn is a PostgreSQL connection handle. It is not
+	// safe for concurrent usage"), and a Ping still in flight when the
+	// deferred pg_advisory_unlock runs collides on the same connection.
+	return func() {
+		close(done)
+		<-exited
+	}
 }
 
 func (s *lockSession) Close(ctx context.Context) {

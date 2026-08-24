@@ -79,3 +79,42 @@ func TestWithSiteLock_NoHookIsANoOp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, conn.pings.Load(), "without a hook there is nobody to tell, so do not pay for the probe")
 }
+
+type slowPingConn struct {
+	deadConn
+	inFlight atomic.Bool
+	overlap  atomic.Bool
+}
+
+func (c *slowPingConn) Ping(ctx context.Context) error {
+	c.inFlight.Store(true)
+	defer c.inFlight.Store(false)
+	c.pings.Add(1)
+	select {
+	case <-ctx.Done():
+	case <-time.After(200 * time.Millisecond):
+	}
+	return nil
+}
+
+func (c *slowPingConn) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	if c.inFlight.Load() {
+		c.overlap.Store(true)
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func TestWithSiteLock_UnlockNeverRunsBesideAnInFlightPing(t *testing.T) {
+	conn := &slowPingConn{}
+	sess := &lockSession{conn: conn, onLost: func() {}, heartbeat: 10 * time.Millisecond}
+
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func() error {
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.False(t, conn.overlap.Load(),
+		"*pgx.Conn is not safe for concurrent use; an unlock racing a heartbeat ping returns "+
+			"conn busy and forces the session closed")
+}

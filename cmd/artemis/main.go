@@ -527,6 +527,10 @@ func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 		h.Repos = d.repoStore
 		h.GitHubApp = d.appClient
 	}
+	if rs, ok := d.registry.(handler.ReservationStore); ok {
+		h.Reservations = rs
+		h.ReservationGrace = cfg.Registry.ReservationGrace
+	}
 	return h
 }
 
