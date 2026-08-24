@@ -16,7 +16,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 17, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Seventeen entries: nine change a response an API caller reads, one changes how a client disconnect is logged and metered, three change a value stored in the audit trail, one changes a cancellation guarantee, two change operator configuration, and one changes how errors group in Sentry.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Seventeen entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
 ## Summary
 
@@ -326,7 +326,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 **New:** the fingerprint is `{op, class}` for a non-transient error and `{op, "transient", class}` for an escalated transient, where `class` is a closed token drawn from `errorClass` (`internal/observability/errorclass.go`). The token set is the named classes — `ctx.canceled`, `ctx.deadline`, `grpc.canceled`, `grpc.deadline`, `grpc.<Code>`, `pg.in_recovery`, `pg.lock_timeout`, `pg.conn_closed`, `io.unexpected_eof`, `net.dns_temporary`, `net.dns` — plus `pg.<SQLSTATE>` for any other Postgres error and `unclassified` for the rest. It is derived from the error class, never from the message, so hosts, ports, ids and durations cannot multiply the bucket count.
 
-**This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, 1 × `net.DNSError` — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
+**This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, and 18 × `net.DNSError` on 2026-08-23 alone (a further 3 landed in `ARTEMIS-8`) — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
 
 **Tag rename:** `transient_sustained: "true"` is replaced by `transient: "true"` plus a new `error_class` tag carrying the token. Any saved search or alert rule filtering on `transient_sustained` stops matching.
 
