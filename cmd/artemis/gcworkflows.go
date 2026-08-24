@@ -73,6 +73,7 @@ const (
 	relayInterval        = 5 * time.Second
 	outboxStuckAfter     = 15 * time.Minute
 	outboxProbeEvery     = 12
+	outboxProbeTimeout   = 5 * time.Second
 	opOutboxBacklog      = "outbox.backlog"
 )
 
@@ -121,7 +122,9 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, backlog outboxBacklo
 }
 
 func observeOutboxBacklog(ctx context.Context, backlog outboxBacklogSource, state *backlogState) {
-	count, oldest, err := backlog.OutboxBacklog(ctx)
+	probeCtx, cancel := context.WithTimeout(ctx, outboxProbeTimeout)
+	defer cancel()
+	count, oldest, err := backlog.OutboxBacklog(probeCtx)
 	if err != nil {
 		slog.WarnContext(ctx, "outbox.backlog.unreadable", "err", err)
 		return

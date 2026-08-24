@@ -259,3 +259,51 @@ func TestRunRelayLoop_DoesNotPageWhenTheBacklogIsUnreadable(t *testing.T) {
 		"a query that failed vouches for none of the numbers beside it; an unreadable backlog is "+
 			"unknown, and paging on it would fire every time Postgres blinks")
 }
+
+type blockingBacklog struct {
+	mu      sync.Mutex
+	nProbes int
+}
+
+func (b *blockingBacklog) OutboxBacklog(ctx context.Context) (int, time.Duration, error) {
+	b.mu.Lock()
+	b.nProbes++
+	b.mu.Unlock()
+	<-ctx.Done()
+	return 0, 0, ctx.Err()
+}
+
+func (b *blockingBacklog) probes() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.nProbes
+}
+
+func TestRunRelayLoop_KeepsDrainingWhenTheBacklogProbeHangs(t *testing.T) {
+	trapCaptures(t)
+	src := &erroringOutbox{}
+	relay := &worker.Relay{Source: src, Publisher: &fakePublisher{}, Batch: 10, Now: time.Now}
+	backlog := &blockingBacklog{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { runRelayLoop(ctx, relay, backlog, time.Millisecond); close(done) }()
+
+	require.Eventually(t, func() bool { return backlog.probes() >= 1 }, 5*time.Second, time.Millisecond,
+		"the loop must reach its first backlog probe")
+	require.Positive(t, outboxProbeTimeout, "the probe must carry its own deadline")
+
+	before := src.calls()
+	require.Eventually(t, func() bool { return src.calls() > before+2 },
+		outboxProbeTimeout*3, 10*time.Millisecond,
+		"a backlog probe that never returns must not stall the only goroutine that drains the outbox "+
+			"for longer than its own deadline")
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runRelayLoop must return when ctx is cancelled even while a probe is hung")
+	}
+}
