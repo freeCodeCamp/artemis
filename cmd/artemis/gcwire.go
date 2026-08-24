@@ -158,52 +158,7 @@ type aliasGetter interface {
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 }
 
-func siteSegment(format string) (string, error) {
-	slash := strings.IndexByte(format, '/')
-	if slash < 0 {
-		return "", fmt.Errorf("key format %q must contain '/' after the site segment", format)
-	}
-	return format[:slash], nil
-}
-
-func aliasTails(deployFormat string, formats ...string) ([]string, error) {
-	deploySeg, err := siteSegment(deployFormat)
-	if err != nil {
-		return nil, fmt.Errorf("DEPLOY_PREFIX_FORMAT: %w", err)
-	}
-	tails := make([]string, 0, len(formats))
-	for _, f := range formats {
-		if !strings.Contains(f, "<site>") {
-			return nil, fmt.Errorf("alias key format %q must contain <site>", f)
-		}
-		seg, err := siteSegment(f)
-		if err != nil {
-			return nil, err
-		}
-		if seg != deploySeg {
-			return nil, fmt.Errorf(
-				"alias key format %q has site segment %q but DEPLOY_PREFIX_FORMAT %q has %q: "+
-					"the GC sweep enumerates storage dirnames rendered from the deploy prefix, so an alias "+
-					"key under a different site segment is unreachable and would 404 for every site",
-				f, seg, deployFormat, deploySeg)
-		}
-		tail := f[len(seg)+1:]
-		if strings.Contains(tail, "<site>") {
-			return nil, fmt.Errorf(
-				"alias key format %q keeps a <site> token after its site segment: only the segment is "+
-					"rendered from the dirname, so the rest is fetched literally and 404s for every site",
-				f)
-		}
-		tails = append(tails, tail)
-	}
-	return tails, nil
-}
-
-func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...string) (func(context.Context, sitekey.Dirname) (map[string]struct{}, error), error) {
-	tails, err := aliasTails(deployFormat, formats...)
-	if err != nil {
-		return nil, err
-	}
+func newLiveAliasReader(getter aliasGetter, tails ...string) func(context.Context, sitekey.Dirname) (map[string]struct{}, error) {
 	return func(ctx context.Context, dirname sitekey.Dirname) (map[string]struct{}, error) {
 		out := map[string]struct{}{}
 		for _, tail := range tails {
@@ -219,7 +174,7 @@ func newLiveAliasReader(getter aliasGetter, deployFormat string, formats ...stri
 			}
 		}
 		return out, nil
-	}, nil
+	}
 }
 
 func gcPolicy(c config.CleanupConfig) gc.Policy {
@@ -249,11 +204,11 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 	if err != nil {
 		return nil, err
 	}
-	liveAliases, err := newLiveAliasReader(r2c, cfg.DeployPrefixFormat,
-		cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+	tails, err := cfg.AliasKeyTails()
 	if err != nil {
 		return nil, err
 	}
+	liveAliases := newLiveAliasReader(r2c, tails...)
 	tmpl, err := handler.NewDeployPrefixTemplate(cfg.DeployPrefixFormat)
 	if err != nil {
 		return nil, err

@@ -269,8 +269,7 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		if layoutErr != nil {
 			return fmt.Errorf("backfill layout: %w", layoutErr)
 		}
-		tails, tailErr := aliasTails(cfg.DeployPrefixFormat,
-			cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+		tails, tailErr := cfg.AliasKeyTails()
 		if tailErr != nil {
 			return fmt.Errorf("backfill alias formats: %w", tailErr)
 		}

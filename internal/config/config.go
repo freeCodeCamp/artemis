@@ -440,13 +440,8 @@ func (c *Config) validate() error {
 	if err != nil {
 		return err
 	}
-	for _, a := range []struct{ env, format string }{
-		{"ALIAS_PRODUCTION_KEY_FORMAT", c.Aliases.ProductionKeyFormat},
-		{"ALIAS_PREVIEW_KEY_FORMAT", c.Aliases.PreviewKeyFormat},
-	} {
-		if err := validateAliasKeyFormat(a.env, a.format, deploySeg); err != nil {
-			return err
-		}
+	if _, err := c.aliasKeyTails(deploySeg); err != nil {
+		return err
 	}
 	for env, f := range map[string]string{
 		"PUBLIC_URL_PRODUCTION_FORMAT": c.Aliases.ProductionURLFormat,
@@ -541,24 +536,49 @@ func validateDeployPrefixFormat(fmtStr string) (string, error) {
 	return seg, nil
 }
 
-func validateAliasKeyFormat(env, format, deploySeg string) error {
+func validateAliasKeyFormat(env, format, deploySeg string) (string, error) {
 	if !strings.Contains(format, "<site>") {
-		return fmt.Errorf("invalid %s %q: must contain <site>", env, format)
+		return "", fmt.Errorf("invalid %s %q: must contain <site>", env, format)
 	}
 	seg, err := keyFormatSiteSegment(format)
 	if err != nil {
-		return fmt.Errorf("invalid %s %q: %w", env, format, err)
+		return "", fmt.Errorf("invalid %s %q: %w", env, format, err)
 	}
 	if seg != deploySeg {
-		return fmt.Errorf("invalid %s %q: site segment %q must equal DEPLOY_PREFIX_FORMAT's %q, "+
+		return "", fmt.Errorf("invalid %s %q: site segment %q must equal DEPLOY_PREFIX_FORMAT's %q, "+
 			"or the alias is unreachable for every site and a whole-site purge cannot find it",
 			env, format, seg, deploySeg)
 	}
-	if strings.Contains(format[len(seg)+1:], "<site>") {
-		return fmt.Errorf("invalid %s %q: keeps a <site> token after its site segment, which is "+
+	tail := format[len(seg)+1:]
+	if strings.Contains(tail, "<site>") {
+		return "", fmt.Errorf("invalid %s %q: keeps a <site> token after its site segment, which is "+
 			"fetched literally rather than rendered", env, format)
 	}
-	return nil
+	return tail, nil
+}
+
+func (c *Config) AliasKeyTails() ([]string, error) {
+	deploySeg, err := validateDeployPrefixFormat(c.DeployPrefixFormat)
+	if err != nil {
+		return nil, err
+	}
+	return c.aliasKeyTails(deploySeg)
+}
+
+func (c *Config) aliasKeyTails(deploySeg string) ([]string, error) {
+	formats := []struct{ env, format string }{
+		{"ALIAS_PRODUCTION_KEY_FORMAT", c.Aliases.ProductionKeyFormat},
+		{"ALIAS_PREVIEW_KEY_FORMAT", c.Aliases.PreviewKeyFormat},
+	}
+	tails := make([]string, 0, len(formats))
+	for _, a := range formats {
+		tail, err := validateAliasKeyFormat(a.env, a.format, deploySeg)
+		if err != nil {
+			return nil, err
+		}
+		tails = append(tails, tail)
+	}
+	return tails, nil
 }
 
 func keyFormatSiteSegment(format string) (string, error) {
