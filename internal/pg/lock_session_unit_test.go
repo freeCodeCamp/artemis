@@ -27,16 +27,29 @@ func (f *fakeSessionConn) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 
 func (f *fakeSessionConn) Close(context.Context) error { f.closed++; return nil }
 
-func TestLockSession_UnlockFailure_ClosesConnAndSurfaces(t *testing.T) {
+var errClosureVerdict = errors.New("the closure's own verdict")
+
+func TestLockSession_UnlockFailure_ClosesConnWithoutPromoting(t *testing.T) {
 	fc := &fakeSessionConn{failUnlock: true}
 	s := &lockSession{conn: fc}
 
 	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func() error { return nil })
 
-	require.Error(t, err, "a failed advisory unlock must surface, not be swallowed into a stranded lock")
-	assert.Contains(t, err.Error(), "unlock")
+	require.NoError(t, err,
+		"closing the session conn releases every session-scoped advisory lock, so a failed unlock "+
+			"is informational; promoting it makes every caller read committed work as a failure")
 	assert.GreaterOrEqual(t, fc.closed, 1,
 		"on unlock failure the session conn is closed to force-release the advisory lock (no writer starvation for the rest of the GC run)")
+}
+
+func TestLockSession_UnlockFailure_KeepsTheClosureError(t *testing.T) {
+	fc := &fakeSessionConn{failUnlock: true}
+	s := &lockSession{conn: fc}
+
+	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func() error { return errClosureVerdict })
+
+	require.ErrorIs(t, err, errClosureVerdict,
+		"the closure's error is the caller's answer; a later unlock failure must not replace it")
 }
 
 func TestLockSession_UnlockSuccess_NoClose_NoError(t *testing.T) {
