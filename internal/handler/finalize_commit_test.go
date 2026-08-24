@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,6 +114,27 @@ func TestDeployFinalize_AuditsTheAliasFailure(t *testing.T) {
 		"the marker is committed and unindexed even though nothing went live; reindex will adopt it")
 	assert.Equal(t, "failure", fa.events[0].Outcome)
 	assert.Equal(t, "alias", fa.events[0].Detail["stage"])
+}
+
+func TestDeployFinalize_AuditsTheRegistryReadFailure(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, fa := newFinalizeHandlers(t, store)
+	h.Registry.(*fakeRegistry).getErr = errors.New("valkey down")
+
+	w := callFinalize(t, h, jwt, deployID)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "registry_read_failed")
+	assert.Equal(t, 1, strings.Count(w.Body.String(), `"error"`),
+		"one request, one body")
+	require.Len(t, fa.events, 1,
+		"the marker is already committed to r2; a stage that destroys nothing still owes an audit row")
+	assert.Equal(t, "deploy.finalize", fa.events[0].Action)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
+	assert.Equal(t, "registry", fa.events[0].Detail["stage"])
+	assert.Equal(t, "preview", fa.events[0].Detail["mode"])
 }
 
 func TestSitePromote_RetriesTheAliasIndexWrite(t *testing.T) {

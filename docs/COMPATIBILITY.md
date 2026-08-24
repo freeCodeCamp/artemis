@@ -269,7 +269,7 @@ A purge refused before it reaches R2 — by the site lock, or by a missing tombs
 
 ## 13 — A lock-release failure no longer fails the request it followed
 
-**Release:** unreleased. Commits `469ce44`, `fd9260d`.
+**Release:** unreleased. Commits `469ce44`, `9202659`.
 
 **Old:** the deferred unlock inside `lockSession.WithSiteLock` overwrote the named return whenever `pg_advisory_unlock` failed — `if err == nil { err = fmt.Errorf("site unlock %s: %w", …) }`. Seven endpoints read that error as "the work failed" before checking whether their own closure had already succeeded, so committed work could answer `502 site_lock_failed` with no audit row: `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}?purge=true`, `DELETE /api/site/{site}/deploys/{id}`, `POST …/deploys/{id}/restore`, `POST …/promote`, `POST …/rollback` and `POST /api/deploy/{id}/finalize`. On the first four the closure had already written its own JSON body, so the response carried **two concatenated JSON objects**. On promote, rollback and finalize the alias was already in R2 and Caddy was already serving the new deploy while the caller was told `502`.
 
@@ -285,7 +285,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 ## 14 — `finalize` retries its index write and audits a partial commit
 
-**Release:** unreleased. Commit `bd227fb`.
+**Release:** unreleased. Commit `9e81645`.
 
 **Old:** `DeployFinalize` wrote the R2 marker, published the alias, then wrote the Postgres row once. A fault on that last leg answered `502 pg_write_failed` and wrote **no audit row at all**, leaving a marked and published deploy with no index row — the `reindex` class `drift-detect` reports and only `artemis reconcile --apply` repairs. `promote` and `rollback` had the identical R2-then-Postgres window, and nothing reconciles R2 aliases against the `aliases` table.
 
