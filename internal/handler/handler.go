@@ -99,6 +99,12 @@ type ReservationStore interface {
 	Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname, until time.Time, by string) (registry.Reservation, error)
 }
 
+// ReservationReverser restores a reserved name to its owner. The grace
+// period promises a way back; without this it promises nothing.
+type ReservationReverser interface {
+	Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
 }

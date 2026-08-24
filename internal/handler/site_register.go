@@ -102,6 +102,9 @@ func (h *Handlers) SiteRegister(w http.ResponseWriter, r *http.Request) {
 	site, err := h.Registry.Register(r.Context(), req.Slug, teams, login)
 	if err != nil {
 		switch {
+		case errors.Is(err, registry.ErrReserved):
+			writeError(w, http.StatusConflict, "site_reserved",
+				"site name is reserved after a delete; undelete it or wait for the reclaim")
 		case errors.Is(err, registry.ErrAlreadyExists):
 			writeError(w, http.StatusConflict, "already_exists", "site is already registered")
 		default:
@@ -237,6 +240,13 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if !slugRe.MatchString(string(slug)) {
 		writeError(w, http.StatusBadRequest, "invalid_slug",
 			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
+		return
+	}
+
+	// ADR 0006 retires ?purge=true. Every delete unpublishes and reserves;
+	// reclaiming early is an approver-gated release, not a query flag.
+	if h.Reservations != nil {
+		h.siteDeleteReserving(w, r, slug)
 		return
 	}
 
@@ -433,4 +443,39 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	h.logAction(r.Context(), "site.delete", "success")
 	h.auditFromScope(r.Context(), "site.delete", "success", nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SiteUndelete implements POST /api/site/{slug}/undelete — returns a
+// reserved name to its owner before the grace period expires. Authz:
+// caller in h.RegistryAuthzTeam.
+func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
+	if err := h.requireRegistryAuthz(w, r); err != nil {
+		return
+	}
+	slug := sitekey.Slug(chi.URLParam(r, "slug"))
+	if !slugRe.MatchString(string(slug)) {
+		writeError(w, http.StatusBadRequest, "invalid_slug",
+			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
+		return
+	}
+	reverser, ok := h.Registry.(ReservationReverser)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "reservation store not configured")
+		return
+	}
+	res, err := reverser.Undelete(r.Context(), slug)
+	if err != nil {
+		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+		h.auditFromScope(r.Context(), "site.undelete", "failure", nil)
+		writeRegistryDeleteError(w, r, err)
+		return
+	}
+	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+	h.logAction(r.Context(), "site.undelete", "success")
+	h.auditFromScope(r.Context(), "site.undelete", "success", nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"slug":           string(res.Slug),
+		"prevProduction": res.PrevProduction,
+		"prevPreview":    res.PrevPreview,
+	})
 }

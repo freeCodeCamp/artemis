@@ -86,6 +86,7 @@ func newWithUploadTimeout(h *handler.Handlers, uploadTimeout time.Duration) http
 			r.Post("/site/register", h.SiteRegister)
 			r.Patch("/site/{slug}", h.SiteUpdate)
 			r.Delete("/site/{slug}", h.SiteDelete)
+			r.Post("/site/{slug}/undelete", h.SiteUndelete)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
 			r.Delete("/site/{site}/deploys/{deployId}", h.SiteDeployDelete)
 			r.Post("/site/{site}/deploys/{deployId}/restore", h.SiteDeployRestore)

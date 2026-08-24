@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 19, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 20, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Nineteen entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Twenty entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
 ## Summary
 
@@ -41,6 +41,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 17 | Alias and deploy key formats are validated at boot, not at first use | unreleased | Operators |
 | 18 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | unreleased | Sentry and alert-rule readers |
 | 19 | `DELETE /api/site/{slug}` takes the site dark and reserves its name | unreleased | API callers |
+| 20 | `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new | unreleased | API callers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -403,6 +404,24 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **`audit_log`:** `site.delete` now writes an `outcome=failure` row carrying `detail.stage`, one of `unpublish` or `reserve`. As in entries 11 and 14, `outcome` is unconstrained `TEXT` so no migration is needed.
 
-**Not yet implemented, and tracked:** `undelete` (step 5), blocking registration of a reserved name (step 6), and retiring `?purge=true` in favour of an approver-gated release endpoint (step 7). Until step 6 lands, a reserved name is held in the registry but the register path's enforcement is incomplete — see `.scratchpad/dossier/2026-08-24-artemis-zero-debt/ADR-0006-STATE.md`.
+**Steps 5, 6 and 7 land in entry 20.**
 
 **Action:** any caller that relied on `DELETE` freeing the slug immediately must wait out the grace period or use the release path once step 7 ships. Any caller that relied on `DELETE` leaving the site serving was relying on the defect this fixes.
+
+## 20 — `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new
+
+**Release:** unreleased. Completes `docs/design/0006-unpublish-is-not-reclaim.md`, steps 5-7.
+
+**`?purge=true` no longer reclaims.** Once a delete unpublishes and reserves, the flag would have meant "skip the grace period and destroy the bytes now" — the one irreversible action in this design, sharing a URL and a permission with the safe form. A query parameter that silently escalates an operation from reversible to final cannot be read from a route table, and the two forms need different authorization: `REGISTRY_AUTHZ_TEAM` may delete, only `REPO_APPROVE_AUTHZ_TEAM` may release early. The flag is now accepted and ignored: a `DELETE` with it behaves exactly like a `DELETE` without it.
+
+**This fails closed.** The destructive reading of the flag is the one that stops working, so a caller that sent it gets *less* destruction than it asked for, never more. `universe-cli` never sent it (`src/lib/proxy-client.ts:667-674`), so no shipped caller is affected.
+
+**Registering a reserved name is `409 site_reserved`, not `502`.** `internal/pg/registry.go:56` already returned `registry.ErrReserved`; the handler's error switch did not name it and fell through to a generic upstream failure. A caller can act on the difference between "someone holds this name for another two days" and "the registry is broken". This closes lifecycle gap E, where re-registering a deleted slug inherited the previous owner's live production bytes.
+
+**`POST /api/site/{slug}/undelete`** returns a reserved name to its owner before the grace expires. Authz: `REGISTRY_AUTHZ_TEAM`. `200` with `{slug, prevProduction, prevPreview}` — the two alias pointers captured at delete time, so the caller knows what re-publishing would restore. `404` if the name is not reserved. Without this the grace period promised something nobody could deliver: `restore` is per-deploy and nothing restored a site.
+
+**`audit_log`** gains `site.undelete` with `success` and `failure` outcomes.
+
+**Still open, tracked as `#54` and `#55`:** the reclaim of reserved-and-expired sites runs on the existing `tombstone-purge` cadence and does not yet sweep the origin prefix. An approver-gated early-release endpoint is not implemented; early release today means waiting out the grace period.
+
+**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
