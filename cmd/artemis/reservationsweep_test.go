@@ -34,7 +34,7 @@ type recordingReleaser struct {
 	err      error
 }
 
-func (r *recordingReleaser) Delete(_ context.Context, slug sitekey.Slug) error {
+func (r *recordingReleaser) ReleaseReservation(_ context.Context, slug sitekey.Slug) error {
 	if r.err != nil {
 		return r.err
 	}
@@ -149,4 +149,32 @@ func TestSweepExpiredReservations_KeepsTheNameWhenTheReclaimFails(t *testing.T) 
 	assert.Zero(t, n)
 	assert.Empty(t, rel.released,
 		"freeing the name while its bytes are still at the origin lets a new owner inherit them")
+}
+
+func TestSweepExpiredReservations_SkipsARowWhoseClaimWasLostAndKeepsGoing(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{
+		{Slug: "gone", ReservedUntil: fixedNow().Add(-time.Hour)},
+		{Slug: "still-here", ReservedUntil: fixedNow().Add(-time.Hour)},
+	}}
+	rel := &refusingReleaser{refuse: "gone"}
+
+	n, err := sweepExpiredReservations(context.Background(), src, rel, reclaimDeps{}, fixedNow, false)
+
+	require.NoError(t, err, "one row that stopped being an expired reservation is not a sweep failure")
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []sitekey.Slug{"still-here"}, rel.released,
+		"a name the guard refused must not be counted as released")
+}
+
+type refusingReleaser struct {
+	refuse   sitekey.Slug
+	released []sitekey.Slug
+}
+
+func (r *refusingReleaser) ReleaseReservation(_ context.Context, slug sitekey.Slug) error {
+	if slug == r.refuse {
+		return registry.ErrNotFound
+	}
+	r.released = append(r.released, slug)
+	return nil
 }

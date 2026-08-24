@@ -67,7 +67,7 @@ func (s *RegistryStore) Undelete(ctx context.Context, slug sitekey.Slug) (regist
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := scanReservation(tx.QueryRow(ctx,
 			`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
-			 FROM sites WHERE slug = $1 AND state = $2 FOR UPDATE`,
+			 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until > now() FOR UPDATE`,
 			slug, registry.StateReserved), &res); err != nil {
 			return err
 		}
@@ -85,6 +85,20 @@ func (s *RegistryStore) Undelete(ctx context.Context, slug sitekey.Slug) (regist
 	}
 	s.changed(slug)
 	return res, nil
+}
+
+func (s *RegistryStore) ReleaseReservation(ctx context.Context, slug sitekey.Slug) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sites WHERE slug = $1 AND state = $2 AND reserved_until < now()`,
+		slug, registry.StateReserved)
+	if err != nil {
+		return fmt.Errorf("pg release reservation %s: %w", slug, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return registry.ErrNotFound
+	}
+	s.changed(slug)
+	return nil
 }
 
 func (s *RegistryStore) ExpiredReservations(ctx context.Context, before time.Time, limit int) ([]registry.Reservation, error) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -21,7 +22,7 @@ type expiredReservationSource interface {
 }
 
 type reservationReleaser interface {
-	Delete(ctx context.Context, slug sitekey.Slug) error
+	ReleaseReservation(ctx context.Context, slug sitekey.Slug) error
 }
 
 // siteReclaimer moves a released site's remaining bytes off the origin
@@ -62,7 +63,13 @@ func sweepExpiredReservations(ctx context.Context, src expiredReservationSource,
 		if err := reclaimSiteBytes(ctx, deps, res.Slug); err != nil {
 			return released, err
 		}
-		if err := rel.Delete(ctx, res.Slug); err != nil {
+		if err := rel.ReleaseReservation(ctx, res.Slug); err != nil {
+			if errors.Is(err, registry.ErrNotFound) {
+				slog.WarnContext(ctx, "reservation.sweep.claim_lost",
+					"slug", res.Slug,
+					"detail", "the row stopped being an expired reservation after its bytes were trashed")
+				continue
+			}
 			return released, fmt.Errorf("reservation sweep release %s: %w", res.Slug, err)
 		}
 		released++
@@ -92,9 +99,10 @@ func runReservationSweep(ctx context.Context, src expiredReservationSource,
 
 // reclaimSiteBytes moves what remains at the origin prefix into trash and
 // records the tombstone that makes tombstone-purge responsible for it. It
-// runs only after the reservation has expired, so the slug cannot have been
-// re-registered — the register path answers 409 for a reserved name — which
-// is the guard that makes an origin-prefix move safe at all.
+// runs only after the reservation has expired, and RegistryStore.Undelete
+// refuses a reservation past its deadline, so no writer can return the row
+// to service between the snapshot and this move — which is the guard that
+// makes an origin-prefix move safe at all.
 func reclaimSiteBytes(ctx context.Context, deps reclaimDeps, slug sitekey.Slug) error {
 	if deps.Mover == nil || deps.Dirname == nil {
 		return nil
