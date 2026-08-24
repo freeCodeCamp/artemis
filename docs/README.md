@@ -172,11 +172,13 @@ Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to 
 | Signal                    | Monitor dataset | Condition                                                                                |
 | ------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
 | upstream faults           | Issues          | new issue where `op` in (`r2.*`, `valkey.*`, `github.*`)                                 |
-| workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `tombstone.purge`, `relay.run`, `drift.sweep`)   |
+| workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `tombstone.purge`, `relay.run`, `drift.sweep`, `outbox.backlog`) |
 | audit write failure       | Issues          | new issue `op=audit.record`                                                              |
 | dangerous drift           | Issues          | new issue where `op` in (`drift.aliased_missing`, `drift.unreadable`, `drift.selfcheck`) |
 | cron missed / failed      | Crons           | `tombstone-purge` / `drift-detect` missed or errored                                     |
 | HTTP error rate / latency | Spans           | 5xx rate or p99 on `POST /api/*` transactions                                            |
+
+`outbox.backlog` belongs on the relay row rather than a row of its own: it fires when the relay reports success while draining nothing (`cmd/artemis/gcworkflows.go:129-141`), which is a relay failure the `relay.run` row cannot see. `r2.ping` needs no new row — the `r2.*` glob on the upstream-faults row already matches it — but it does need weighting. Since a readyz R2 fault returns `200` degraded and keeps the pod in the Service (`internal/handler/readyz.go:66-75`), `op:r2.ping` is now the only signal that R2 is unreachable; it must not be deprioritised as a duplicate of a probe failure.
 
 The `drift-detect` cron stays silent when it finds only reclaimable drift. It sends an event only when a person must act. A green check-in with no event therefore means "the job ran and found nothing to do", and a missed check-in is the only signal that the job stopped running. Both rows above are needed: the Crons row proves the job runs, and the drift row carries what it found.
 

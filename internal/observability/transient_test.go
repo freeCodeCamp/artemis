@@ -90,3 +90,65 @@ func TestIsTransient_PlainEOFIsNotTransient(t *testing.T) {
 	require.False(t, isTransient(io.EOF), "a clean end-of-stream is a control value, not a fault")
 	require.False(t, isTransient(fmt.Errorf("relay: %w", io.EOF)))
 }
+
+func TestIsTransient_Artemis8LiveChainIsTransient(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := pgconn.ParseConfig("postgres://artemis:x@artemis-postgresql:5432/artemis?sslmode=disable")
+	require.NoError(t, err)
+	cfg.LookupFunc = func(context.Context, string) ([]string, error) {
+		return nil, &net.DNSError{
+			Err:         "server misbehaving",
+			Name:        "artemis-postgresql",
+			Server:      "10.11.0.10:53",
+			IsTemporary: true,
+		}
+	}
+
+	_, connErr := pgconn.ConnectConfig(context.Background(), cfg)
+	require.Error(t, connErr)
+	var connectErr *pgconn.ConnectError
+	require.ErrorAs(t, connErr, &connectErr,
+		"the chain must be the one pgconn really builds, not a hand-rolled lookalike")
+	require.Contains(t, connErr.Error(), "hostname resolving error: lookup artemis-postgresql on 10.11.0.10:53: server misbehaving")
+
+	live := fmt.Errorf("pg registry list: %w", connErr)
+	require.True(t, IsTransient(live))
+	require.Equal(t, classDNSTemporary, errorClass(live))
+}
+
+func TestIsTransient_DNSServerMisbehavingIsTransientWhicheverRcode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		err       *net.DNSError
+		wantClass string
+	}{
+		{"SERVFAIL", &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql", Server: "10.11.0.10:53", IsTemporary: true}, classDNSTemporary},
+		{"other bad rcode", &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql", Server: "10.11.0.10:53"}, classDNSResolver},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			live := fmt.Errorf("pg registry list: %w", errors.Join(fmt.Errorf("failed to connect: %w", tc.err)))
+			require.True(t, IsTransient(tc.err),
+				"Go stringifies SERVFAIL and REFUSED identically, so a classification that splits them splits on evidence the operator does not have")
+			require.True(t, IsTransient(live))
+			require.Equal(t, tc.wantClass, errorClass(live))
+		})
+	}
+}
+
+func TestErrorClass_DNSNotFoundKeepsItsOwnClass(t *testing.T) {
+	t.Parallel()
+
+	notFound := &net.DNSError{Err: "no such host", Name: "artemis-postgresql", IsNotFound: true}
+	require.Equal(t, classDNSNotFound, errorClass(notFound))
+	require.Equal(t, classDNSNotFound, errorClass(fmt.Errorf("failed to connect: %w", notFound)))
+	require.False(t, IsTransient(notFound),
+		"NXDOMAIN is the one DNS answer no retry can change; folding it into a transient token would silence a misconfigured hostname")
+
+	alsoTemporary := &net.DNSError{Err: "no such host", Name: "artemis-postgresql", IsNotFound: true, IsTemporary: true}
+	require.Equal(t, classDNSNotFound, errorClass(alsoTemporary),
+		"IsNotFound is tested before Temporary(), so a future stdlib setting both cannot demote NXDOMAIN")
+}

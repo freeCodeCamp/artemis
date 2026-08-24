@@ -24,6 +24,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
+	"github.com/freeCodeCamp/artemis/internal/retryconnect"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
@@ -106,60 +107,33 @@ func ClientOptions(cfg Config) *redis.Options {
 	}
 }
 
+func policy(window time.Duration) retryconnect.Policy {
+	return retryconnect.Policy{
+		Event:   "valkey.connect.retrying",
+		Window:  window,
+		Attempt: DialTimeout,
+		Base:    RetryBackoffBase,
+		Max:     RetryBackoffMax,
+	}
+}
+
 func NewWithRetry(ctx context.Context, cfg Config, window time.Duration) (*Store, error) {
-	return RetryConnect(ctx, window, DialTimeout, RetryBackoffBase, RetryBackoffMax,
+	return retryconnect.Do(ctx, policy(window),
 		func(ctx context.Context) (*Store, error) {
 			return New(ctx, cfg)
 		})
 }
 
-func connectWithin[T any](ctx context.Context, deadline time.Time, attempt time.Duration, connect func(context.Context) (T, error)) (T, error) {
-	budget := time.Until(deadline)
-	if attempt > 0 && attempt < budget {
-		budget = attempt
-	}
-	attemptCtx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
-	return connect(attemptCtx)
-}
-
-func RetryConnect[T any](ctx context.Context, window, attempt, base, max time.Duration, connect func(context.Context) (T, error)) (T, error) {
-	if window <= 0 {
-		return connect(ctx)
-	}
-
-	deadline := time.Now().Add(window)
-
-	backoff := base
-	for n := 1; ; n++ {
-		v, err := connectWithin(ctx, deadline, attempt, connect)
-		if err == nil {
-			return v, nil
-		}
-		if ctx.Err() != nil {
-			var zero T
-			return zero, ctx.Err()
-		}
-		if remaining := time.Until(deadline); remaining <= backoff {
-			var zero T
-			return zero, err
-		}
-		slog.Warn("valkey.connect.retrying",
-			"attempt", n,
-			"backoff", backoff,
-			"err", err)
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			var zero T
-			return zero, ctx.Err()
-		case <-timer.C:
-		}
-		if backoff *= 2; backoff > max {
-			backoff = max
-		}
-	}
+func NewClientWithRetry(ctx context.Context, cfg Config, window time.Duration) (*redis.Client, error) {
+	return retryconnect.Do(ctx, policy(window),
+		func(ctx context.Context) (*redis.Client, error) {
+			c := redis.NewClient(ClientOptions(cfg))
+			if err := c.Ping(ctx).Err(); err != nil {
+				_ = c.Close()
+				return nil, fmt.Errorf("valkey: ping %s: %w", cfg.Addr, err)
+			}
+			return c, nil
+		})
 }
 
 // Ping verifies the underlying connection. Cheap; safe to call on a

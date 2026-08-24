@@ -35,7 +35,6 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/teamcache"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
-	"github.com/redis/go-redis/v9"
 )
 
 // Build-time identity, injected via -ldflags "-X main.version=... -X main.commit=...".
@@ -433,18 +432,10 @@ func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, fun
 	if cfg.Registry.Valkey.Addr == "" {
 		return nil, func() {}, nil
 	}
-	client, err := valkey.RetryConnect(ctx, cfg.Registry.Valkey.RetryWindow, valkey.DialTimeout, valkey.RetryBackoffBase, valkey.RetryBackoffMax,
-		func(ctx context.Context) (*redis.Client, error) {
-			c := redis.NewClient(valkey.ClientOptions(valkey.Config{
-				Addr:     cfg.Registry.Valkey.Addr,
-				Password: cfg.Registry.Valkey.Password,
-			}))
-			if err := c.Ping(ctx).Err(); err != nil {
-				_ = c.Close()
-				return nil, fmt.Errorf("teamcache ping %s: %w", cfg.Registry.Valkey.Addr, err)
-			}
-			return c, nil
-		})
+	client, err := valkey.NewClientWithRetry(ctx, valkey.Config{
+		Addr:     cfg.Registry.Valkey.Addr,
+		Password: cfg.Registry.Valkey.Password,
+	}, cfg.Registry.Valkey.RetryWindow)
 	if err != nil {
 		return nil, func() {}, err
 	}

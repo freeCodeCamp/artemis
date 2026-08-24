@@ -47,6 +47,25 @@ func TestErrorClass_SameFaultDifferentHostsShareOneClass(t *testing.T) {
 		"the discriminator is the class, never the message, which embeds hosts, ports, ids and durations")
 }
 
+func TestErrorClass_DNSShapesGetDistinctClasses(t *testing.T) {
+	t.Parallel()
+
+	shapes := []error{
+		fmt.Errorf("pg registry list: %w", &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql", Server: "10.11.0.10:53", IsTemporary: true}),
+		fmt.Errorf("pg registry list: %w", &net.DNSError{Err: "server misbehaving", Name: "artemis-postgresql", Server: "10.11.0.10:53"}),
+		fmt.Errorf("pg registry list: %w", &net.DNSError{Err: "no such host", Name: "artemis-postgresql", IsNotFound: true}),
+	}
+
+	seen := make(map[string]bool, len(shapes))
+	for _, err := range shapes {
+		class := errorClass(err)
+		require.NotEmpty(t, class)
+		seen[class] = true
+	}
+
+	require.Len(t, seen, len(shapes), "three DNS faults with three different remedies must not share one Sentry issue")
+}
+
 func TestErrorClass_PlainErrorIsNotAGRPCStatus(t *testing.T) {
 	t.Parallel()
 

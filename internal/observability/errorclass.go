@@ -21,7 +21,8 @@ const (
 	classPGConnClosed  = "pg.conn_closed"
 	classUnexpectedEOF = "io.unexpected_eof"
 	classDNSTemporary  = "net.dns_temporary"
-	classDNSPermanent  = "net.dns"
+	classDNSResolver   = "net.dns_resolver"
+	classDNSNotFound   = "net.dns_notfound"
 	classUnclassified  = "unclassified"
 )
 
@@ -35,6 +36,7 @@ var transientClasses = map[string]bool{
 	classPGConnClosed:  true,
 	classUnexpectedEOF: true,
 	classDNSTemporary:  true,
+	classDNSResolver:   true,
 }
 
 var shutdownClasses = map[string]bool{
@@ -76,10 +78,14 @@ func errorClass(err error) string {
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		if dnsErr.Temporary() {
+		switch {
+		case dnsErr.IsNotFound:
+			return classDNSNotFound
+		case dnsErr.Temporary():
 			return classDNSTemporary
+		default:
+			return classDNSResolver
 		}
-		return classDNSPermanent
 	}
 	if code, ok := pg.SQLState(err); ok {
 		return "pg." + code
