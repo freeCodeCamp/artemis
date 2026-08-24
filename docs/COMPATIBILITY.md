@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 13, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 17, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Fifteen entries: nine change a response an API caller reads, one changes how a client disconnect is logged and metered, two change a value stored in the audit trail, one changes a cancellation guarantee, one changes operator configuration, and one changes how errors group in Sentry.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. Seventeen entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
 ## Summary
 
@@ -38,6 +38,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 14 | `finalize` retries its index write and audits a partial commit | unreleased | API callers and audit-trail readers |
 | 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
 | 16 | Background Sentry issues re-bucket by error class | unreleased | Sentry and alert-rule readers |
+| 17 | Alias and deploy key formats are validated at boot, not at first use | unreleased | Operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -325,7 +326,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 **New:** the fingerprint is `{op, class}` for a non-transient error and `{op, "transient", class}` for an escalated transient, where `class` is a closed token drawn from `errorClass` (`internal/observability/errorclass.go`). The token set is the named classes — `ctx.canceled`, `ctx.deadline`, `grpc.canceled`, `grpc.deadline`, `grpc.<Code>`, `pg.in_recovery`, `pg.lock_timeout`, `pg.conn_closed`, `io.unexpected_eof`, `net.dns_temporary`, `net.dns` — plus `pg.<SQLSTATE>` for any other Postgres error and `unclassified` for the rest. It is derived from the error class, never from the message, so hosts, ports, ids and durations cannot multiply the bucket count.
 
-**This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, 1 × `net.DNSError` — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
+**This re-buckets existing issues and breaks continuity.** `ARTEMIS-5` and `ARTEMIS-7` stop receiving events and go stale; Sentry creates new issues under the new fingerprints and offers no redirect. `ARTEMIS-7` currently holds four unrelated shapes — 12 × `57P03`, 4 × `io.ErrUnexpectedEOF`, 1 × `connLockError`, and 18 × `net.DNSError` on 2026-08-23 alone (a further 3 landed in `ARTEMIS-8`) — and has been retitled twice while the defect never changed; Sentry's own Seer analysis read the merged issue as a result. After this release those become up to four issues. Resolve the old issues by hand rather than letting them age out.
 
 **Tag rename:** `transient_sustained: "true"` is replaced by `transient: "true"` plus a new `error_class` tag carrying the token. Any saved search or alert rule filtering on `transient_sustained` stops matching.
 
@@ -336,3 +337,22 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 **Expect a bounded spike on the first incident after release.** A Postgres StatefulSet replacement can now raise roughly one event per pod per op per class in the window — on the order of tens of events across around a dozen issues, against roughly zero today. That is the intended trade and it is self-limiting.
 
 **Action:** expect new issue IDs for background failures. Re-point any alert rule, saved search or dashboard keyed on `ARTEMIS-5`, `ARTEMIS-7` or the `transient_sustained` tag. Enumerate those rules before the release, not after.
+
+## 17 — Alias and deploy key formats are validated at boot, not at first use
+
+**Release:** unreleased. Commits `46344c0`, `b22ce44`.
+
+**Old:** `Config.validate()` checked only that `DEPLOY_PREFIX_FORMAT` carried both a `<site>` and a `<ts>`/`<sha>` token. The stricter structural rules lived in `cmd/artemis/gcwire.go` `aliasTails`, which runs only when GC wiring runs — and GC wiring is gated on Postgres being configured. A deploy-only instance with no `DATABASE_URL` therefore booted with a malformed key format and failed later, at the first operation that rendered a key, or never.
+
+**New:** `internal/config/config.go` enforces the rules at `Load()`, before anything else starts, for `DEPLOY_PREFIX_FORMAT`, `ALIAS_PRODUCTION_KEY_FORMAT` and `ALIAS_PREVIEW_KEY_FORMAT`. A violation is a boot failure with a named variable and a reason. Four rules:
+
+- The site segment — everything before the first `/` — must contain `<site>` (`config.go:526`). `sites/<site>/deploys/<ts>-<sha>/` is now refused, because its segment is the literal `sites`.
+- The site segment must not contain `<ts>` or `<sha>` (`config.go:531`).
+- Each alias format's site segment must equal `DEPLOY_PREFIX_FORMAT`'s, or the alias is unreachable for every site and a whole-site purge cannot find it.
+- An alias format must name an object after its site segment. `<site>/` is refused, because it renders to the bare site prefix and the purge's unpublish stage would `MovePrefix` the whole site instead of one alias object.
+
+**Consequence:** a configuration that previously booted and misbehaved now refuses to boot. That is the intended direction — the failure it prevents is a purge moving an entire site — but it is a behaviour change for anyone running a non-default format, and specifically for a deploy-only instance where the old check never ran at all.
+
+Production's format is `<site>.freecode.camp/deploys/<ts>-<sha>/` with aliases `<site>.freecode.camp/production` and `/preview`, and all three pass every rule. Verified against the live `artemis-env` ConfigMap.
+
+**Action:** if you run artemis outside freeCodeCamp production with a custom `DEPLOY_PREFIX_FORMAT` or alias format, check it against the four rules before upgrading. A boot failure names the variable and the rule it broke.

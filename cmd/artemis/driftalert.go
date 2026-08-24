@@ -47,8 +47,8 @@ func classifyDrift(res sweepResult) driftVerdict {
 		return driftVerdict{
 			Op: opDriftReclaimable,
 			Err: fmt.Errorf(
-				"%d deploys are reclaimable across %s (>= %d): storage is accruing faster than it is "+
-					"collected; run `artemis reconcile <site> --apply` for each and find what stopped expiring",
+				"%d deploys are reclaimable across %s (>= %d): these bytes have no index row and are "+
+					"past the grace window; run `artemis reconcile <site> --apply` for each",
 				reindex+tombstone, strings.Join(sites, ", "), reclaimableAlertThreshold),
 		}
 	}

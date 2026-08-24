@@ -188,3 +188,55 @@ func TestSiteRollback_RetriesTheAliasIndexWrite(t *testing.T) {
 	assert.Equal(t, "site.rollback", fa.events[0].Action)
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }
+
+func TestSitePromote_AuditsTheIndexFailureAfterTheAliasIsLive(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	store.aliases["www/preview"] = deployID
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	h.Index = &fakeIndex{fail: true}
+	fa := &fakeAudit{}
+	h.Audit = fa
+
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
+		"/api/site/www/promote", nil,
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SitePromote,
+	)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Equal(t, deployID, store.aliases["www/production"],
+		"the production alias is already rewritten and caddy is already serving it")
+	require.Len(t, fa.events, 1,
+		"production traffic moved; a 502 that leaves no audit row makes the move invisible")
+	assert.Equal(t, "site.promote", fa.events[0].Action)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
+	assert.Equal(t, "index", fa.events[0].Detail["stage"])
+}
+
+func TestSiteRollback_AuditsTheIndexFailureAfterTheAliasIsLive(t *testing.T) {
+	from := "20260420-141522-abc1234"
+	to := "20260419-101010-def5678"
+	store := newFakeR2()
+	store.objects["www/deploys/"+to+"/index.html"] = []byte("hi")
+	store.aliases["www/production"] = from
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	h.Index = &fakeIndex{fail: true}
+	fa := &fakeAudit{}
+	h.Audit = fa
+
+	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
+		"/api/site/www/rollback", []byte(`{"to":"`+to+`"}`),
+		contextWithLogin(context.Background(), "alice", "tok"),
+		h.SiteRollback,
+	)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Equal(t, to, store.aliases["www/production"],
+		"the rollback already moved production traffic back")
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "site.rollback", fa.events[0].Action)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
+	assert.Equal(t, "index", fa.events[0].Detail["stage"])
+}

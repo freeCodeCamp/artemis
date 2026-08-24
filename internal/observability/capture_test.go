@@ -200,7 +200,8 @@ func TestCaptureBackground_SustainedTransientEscalatesOnce(t *testing.T) {
 	CaptureBackground("relay.run", transientErr)
 	sentry.CurrentHub().Flush(time.Second)
 
-	require.Len(t, rt.events, 1, "3rd consecutive transient must escalate exactly once")
+	require.Len(t, rt.events, 1,
+		"the first transient escalates; the next three fall inside the 24h cooldown")
 	require.Equal(t, "relay.run", rt.events[0].Tags["op"])
 	require.Equal(t, "true", rt.events[0].Tags["transient"])
 	require.Equal(t, "pg.in_recovery", rt.events[0].Tags["error_class"])

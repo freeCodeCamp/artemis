@@ -125,3 +125,14 @@ func TestLoad_ReturnsTheAliasKeyTailsInProductionThenPreviewOrder(t *testing.T) 
 		"cmd/artemis/main.go picks tails[0] for mode==production and tails[1] otherwise, so a swapped "+
 			"order writes every production alias key at the preview tail")
 }
+
+func TestLoad_RejectsAnAliasKeyFormatWithNoTail(t *testing.T) {
+	configtest.Hermetic(t, EnvKeys(), aliasKeyEnv())
+	t.Setenv("ALIAS_PRODUCTION_KEY_FORMAT", "<site>/")
+
+	_, err := Load()
+	require.ErrorContains(t, err, "ALIAS_PRODUCTION_KEY_FORMAT")
+	require.ErrorContains(t, err, "names no object after its site segment",
+		"an alias key that ends at the site segment renders to the bare site prefix, so the purge "+
+			"unpublish stage would MovePrefix the whole site instead of one alias object")
+}

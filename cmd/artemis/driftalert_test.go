@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -167,4 +168,21 @@ func TestAlertOnDrift_SendsNothingOnACleanSweep(t *testing.T) {
 	require.NoError(t, alertOnDrift(context.Background(), healthySweep()))
 
 	assert.False(t, called, "silence is the contract when there is nothing for a person to do")
+}
+
+func TestClassifyDrift_ReclaimableAlertClaimsNoTrendItDidNotMeasure(t *testing.T) {
+	res := healthySweep()
+	for i := 0; i < reclaimableAlertThreshold; i++ {
+		res.Reports[0].Tombstone = append(res.Reports[0].Tombstone, fmt.Sprintf("d%d", i))
+	}
+
+	v := classifyDrift(res)
+
+	require.Equal(t, opDriftReclaimable, v.Op)
+	require.Error(t, v.Err)
+	assert.NotContains(t, v.Err.Error(), "accruing",
+		"one sweep sees one count; it cannot know whether the backlog grew, and production has "+
+			"reported an identical 35 on five consecutive nights while this sentence claimed growth")
+	assert.Contains(t, v.Err.Error(), "artemis reconcile",
+		"an alert a human must answer has to carry the command that answers it")
 }
