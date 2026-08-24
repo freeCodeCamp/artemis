@@ -51,7 +51,7 @@ Non-goals here: multi-region, connection pooling, capacity scaling (0002 covers 
 
 **(c) `audit_log` needs a row-count assertion, not a presence assertion.** The drill prints `count(*)` for all six tables (`08:126-133`) but asserts a count for only one of them, `sites` (`08:140`). The remaining five, and `audit_log` when it is added, pass on presence alone — a restored-but-empty table clears that gate. `audit_log` held 7257 rows live at the probe. It is the table §1 names as unrebuildable, so it is the one that most needs the count.
 
-**(d) The drill must assert the append-only guards came back.** `audit_log` carries three triggers (`0006_audit_log.sql:16-25`, all three confirmed live):
+**(d) The drill must assert the append-only guards came back.** `audit_log` carries three triggers (`0006_audit_log.sql:16-29`, all three confirmed live):
 
 ```sh
 kubectl -n artemis exec "$SCRATCH" -- psql -U postgres -d artemis -At -c \
