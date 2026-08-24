@@ -48,6 +48,9 @@ type fakeS3 struct {
 	deleteObjectsCalls int
 	lastDeleteBatch    int
 
+	listCalls int
+	hangList  bool
+
 	failList          bool
 	failDeleteObjects bool
 	deleteFailKeys    map[string]struct{}
@@ -185,8 +188,14 @@ func writeS3Error(w http.ResponseWriter, status int, code, message string) {
 
 func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
+	f.listCalls++
 	failList := f.failList
+	hangList := f.hangList
 	f.mu.Unlock()
+	if hangList {
+		<-r.Context().Done()
+		return
+	}
 	if failList {
 		writeS3Error(w, http.StatusInternalServerError, "InternalError", "list failed")
 		return
@@ -377,6 +386,68 @@ func newClient(t *testing.T, fake *fakeS3) *Client {
 	})
 	require.NoError(t, err)
 	return c
+}
+
+func newClientWithProbeTimeout(t *testing.T, fake *fakeS3, probe time.Duration) *Client {
+	t.Helper()
+	u, err := url.Parse(fake.server.URL)
+	require.NoError(t, err)
+	c, err := New(context.Background(), Config{
+		Endpoint:        u.String(),
+		AccessKeyID:     "ak",
+		SecretAccessKey: "sk",
+		Bucket:          fake.bucket,
+		Region:          "auto",
+		ProbeTimeout:    probe,
+	})
+	require.NoError(t, err)
+	return c
+}
+
+func TestPing_SingleAttemptOnUpstream500(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failList = true
+	c := newClient(t, fake)
+
+	require.Error(t, c.Ping(context.Background()),
+		"an upstream 500 must surface as a probe failure")
+
+	fake.mu.Lock()
+	calls := fake.listCalls
+	fake.mu.Unlock()
+	assert.Equal(t, 1, calls,
+		"one readiness probe is exactly one request; the SDK's default three attempts burn the probe budget")
+}
+
+func TestPing_HangingUpstreamBoundedByProbeTimeout(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.hangList = true
+	c := newClientWithProbeTimeout(t, fake, 50*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := c.Ping(ctx)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, time.Second,
+		"the probe bounds itself on wall clock; it must not ride the caller's context to the end")
+}
+
+func TestListPrefix_StillRetriesOnUpstream500(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failList = true
+	c := newClient(t, fake)
+
+	_, err := c.ListPrefix(context.Background(), "www/deploys/d1/")
+	require.Error(t, err)
+
+	fake.mu.Lock()
+	calls := fake.listCalls
+	fake.mu.Unlock()
+	assert.Greater(t, calls, 1,
+		"MovePrefix and the GC sweep list through here and must keep the SDK's retries")
 }
 
 func TestPutObject_StoresBytes(t *testing.T) {
