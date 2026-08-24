@@ -356,7 +356,11 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 NXDOMAIN is the only DNS answer that names a configuration fault, so it keeps its own class and its own page. Everything else is a resolver-side or transport fault that a retry can clear.
 
-**Consequence for grouping.** A non-NXDOMAIN resolver fault moves from fingerprint `{op, "net.dns"}` to `{op, "transient", "net.dns_resolver"}` and becomes subject to the per-pod, per-op, per-class 24-hour cooldown at `internal/observability/sentry.go:400`. `registry.refresh` is not in `cronShapedOps` (`internal/observability/sentry.go:381-388`), so the cooldown applies to it. ARTEMIS-8's three events on the morning of 2026-08-23 would be one event under this release. The trade is symmetric and deliberate: a **sustained** resolver outage now pages less loudly than it does today. A sustained outage also fails the readyz Valkey probe and empties the Service, which pod alerting covers.
+**Consequence for grouping.** A non-NXDOMAIN resolver fault moves from fingerprint `{op, "net.dns"}` to `{op, "transient", "net.dns_resolver"}` and becomes subject to the 24-hour cooldown at `internal/observability/sentry.go:400`. Neither `registry.refresh` nor `relay.run` is in `cronShapedOps` (`internal/observability/sentry.go:381-388`), so the cooldown applies to both.
+
+The cooldown is keyed per op and per class but the tracker is a package variable (`internal/observability/transientrate.go:37`), so its scope is one process — **one pod**. It suppresses repeats inside a pod, never across pods. The recorded morning of 2026-08-23 shows the size of that effect. Twenty-one DNS events arrived in two bursts, 05:50:58-05:51:11 and 06:03:19-06:03:30, each burst hitting all three replicas: eighteen under `op=relay.run` (ARTEMIS-7), three events per pod across six distinct pods, and three under `op=registry.refresh` (ARTEMIS-8), one per pod across three distinct pods. Under this release the `relay.run` repeats collapse to one per pod and the eighteen become six; the three `registry.refresh` events come from three different pods and stay three. Twenty-one becomes nine, not one.
+
+The trade is symmetric and deliberate: a **sustained** resolver outage now pages less loudly than it does today. A sustained outage also fails the readyz Valkey probe and empties the Service, which pod alerting covers.
 
 **Bucket moves.** NXDOMAIN opens a new issue under `net.dns_notfound`; any existing issue under `net.dns` goes stale and Sentry offers no redirect, exactly as in entry 16.
 
