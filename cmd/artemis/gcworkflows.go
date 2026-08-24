@@ -200,6 +200,9 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 				if err := purgeOutbox(ctx, gcw.Outbox, gcw.OutboxRetention, dryRun); err != nil {
 					errs = append(errs, err)
 				}
+				if err := runReservationSweep(ctx, gcw.Reservations, gcw.NameReleaser, time.Now, dryRun); err != nil {
+					errs = append(errs, err)
+				}
 				return errors.Join(errs...)
 			})),
 		},

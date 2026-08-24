@@ -195,6 +195,8 @@ type gcWiring struct {
 	SiteGC          *gc.SiteGC
 	Reconciler      *gc.Reconciler
 	Purge           *gc.TombstonePurge
+	Reservations    expiredReservationSource
+	NameReleaser    reservationReleaser
 	Outbox          outboxPurger
 	OutboxRetention time.Duration
 }

@@ -244,6 +244,11 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 	var gcw *gcWiring
 	if pgDB != nil {
 		gcw, err = newGCWiring(cfg, pg.NewRepo(pgDB), r2Client)
+		if gcw != nil {
+			reg := pg.NewRegistryStore(pgDB)
+			gcw.Reservations = reg
+			gcw.NameReleaser = reg
+		}
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
 		}

@@ -422,6 +422,8 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **`audit_log`** gains `site.undelete` with `success` and `failure` outcomes.
 
-**Still open, tracked as `#54` and `#55`:** the reclaim of reserved-and-expired sites runs on the existing `tombstone-purge` cadence and does not yet sweep the origin prefix. An approver-gated early-release endpoint is not implemented; early release today means waiting out the grace period.
+**A reserved name is freed by the nightly `tombstone-purge` run.** `sweepExpiredReservations` (`cmd/artemis/reservationsweep.go`) selects names whose `reserved_until` has passed and deletes their registry row, releasing the slug. It runs inside the existing 03:00 UTC workflow, honours `CLEANUP_DRY_RUN`, is capped at 50 names per run and logs `reservation.sweep.capped` when it hits that cap. So the grace period is a ceiling as well as a floor: a name is held for `SITE_RESERVATION_GRACE` and then released, with no operator action.
+
+**Still open, tracked as `#54` and `#55`:** the sweep frees the *name*; the *bytes* are reclaimed on the tombstone path, which does not yet sweep the origin prefix. An approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today.
 
 **Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
