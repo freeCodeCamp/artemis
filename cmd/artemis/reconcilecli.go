@@ -111,13 +111,13 @@ func runReconcileCLI(ctx context.Context, out io.Writer, args []string) error {
 	}
 
 	if !apply {
-		res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl).
+		res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl, nil, nil).
 			runSite(ctx, resolved)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "dry run: pass --apply to repair\n")
-		return finishReport(out, res.Reports, cfg.Cleanup, res.Stats)
+		return finishReport(out, res, cfg.Cleanup)
 	}
 
 	report, err := wiring.Reconciler.ReconcileSite(ctx, resolved, false)

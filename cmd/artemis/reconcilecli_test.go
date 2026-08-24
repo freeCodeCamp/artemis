@@ -135,7 +135,7 @@ func TestRunReconcileCLI_DryRunReportsOneSiteAndWritesNothing(t *testing.T) {
 	got := out.String()
 	assert.Contains(t, got, "dry run: pass --apply to repair",
 		"the default must say plainly that it changed nothing")
-	assert.Contains(t, got, "TOTAL reindex=0 tombstone=1 prune=0 aliased-missing=0 read-failures=0")
+	assert.Contains(t, got, "TOTAL reindex=0 tombstone=1 prune=0 aliased-missing=0 orphan-aliases=0 read-failures=0")
 	assert.Contains(t, got, "SWEPT sites=1",
 		"a named-site repair looks at that site alone, never the fleet")
 }

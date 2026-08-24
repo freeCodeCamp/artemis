@@ -49,6 +49,43 @@ func TestClassifyDrift_AlertsOnAnAliasPointingAtNothing(t *testing.T) {
 		"the job did its job: finding a problem is a green check-in with an event, not a failed run")
 }
 
+func TestClassifyDrift_OrphanAliasesPageWithoutFailingTheCron(t *testing.T) {
+	res := healthySweep()
+	res.OrphanAliases = []orphanAlias{{Dirname: "ghost.freecode.camp", Modes: []string{"production"}}}
+
+	v := classifyDrift(res)
+
+	require.Equal(t, opDriftOrphanAliases, v.Op,
+		"an alias with no registry row is a site nobody owns still serving the public internet")
+	require.Error(t, v.Err)
+	assert.Contains(t, v.Err.Error(), "ghost.freecode.camp")
+	assert.False(t, v.Fails,
+		"only a human can clear this; a failing cron would re-page on every retry")
+}
+
+func TestClassifyDrift_AnUnreadableOrphanScanIsUnknownDriftNotZero(t *testing.T) {
+	res := healthySweep()
+	res.OrphanErr = errors.New("list bucket sites: connection refused")
+
+	v := classifyDrift(res)
+
+	require.Equal(t, opDriftUnreadable, v.Op)
+	assert.True(t, v.Fails,
+		"a scan that could not run proves nothing about whether a deregistered site is serving")
+	assert.Contains(t, v.Err.Error(), "connection refused")
+}
+
+func TestClassifyDrift_AliasedMissingOutranksOrphanAliases(t *testing.T) {
+	res := healthySweep()
+	res.Reports[0].Aliased = []string{"20260101-000000-abc1234"}
+	res.OrphanAliases = []orphanAlias{{Dirname: "ghost.freecode.camp", Modes: []string{"production"}}}
+
+	v := classifyDrift(res)
+
+	require.Equal(t, opDriftAliasedMissing, v.Op,
+		"a live site serving nothing outranks a dead site serving something")
+}
+
 func TestClassifyDrift_FailsTheRunWhenASiteCannotBeRead(t *testing.T) {
 	res := healthySweep()
 	res.Reports[0].FailedWith = errors.New("r2: connection refused")

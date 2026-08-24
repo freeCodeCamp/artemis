@@ -7,6 +7,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/config"
@@ -137,9 +138,21 @@ type driftSweepRepo interface {
 	CountDeploys(ctx context.Context) (int, error)
 }
 
+type orphanAlias struct {
+	Dirname string
+	Modes   []string
+}
+
+type bucketAliasReader interface {
+	ListSites(ctx context.Context) ([]string, error)
+	HasObject(ctx context.Context, key string) (bool, error)
+}
+
 type sweepResult struct {
-	Reports []siteDrift
-	Stats   sweepStats
+	Reports       []siteDrift
+	OrphanAliases []orphanAlias
+	OrphanErr     error
+	Stats         sweepStats
 }
 
 func (r sweepResult) totals() (reindex, tombstone, prune, aliased int) {
@@ -153,16 +166,19 @@ func (r sweepResult) totals() (reindex, tombstone, prune, aliased int) {
 }
 
 type driftSweep struct {
-	rc     *gc.Reconciler
-	lister *countingLister
-	store  *countingStore
-	repo   driftSweepRepo
-	reg    registrySiteReader
-	tmpl   handler.DeployPrefixTemplate
+	rc         *gc.Reconciler
+	lister     *countingLister
+	store      *countingStore
+	repo       driftSweepRepo
+	reg        registrySiteReader
+	tmpl       handler.DeployPrefixTemplate
+	bucket     bucketAliasReader
+	aliasTails []string
 }
 
 func newReadOnlySweeper(base *gc.Reconciler, lister gc.ReconcileLister, repo driftSweepRepo,
-	reg registrySiteReader, tmpl handler.DeployPrefixTemplate) *driftSweep {
+	reg registrySiteReader, tmpl handler.DeployPrefixTemplate,
+	bucket bucketAliasReader, aliasTails []string) *driftSweep {
 	counting := &countingLister{inner: lister}
 	store := &countingStore{ReconcileStore: readOnlyStore{inner: repo}}
 
@@ -174,7 +190,54 @@ func newReadOnlySweeper(base *gc.Reconciler, lister gc.ReconcileLister, repo dri
 	rc.Audit = nil
 	rc.PruneAudit = nil
 
-	return &driftSweep{rc: &rc, lister: counting, store: store, repo: repo, reg: reg, tmpl: tmpl}
+	return &driftSweep{
+		rc: &rc, lister: counting, store: store, repo: repo, reg: reg, tmpl: tmpl,
+		bucket: bucket, aliasTails: aliasTails,
+	}
+}
+
+const artemisOwnedPrefixMarker = "_"
+
+func (s *driftSweep) orphanAliases(ctx context.Context) ([]orphanAlias, error) {
+	if s.bucket == nil || len(s.aliasTails) == 0 {
+		return nil, nil
+	}
+	sites, err := s.reg.Sites(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("registry sites: %w", err)
+	}
+	registered := make(map[string]struct{}, len(sites))
+	for _, site := range sites {
+		registered[string(s.tmpl.SiteDirname(site.Slug))] = struct{}{}
+	}
+	dirnames, err := s.bucket.ListSites(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list bucket sites: %w", err)
+	}
+	var out []orphanAlias
+	for _, dirname := range dirnames {
+		if strings.HasPrefix(dirname, artemisOwnedPrefixMarker) {
+			continue
+		}
+		if _, ok := registered[dirname]; ok {
+			continue
+		}
+		var modes []string
+		for _, tail := range s.aliasTails {
+			has, err := s.bucket.HasObject(ctx, dirname+"/"+tail)
+			if err != nil {
+				return nil, fmt.Errorf("head alias %s/%s: %w", dirname, tail, err)
+			}
+			if has {
+				modes = append(modes, tail)
+			}
+		}
+		if len(modes) > 0 {
+			out = append(out, orphanAlias{Dirname: dirname, Modes: modes})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Dirname < out[j].Dirname })
+	return out, nil
 }
 
 func (s *driftSweep) Run(ctx context.Context) (sweepResult, error) {
@@ -212,6 +275,12 @@ func (s *driftSweep) sweep(ctx context.Context, sites []sitekey.Dirname, scoped 
 		return sweepResult{}, fmt.Errorf("count deploys: %w", err)
 	}
 
+	var orphans []orphanAlias
+	var orphanErr error
+	if !scoped {
+		orphans, orphanErr = s.orphanAliases(ctx)
+	}
+
 	stats := sweepStats{
 		Scoped:       scoped,
 		Sites:        len(sites),
@@ -223,7 +292,7 @@ func (s *driftSweep) sweep(ctx context.Context, sites []sitekey.Dirname, scoped 
 		stats.Prunes += len(r.Prune)
 	}
 	stats.ReadFailures = countReadFailures(reports)
-	return sweepResult{Reports: reports, Stats: stats}, nil
+	return sweepResult{Reports: reports, OrphanAliases: orphans, OrphanErr: orphanErr, Stats: stats}, nil
 }
 
 func countReadFailures(reports []siteDrift) int {
@@ -291,16 +360,23 @@ func runDriftReport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("deploy prefix format: %w", err)
 	}
 
-	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl).Run(ctx)
+	tails, err := cfg.AliasKeyTails()
+	if err != nil {
+		return fmt.Errorf("alias key formats: %w", err)
+	}
+
+	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl, r2Client, tails).Run(ctx)
 	if err != nil {
 		return err
 	}
-	return finishReport(out, res.Reports, cfg.Cleanup, res.Stats)
+	return finishReport(out, res, cfg.Cleanup)
 }
 
-func finishReport(out io.Writer, reports []siteDrift, cleanup config.CleanupConfig, stats sweepStats) error {
+func finishReport(out io.Writer, res sweepResult, cleanup config.CleanupConfig) error {
+	reports := res.Reports
+	stats := res.Stats
 	stats.ReadFailures = countReadFailures(reports)
-	reportErr := writeDriftReport(out, reports, cleanup)
+	reportErr := errors.Join(writeDriftReport(out, reports, res.OrphanAliases, cleanup), orphanScanErr(out, res.OrphanErr))
 	fmt.Fprintf(out, "SWEPT sites=%d r2-objects=%d pg-deploys=%d/%d read-failures=%d\n",
 		stats.Sites, stats.R2Objects, stats.PGDeploys, stats.IndexedTotal, stats.ReadFailures)
 	if err := stats.validate(); err != nil {
@@ -309,7 +385,15 @@ func finishReport(out io.Writer, reports []siteDrift, cleanup config.CleanupConf
 	return reportErr
 }
 
-func writeDriftReport(out io.Writer, reports []siteDrift, cleanup config.CleanupConfig) error {
+func orphanScanErr(out io.Writer, err error) error {
+	if err == nil {
+		return nil
+	}
+	fmt.Fprintf(out, "ORPHAN-ALIAS SCAN FAILED: %s\n", err)
+	return fmt.Errorf("orphan-alias scan: %w", err)
+}
+
+func writeDriftReport(out io.Writer, reports []siteDrift, orphans []orphanAlias, cleanup config.CleanupConfig) error {
 	sort.SliceStable(reports, func(i, j int) bool { return reports[i].total() > reports[j].total() })
 
 	var reindex, tombstone, prune, aliased, failed int
@@ -341,8 +425,15 @@ func writeDriftReport(out io.Writer, reports []siteDrift, cleanup config.Cleanup
 		}
 	}
 
-	fmt.Fprintf(out, "\nTOTAL reindex=%d tombstone=%d prune=%d aliased-missing=%d read-failures=%d\n",
-		reindex, tombstone, prune, aliased, failed)
+	for _, o := range orphans {
+		fmt.Fprintf(out, "%-42s ORPHAN-ALIAS %s\n", o.Dirname, strings.Join(o.Modes, ","))
+	}
+
+	fmt.Fprintf(out, "\nTOTAL reindex=%d tombstone=%d prune=%d aliased-missing=%d orphan-aliases=%d read-failures=%d\n",
+		reindex, tombstone, prune, aliased, len(orphans), failed)
+	if len(orphans) > 0 {
+		fmt.Fprintf(out, "\norphan-alias means a name nobody owns is still serving: no registry row, live alias object.\n")
+	}
 	if aliased > 0 {
 		fmt.Fprintf(out, "\naliased-missing is the dangerous class: an alias points at a deploy the index or R2 lost.\n")
 	}

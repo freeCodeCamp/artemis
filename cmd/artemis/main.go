@@ -300,9 +300,13 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 			WorkerName: "artemis",
 		})
 		workerRuntime := worker.NewRuntime(hatchetAdapter)
+		sweepTails, tailErr := cfg.AliasKeyTails()
+		if tailErr != nil {
+			return fmt.Errorf("drift alias formats: %w", tailErr)
+		}
 		sweepDrift := func(ctx context.Context) (sweepResult, error) {
 			return newReadOnlySweeper(gcw.Reconciler, r2Client, pgRepo,
-				pg.NewRegistryStore(pgDB), deployPrefix).Run(ctx)
+				pg.NewRegistryStore(pgDB), deployPrefix, r2Client, sweepTails).Run(ctx)
 		}
 		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, sweepDrift); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)

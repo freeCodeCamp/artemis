@@ -153,11 +153,11 @@ func TestWriteDriftReport_SurfacesTotalsAndHidesCleanSites(t *testing.T) {
 		{Site: "clean.freecode.camp"},
 		{Site: "dirty.freecode.camp", Tombstone: []string{"d1", "d2"}, Prune: []string{"d3"}},
 		{Site: "danger.freecode.camp", Aliased: []string{"d9"}},
-	}, config.CleanupConfig{Grace: 72 * time.Hour, BlastCap: 10})
+	}, nil, config.CleanupConfig{Grace: 72 * time.Hour, BlastCap: 10})
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "TOTAL reindex=0 tombstone=2 prune=1 aliased-missing=1 read-failures=0")
+	assert.Contains(t, out, "TOTAL reindex=0 tombstone=2 prune=1 aliased-missing=1 orphan-aliases=0 read-failures=0")
 	assert.Contains(t, out, "ALIASED-MISSING d9")
 	assert.NotContains(t, out, "clean.freecode.camp", "a site with no drift is noise in a sweep of 70")
 	assert.Contains(t, out, "read-only, no writes possible")
@@ -169,7 +169,7 @@ func TestWriteDriftReport_FailsWhenASiteCouldNotBeRead(t *testing.T) {
 	var buf bytes.Buffer
 	err := writeDriftReport(&buf, []siteDrift{
 		{Site: "broken.freecode.camp", FailedWith: context.DeadlineExceeded},
-	}, config.CleanupConfig{})
+	}, nil, config.CleanupConfig{})
 
 	require.Error(t, err, "an unread site is unknown drift, not zero drift")
 	assert.True(t, strings.Contains(buf.String(), "READ FAILED"))
@@ -238,9 +238,11 @@ func TestFinishReport_KeepsBothTheSelfCheckAndTheReadFailure(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := finishReport(&buf,
-		[]siteDrift{{Site: "broken.freecode.camp", FailedWith: context.DeadlineExceeded}},
-		config.CleanupConfig{},
-		sweepStats{Sites: 0})
+		sweepResult{
+			Reports: []siteDrift{{Site: "broken.freecode.camp", FailedWith: context.DeadlineExceeded}},
+			Stats:   sweepStats{Sites: 0},
+		},
+		config.CleanupConfig{})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "swept 0 sites",
@@ -254,9 +256,11 @@ func TestFinishReport_AReadFailureDoesNotGetBlamedOnTheSiteList(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := finishReport(&buf,
-		[]siteDrift{{Site: "www.freecode.camp", FailedWith: context.DeadlineExceeded}},
-		config.CleanupConfig{},
-		sweepStats{Sites: 1, IndexedTotal: 198, PGDeploys: 0, R2Objects: 0})
+		sweepResult{
+			Reports: []siteDrift{{Site: "www.freecode.camp", FailedWith: context.DeadlineExceeded}},
+			Stats:   sweepStats{Sites: 1, IndexedTotal: 198, PGDeploys: 0, R2Objects: 0},
+		},
+		config.CleanupConfig{})
 
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "the site list is wrong",

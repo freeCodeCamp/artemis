@@ -155,7 +155,7 @@ func TestRunDriftReport_ReportsNoDriftWhenTheStoresAgree(t *testing.T) {
 	require.NoError(t, runDriftReport(context.Background(), &out))
 
 	got := out.String()
-	assert.Contains(t, got, "TOTAL reindex=0 tombstone=0 prune=0 aliased-missing=0 read-failures=0",
+	assert.Contains(t, got, "TOTAL reindex=0 tombstone=0 prune=0 aliased-missing=0 orphan-aliases=0 read-failures=0",
 		"a site whose bytes and index agree is not drift")
 	assert.Contains(t, got, "SWEPT sites=1 r2-objects=2 pg-deploys=1/1",
 		"the sweep must show what it actually read, against a count it did not derive from its own site list")
@@ -176,7 +176,7 @@ func TestRunDriftReport_FindsTheOrphanBytesOfAFailedUpload(t *testing.T) {
 	require.NoError(t, runDriftReport(context.Background(), &out))
 
 	got := out.String()
-	assert.Contains(t, got, "TOTAL reindex=0 tombstone=1 prune=0 aliased-missing=0 read-failures=0",
+	assert.Contains(t, got, "TOTAL reindex=0 tombstone=1 prune=0 aliased-missing=0 orphan-aliases=0 read-failures=0",
 		"an unmarked prefix past grace with no index row is exactly the failed upload reconcile exists to reclaim")
 	assert.Contains(t, got, site)
 }
