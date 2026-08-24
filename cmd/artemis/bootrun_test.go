@@ -127,6 +127,32 @@ func TestRunWith_BootsAndShutsDownCleanly(t *testing.T) {
 	}
 }
 
+func TestRunWith_WarnsWhenPostgresIsWiredWithoutHatchet(t *testing.T) {
+	dsn, valkeyAddr := startDeps(t)
+	cfg := bootCfg(t, dsn, valkeyAddr, freePort(t))
+	require.Empty(t, cfg.Hatchet.Addr)
+	got := trapCaptures(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runWith(ctx, cfg) }()
+
+	require.Eventually(t, func() bool { return got.has("outbox.relay.absent") }, 60*time.Second, 200*time.Millisecond,
+		"finalize and alias writes enqueue site.changed whenever Postgres is wired, but the relay and "+
+			"gc-site are both gated on HATCHET_ADDR, so this is the one shape where the backlog alert "+
+			"cannot fire for itself")
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err,
+			"a Postgres-backed boot without hatchet is legal today; this is a warning, not a refusal")
+	case <-time.After(30 * time.Second):
+		t.Fatal("runWith did not return after context cancellation")
+	}
+}
+
 func TestRunWith_BackfillOnBootExitsWithoutServing(t *testing.T) {
 	dsn, valkeyAddr := startDeps(t)
 	port := freePort(t)

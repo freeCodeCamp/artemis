@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -161,6 +162,10 @@ func (c *capturedOps) snapshot() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.ops...)
+}
+
+func (c *capturedOps) has(op string) bool {
+	return slices.Contains(c.snapshot(), op)
 }
 
 func trapCaptures(t *testing.T) *capturedOps {
