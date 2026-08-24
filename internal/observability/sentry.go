@@ -390,13 +390,15 @@ var cronShapedOps = map[string]bool{
 // (e.g. the registry refresh goroutine). op becomes a tag and the
 // fingerprint so the failures group on their own. No-op when disabled.
 func CaptureBackground(op string, err error) {
-	if IsTransient(err) {
+	class := errorClass(err)
+	if transientClasses[class] {
 		slog.Warn("background.transient", "op", op, "err", err)
 		if cronShapedOps[op] || backgroundTransientRate.observe(op, backgroundTransientRate.clock()) {
 			sentry.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("op", op)
-				scope.SetTag("transient_sustained", "true")
-				scope.SetFingerprint([]string{op, "sustained"})
+				scope.SetTag("error_class", class)
+				scope.SetTag("transient", "true")
+				scope.SetFingerprint([]string{op, "transient", class})
 				sentry.CaptureException(err)
 			})
 		}
@@ -404,7 +406,8 @@ func CaptureBackground(op string, err error) {
 	}
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetTag("op", op)
-		scope.SetFingerprint([]string{op})
+		scope.SetTag("error_class", class)
+		scope.SetFingerprint([]string{op, class})
 		sentry.CaptureException(err)
 	})
 }
