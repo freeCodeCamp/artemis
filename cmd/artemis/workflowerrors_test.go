@@ -131,24 +131,15 @@ func (g stubAliasGetter) GetAlias(context.Context, string) (string, error) {
 	return g.val, g.err
 }
 
-const bareFormat = "<site>/deploys/<ts>-<sha>/"
-
-func TestNewLiveAliasReader_RejectsFormatWithoutSiteToken(t *testing.T) {
-	_, err := newLiveAliasReader(stubAliasGetter{}, bareFormat, "no-token/production")
-	require.ErrorContains(t, err, "<site>")
-}
-
 func TestNewLiveAliasReader_PropagatesGetterError(t *testing.T) {
-	read, err := newLiveAliasReader(stubAliasGetter{err: errors.New("r2 down")}, bareFormat, "<site>/production")
-	require.NoError(t, err)
+	read := newLiveAliasReader(stubAliasGetter{err: errors.New("r2 down")}, "production")
 
-	_, err = read(context.Background(), "www")
+	_, err := read(context.Background(), "www")
 	require.ErrorContains(t, err, "r2 down")
 }
 
 func TestNewLiveAliasReader_CollectsTargets(t *testing.T) {
-	read, err := newLiveAliasReader(stubAliasGetter{val: "d1"}, bareFormat, "<site>/production", "<site>/preview")
-	require.NoError(t, err)
+	read := newLiveAliasReader(stubAliasGetter{val: "d1"}, "production", "preview")
 
 	got, err := read(context.Background(), "www")
 	require.NoError(t, err)

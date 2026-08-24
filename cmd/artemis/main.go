@@ -269,8 +269,7 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		if layoutErr != nil {
 			return fmt.Errorf("backfill layout: %w", layoutErr)
 		}
-		tails, tailErr := aliasTails(cfg.DeployPrefixFormat,
-			cfg.Aliases.ProductionKeyFormat, cfg.Aliases.PreviewKeyFormat)
+		tails, tailErr := cfg.AliasKeyTails()
 		if tailErr != nil {
 			return fmt.Errorf("backfill alias formats: %w", tailErr)
 		}
@@ -314,8 +313,13 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		}()
 
 		relay := &worker.Relay{Source: pgRepo, Publisher: hatchetAdapter, Batch: 100, Now: time.Now}
-		go runRelayLoop(rootCtx, relay, relayInterval)
+		go runRelayLoop(rootCtx, relay, pgRepo, relayInterval)
 		slog.Info("outbox.relay.started", "interval", relayInterval)
+	} else if gcw != nil {
+		absent := errors.New("DATABASE_URL is set but HATCHET_ADDR is not: every site.changed row " +
+			"enqueued by finalize and alias writes stays unpublished and gc-site never runs")
+		slog.Warn("outbox.relay.absent", "err", absent)
+		captureBackground("outbox.relay.absent", absent)
 	}
 
 	h := buildHandlers(cfg, handlerDeps{

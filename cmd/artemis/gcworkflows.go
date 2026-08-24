@@ -71,13 +71,37 @@ const (
 	driftDetectRunBudget = 30 * time.Minute
 	gcRunBudget          = 30 * time.Minute
 	relayInterval        = 5 * time.Second
+	outboxStuckAfter     = 15 * time.Minute
+	outboxProbeEvery     = 12
+	outboxProbeTimeout   = 5 * time.Second
+	opOutboxBacklog      = "outbox.backlog"
 )
 
 type driftSweeper func(ctx context.Context) (sweepResult, error)
 
-func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Duration) {
+type outboxBacklogSource interface {
+	OutboxBacklog(ctx context.Context) (int, time.Duration, error)
+}
+
+type backlogState struct{ paged bool }
+
+func (s *backlogState) observe(stuck bool) bool {
+	if !stuck {
+		s.paged = false
+		return false
+	}
+	if s.paged {
+		return false
+	}
+	s.paged = true
+	return true
+}
+
+func runRelayLoop(ctx context.Context, relay *worker.Relay, backlog outboxBacklogSource, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var state backlogState
+	ticks := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -88,8 +112,33 @@ func runRelayLoop(ctx context.Context, relay *worker.Relay, interval time.Durati
 				slog.ErrorContext(rctx, "relay.run", "err", err)
 				observability.CaptureBackground("relay.run", err)
 			}
+			ticks++
+			if backlog == nil || ticks%outboxProbeEvery != 0 {
+				continue
+			}
+			observeOutboxBacklog(rctx, backlog, &state)
 		}
 	}
+}
+
+func observeOutboxBacklog(ctx context.Context, backlog outboxBacklogSource, state *backlogState) {
+	probeCtx, cancel := context.WithTimeout(ctx, outboxProbeTimeout)
+	defer cancel()
+	count, oldest, err := backlog.OutboxBacklog(probeCtx)
+	if err != nil {
+		slog.WarnContext(ctx, "outbox.backlog.unreadable", "err", err)
+		return
+	}
+	if !state.observe(count > 0 && oldest >= outboxStuckAfter) {
+		return
+	}
+	stuck := fmt.Errorf(
+		"%d outbox events are unpublished and the oldest has waited %s (>= %s): the relay reports "+
+			"success while draining nothing, so every site.changed behind it never reaches hatchet "+
+			"and gc-site never runs",
+		count, oldest.Round(time.Second), outboxStuckAfter)
+	slog.ErrorContext(ctx, "outbox.backlog.stuck", "count", count, "oldest", oldest, "err", stuck)
+	captureBackground(opOutboxBacklog, stuck)
 }
 
 func observeWorkflow(name string, fn worker.Handler) worker.Handler {

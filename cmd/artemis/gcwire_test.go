@@ -89,12 +89,10 @@ func (g *recordingAliasGetter) GetAlias(_ context.Context, key string) (string, 
 }
 
 func TestNewLiveAliasReader_KeyMatchesWritePath(t *testing.T) {
-	const prodFmt = "<site>.freecode.camp/production"
 	getter := &recordingAliasGetter{values: map[string]string{
 		"www.freecode.camp/production": "20260101-000000-abc1234",
 	}}
-	read, err := newLiveAliasReader(getter, domainFormat, prodFmt)
-	require.NoError(t, err)
+	read := newLiveAliasReader(getter, "production")
 
 	live, err := read(context.Background(), "www.freecode.camp")
 	require.NoError(t, err)
@@ -113,9 +111,7 @@ func TestNewLiveAliasReader_ReadsTheSameKeyspaceTheSweepEnumerates(t *testing.T)
 	require.NoError(t, err)
 
 	getter := &recordingAliasGetter{}
-	read, err := newLiveAliasReader(getter, domainFormat,
-		"<site>.freecode.camp/production", "<site>.freecode.camp/preview")
-	require.NoError(t, err)
+	read := newLiveAliasReader(getter, "production", "preview")
 
 	dirname := tmpl.SiteDirname("test")
 	_, err = read(context.Background(), dirname)
@@ -127,18 +123,6 @@ func TestNewLiveAliasReader_ReadsTheSameKeyspaceTheSweepEnumerates(t *testing.T)
 			"alias key %q must sit under the same site directory the sweep lists, or the "+
 				"pre-delete safety net reads a prefix no alias was ever written to", k)
 	}
-}
-
-func TestNewLiveAliasReader_RequiresSiteToken(t *testing.T) {
-	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat, "production/only")
-	require.Error(t, err, "an alias format missing <site> must fail boot, not silently mis-derive keys")
-}
-
-func TestNewLiveAliasReader_RejectsASiteSegmentTheDeployPrefixDoesNotShare(t *testing.T) {
-	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat, "<site>.preview.freecode.camp/production")
-	require.Error(t, err,
-		"an alias format whose site segment differs from the deploy prefix's cannot be reached from a "+
-			"dirname; boot must refuse rather than 404 silently for every site")
 }
 
 func TestOpenRepoQueue_RequiresDatabase(t *testing.T) {
@@ -277,6 +261,23 @@ func TestNewGCWiring_RejectsBadFormat(t *testing.T) {
 	require.Nil(t, w)
 }
 
+func TestNewGCWiring_RefusesAnAliasKeyFormatUnderADifferentSiteSegment(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: domainFormat,
+		Cleanup:            config.CleanupConfig{BlastCap: 5, TrashPrefix: "_trash/"},
+	}
+	cfg.Aliases.ProductionKeyFormat = "<site>.example.test/production"
+	cfg.Aliases.PreviewKeyFormat = "<site>.freecode.camp/preview"
+
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
+
+	require.Error(t, err,
+		"the wiring must refuse a config only a hand-built literal could produce: bootrun_test.go "+
+			"reaches newGCWiring with a Config that never passed config.Load, so an alias segment the "+
+			"deploy prefix does not share would 404 for every site with nothing having refused it")
+	require.Nil(t, w)
+}
+
 func TestGCPolicyFromConfig(t *testing.T) {
 	p := gcPolicy(config.CleanupConfig{
 		RecentKeep:    3,
@@ -288,14 +289,6 @@ func TestGCPolicyFromConfig(t *testing.T) {
 	assert.Equal(t, time.Hour, p.Grace)
 	assert.Equal(t, 7*24*time.Hour, p.Retention)
 	assert.Equal(t, 15*time.Second, p.ServeCacheTTL)
-}
-
-func TestNewLiveAliasReader_RejectsASiteTokenOutsideTheSiteSegment(t *testing.T) {
-	_, err := newLiveAliasReader(&recordingAliasGetter{}, domainFormat,
-		"<site>.freecode.camp/aliases-<site>/production")
-	require.Error(t, err,
-		"the reader substitutes nothing after the site segment, so a surviving <site> is fetched literally "+
-			"and 404s for every site — the same silent-inert failure this constructor exists to refuse")
 }
 
 func prodSlugFn(t *testing.T) siteSlugFn {

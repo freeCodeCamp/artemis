@@ -112,3 +112,16 @@ func TestLoad_RejectsAnAliasKeyFormatWithNoSlash(t *testing.T) {
 	require.ErrorContains(t, err, "ALIAS_PREVIEW_KEY_FORMAT")
 	require.ErrorContains(t, err, "'/'")
 }
+
+func TestLoad_ReturnsTheAliasKeyTailsInProductionThenPreviewOrder(t *testing.T) {
+	configtest.Hermetic(t, EnvKeys(), aliasKeyEnv())
+
+	c, err := Load()
+	require.NoError(t, err)
+
+	tails, err := c.AliasKeyTails()
+	require.NoError(t, err)
+	require.Equal(t, []string{"production", "preview"}, tails,
+		"cmd/artemis/main.go picks tails[0] for mode==production and tails[1] otherwise, so a swapped "+
+			"order writes every production alias key at the preview tail")
+}
