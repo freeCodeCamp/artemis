@@ -130,6 +130,11 @@ type RegistryConfig struct {
 
 	// Valkey connection details.
 	Valkey ValkeyConfig
+
+	// ReservationGrace is how long a deleted site's name is held
+	// against reuse before the reclaim frees it. Its own lifecycle:
+	// deliberately not CleanupConfig.Grace, which governs deploy GC.
+	ReservationGrace time.Duration
 }
 
 // ValkeyConfig holds the connection string + auth password for the
@@ -199,6 +204,7 @@ const (
 	defaultSentryTracesSampleRate = 0.2
 	defaultPGConnectRetryWindow   = 45 * time.Second
 	defaultValkeyRetryWindow      = 5 * time.Second
+	defaultReservationGrace       = 72 * time.Hour
 )
 
 var validLogLevels = map[string]struct{}{
@@ -237,8 +243,9 @@ func Load() (*Config, error) {
 		UploadMaxBytes:     100 * 1024 * 1024, // 100 MiB
 		LogLevel:           "info",
 		Registry: RegistryConfig{
-			AuthzTeam: defaultRegistryAuthzTeam,
-			Valkey:    ValkeyConfig{RetryWindow: defaultValkeyRetryWindow},
+			AuthzTeam:        defaultRegistryAuthzTeam,
+			Valkey:           ValkeyConfig{RetryWindow: defaultValkeyRetryWindow},
+			ReservationGrace: defaultReservationGrace,
 		},
 		Repo: RepoConfig{
 			Org:                defaultRepoOrg,
@@ -341,6 +348,14 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid VALKEY_CONNECT_RETRY_WINDOW %q: must be a non-negative Go duration (0 disables retry)", v)
 		}
 		cfg.Registry.Valkey.RetryWindow = d
+	}
+
+	if v, ok := os.LookupEnv("SITE_RESERVATION_GRACE"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("invalid SITE_RESERVATION_GRACE %q: must be a positive Go duration", v)
+		}
+		cfg.Registry.ReservationGrace = d
 	}
 
 	if v, ok := os.LookupEnv("GH_REPO_ORG"); ok && v != "" {
