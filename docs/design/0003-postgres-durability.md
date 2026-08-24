@@ -37,6 +37,30 @@ Scale context from local design 0002: at the 10k-site target the control-plane D
 
 ## 4. Recommendation to the operator
 
-**B first, C later if warranted.** PITR closes the real gap (24 h RPO on an unrebuildable `audit_log`) with the smallest operational delta, reusing R2 and the existing backup credentials. C (CloudNativePG) is the right end-state if the platform later needs minutes-level RTO or wants the `hatchet` tenant isolated, but it replaces the whole chart and deserves its own wave with a rehearsed cutover. Whichever option is picked, the first task of that wave is a **restore drill** — today's dump path has never been proven end-to-end (unverified, and that is itself the finding).
+**B first, C later if warranted.** PITR closes the real gap (24 h RPO on an unrebuildable `audit_log`) with the smallest operational delta, reusing R2 and the existing backup credentials. C (CloudNativePG) is the right end-state if the platform later needs minutes-level RTO or wants the `hatchet` tenant isolated, but it replaces the whole chart and deserves its own wave with a rehearsed cutover. Whichever option is picked, the first task of that wave is a **re-run of the restore drill against the current schema**. The drill itself is not missing — `infra:docs/runbooks/08-artemis-pg-restore-drill.md` passed on 2026-06-05 (§2) — but its §D gate asserts six tables (`deploys`, `aliases`, `tombstones`, `outbox`, `sites`, `repo_requests`), which was the entire schema on that date. `audit_log` arrived a month later in `internal/pg/migrations/0006_audit_log.sql` (commit `025cc73`, 2026-07-06). The one table §1 calls unrebuildable is the one table the drill has never asserted. §5 says what the gate needs.
 
 Non-goals here: multi-region, connection pooling, capacity scaling (0002 covers capacity).
+
+## 5. What the restore drill must add before it is re-run (handover to infra)
+
+`infra:docs/runbooks/08-artemis-pg-restore-drill.md` lives in a sibling repo and is not edited from here. This section is the change list, with the evidence for each item. Probed read-only against `artemis-postgresql-0` on 2026-08-24.
+
+**(a) The artefact is not the gap.** The backup CronJob runs `pg_dumpall --clean --if-exists | gzip` with no `--exclude-table` and no per-database selection (infra chart `artemis/templates/backup-cronjob.yaml:52-56`). It is a full cluster dump, so `audit_log` is inside today's artefact. Every item below is an assertion the drill does not make — not a hole in what gets backed up.
+
+**(b) Six tables becomes seven.** Runbook `08:118` names the artemis-owned set and `08:139` asserts it; both go from six to seven with `audit_log` added, and the header claim at `08:5` goes from `6/6` to `7/7`. The drill was **complete when it ran** — `audit_log` postdates it by a month — so this is staleness, not a past failure.
+
+**(c) `audit_log` needs a row-count assertion, not a presence assertion.** The drill prints `count(*)` for all six tables (`08:126-133`) but asserts a count for only one of them, `sites` (`08:140`). The remaining five, and `audit_log` when it is added, pass on presence alone — a restored-but-empty table clears that gate. `audit_log` held 7257 rows live at the probe. It is the table §1 names as unrebuildable, so it is the one that most needs the count.
+
+**(d) The drill must assert the append-only guards came back.** `audit_log` carries three triggers (`0006_audit_log.sql:16-25`, all three confirmed live):
+
+```sh
+kubectl -n artemis exec "$SCRATCH" -- psql -U postgres -d artemis -At -c \
+  "SELECT tgname FROM pg_trigger WHERE tgrelid='audit_log'::regclass AND NOT tgisinternal ORDER BY 1"
+# expect: audit_log_no_delete, audit_log_no_truncate, audit_log_no_update
+```
+
+A restore that replays every row but loses the triggers passes the presence gate and the row-count gate in (c), and leaves the forensic system-of-record silently **mutable**. No gate above can see that.
+
+**(e) `schema_migrations` is a restore gate, not bookkeeping.** `0006_audit_log.sql:1` is a bare `CREATE TABLE audit_log` with no `IF NOT EXISTS`, unlike `0001`-`0003`. A restore that brings the tables back but loses the migration ledger makes the next artemis boot re-run `0006`, `pg.Migrate` returns an error, `openPostgres` fails (`cmd/artemis/main.go:382-386`) and the pod does not start. The drill must assert `schema_migrations` restored with its nine rows, `0001_init.sql` through `0009_outbox_claim.sql` (nine confirmed live).
+
+**(f) The root fix for the staleness.** Derive the expected table set from `internal/pg/migrations/` at drill time instead of hard-coding it in the runbook. Migration `0006` staled this gate silently for two months; `0010` will do the same to whatever list replaces it.
