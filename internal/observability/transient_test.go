@@ -38,8 +38,8 @@ func TestIsTransient(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := IsTransient(tc.err); got != tc.want {
-				t.Errorf("IsTransient(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := isTransient(tc.err); got != tc.want {
+				t.Errorf("isTransient(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -48,8 +48,8 @@ func TestIsTransient(t *testing.T) {
 func TestIsTransient_UnexpectedEOFIsTransient(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, IsTransient(io.ErrUnexpectedEOF))
-	require.True(t, IsTransient(fmt.Errorf("pg registry list: %w", io.ErrUnexpectedEOF)))
+	require.True(t, isTransient(io.ErrUnexpectedEOF))
+	require.True(t, isTransient(fmt.Errorf("pg registry list: %w", io.ErrUnexpectedEOF)))
 }
 
 func TestIsTransient_DNSTemporaryIsTransient(t *testing.T) {
@@ -63,8 +63,8 @@ func TestIsTransient_DNSTemporaryIsTransient(t *testing.T) {
 	}
 	live := fmt.Errorf("pg registry list: %w", errors.Join(fmt.Errorf("failed to connect: %w", dnsErr)))
 
-	require.True(t, IsTransient(dnsErr))
-	require.True(t, IsTransient(live), "errors.As must reach the DNSError through fmt.wrapError and errors.joinError")
+	require.True(t, isTransient(dnsErr))
+	require.True(t, isTransient(live), "errors.As must reach the DNSError through fmt.wrapError and errors.joinError")
 }
 
 func TestIsTransient_DNSTimeoutIsTransient(t *testing.T) {
@@ -72,7 +72,7 @@ func TestIsTransient_DNSTimeoutIsTransient(t *testing.T) {
 
 	dnsErr := &net.DNSError{Err: "i/o timeout", IsTimeout: true, IsTemporary: false}
 
-	require.True(t, IsTransient(dnsErr), "the gate is the Temporary() method (IsTimeout || IsTemporary), not the IsTemporary field")
+	require.True(t, isTransient(dnsErr), "the gate is the Temporary() method (IsTimeout || IsTemporary), not the IsTemporary field")
 }
 
 func TestIsTransient_DNSNotFoundIsNotTransient(t *testing.T) {
@@ -80,13 +80,13 @@ func TestIsTransient_DNSNotFoundIsNotTransient(t *testing.T) {
 
 	dnsErr := &net.DNSError{Err: "no such host", Name: "artemis-postgresql", IsNotFound: true}
 
-	require.False(t, IsTransient(dnsErr), "NXDOMAIN is permanent for a misconfigured hostname; it pages in its own bucket")
-	require.False(t, IsTransient(fmt.Errorf("failed to connect: %w", dnsErr)))
+	require.False(t, isTransient(dnsErr), "NXDOMAIN is permanent for a misconfigured hostname; it pages in its own bucket")
+	require.False(t, isTransient(fmt.Errorf("failed to connect: %w", dnsErr)))
 }
 
 func TestIsTransient_PlainEOFIsNotTransient(t *testing.T) {
 	t.Parallel()
 
-	require.False(t, IsTransient(io.EOF), "a clean end-of-stream is a control value, not a fault")
-	require.False(t, IsTransient(fmt.Errorf("relay: %w", io.EOF)))
+	require.False(t, isTransient(io.EOF), "a clean end-of-stream is a control value, not a fault")
+	require.False(t, isTransient(fmt.Errorf("relay: %w", io.EOF)))
 }

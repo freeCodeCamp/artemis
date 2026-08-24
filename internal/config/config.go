@@ -550,6 +550,11 @@ func validateAliasKeyFormat(env, format, deploySeg string) (string, error) {
 			env, format, seg, deploySeg)
 	}
 	tail := format[len(seg)+1:]
+	if tail == "" {
+		return "", fmt.Errorf("invalid %s %q: names no object after its site segment, so it renders "+
+			"to the bare site prefix and a purge would move the whole site instead of one alias",
+			env, format)
+	}
 	if strings.Contains(tail, "<site>") {
 		return "", fmt.Errorf("invalid %s %q: keeps a <site> token after its site segment, which is "+
 			"fetched literally rather than rendered", env, format)

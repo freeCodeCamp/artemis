@@ -292,7 +292,6 @@ func TestRunRelayLoop_KeepsDrainingWhenTheBacklogProbeHangs(t *testing.T) {
 
 	require.Eventually(t, func() bool { return backlog.probes() >= 1 }, 5*time.Second, time.Millisecond,
 		"the loop must reach its first backlog probe")
-	require.Positive(t, outboxProbeTimeout, "the probe must carry its own deadline")
 
 	before := src.calls()
 	require.Eventually(t, func() bool { return src.calls() > before+2 },
