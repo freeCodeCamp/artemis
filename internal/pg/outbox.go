@@ -152,3 +152,15 @@ func (r *Repo) PurgeOutbox(ctx context.Context, before time.Time, limit int, dry
 	}
 	return int(tag.RowsAffected()), nil
 }
+
+func (r *Repo) OutboxBacklog(ctx context.Context) (int, time.Duration, error) {
+	var count int
+	var oldestSeconds float64
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*), coalesce(extract(epoch FROM now() - min(created_at)), 0)
+		   FROM outbox
+		  WHERE published_at IS NULL`).Scan(&count, &oldestSeconds); err != nil {
+		return 0, 0, fmt.Errorf("pg outbox backlog: %w", err)
+	}
+	return count, time.Duration(oldestSeconds * float64(time.Second)), nil
+}
