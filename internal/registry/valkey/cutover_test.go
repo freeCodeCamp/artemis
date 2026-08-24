@@ -14,12 +14,13 @@ import (
 )
 
 type stubSource struct {
-	mu     sync.Mutex
-	bySite map[sitekey.Slug][]string
+	mu       sync.Mutex
+	bySite   map[sitekey.Slug][]string
+	reserved map[sitekey.Slug]bool
 }
 
 func newStubSource() *stubSource {
-	return &stubSource{bySite: map[sitekey.Slug][]string{}}
+	return &stubSource{bySite: map[sitekey.Slug][]string{}, reserved: map[sitekey.Slug]bool{}}
 }
 
 func (s *stubSource) set(slug sitekey.Slug, teams []string) {
@@ -28,14 +29,48 @@ func (s *stubSource) set(slug sitekey.Slug, teams []string) {
 	s.bySite[slug] = append([]string(nil), teams...)
 }
 
+func (s *stubSource) reserve(slug sitekey.Slug) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reserved[slug] = true
+}
+
 func (s *stubSource) Sites(_ context.Context) ([]registry.Site, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]registry.Site, 0, len(s.bySite))
 	for slug, teams := range s.bySite {
-		out = append(out, registry.Site{Slug: slug, Teams: append([]string(nil), teams...)})
+		state := registry.StateActive
+		if s.reserved[slug] {
+			state = registry.StateReserved
+		}
+		out = append(out, registry.Site{Slug: slug, Teams: append([]string(nil), teams...), State: state})
 	}
 	return out, nil
+}
+
+func TestReaderRefresh_ExpelsAReservedSiteFromTheSnapshot(t *testing.T) {
+	t.Parallel()
+
+	pubsub, _, _ := newStore(t)
+	source := newStubSource()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source.set("live", []string{"staff"})
+	source.set("taken-down", []string{"staff"})
+
+	reader, err := valkey.NewReaderFromSource(ctx, source, pubsub, valkey.DefaultRefreshFallback)
+	require.NoError(t, err)
+	require.Equal(t, []sitekey.Slug{"live", "taken-down"}, reader.Snapshot().Sites())
+
+	source.reserve("taken-down")
+	require.NoError(t, reader.Refresh(ctx))
+
+	snap := reader.Snapshot()
+	require.Equal(t, []sitekey.Slug{"live"}, snap.Sites(),
+		"a reserved name must leave every snapshot-driven authz path")
+	require.Nil(t, snap.TeamsForSite("taken-down"))
 }
 
 func TestRegistryCutover(t *testing.T) {

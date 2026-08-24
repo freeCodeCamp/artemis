@@ -51,6 +51,10 @@ func (s *RegistryStore) Register(ctx context.Context, slug sitekey.Slug, teams [
 		return registry.Site{}, fmt.Errorf("pg registry register %s: %w", slug, err)
 	}
 	if tag.RowsAffected() == 0 {
+		existing, getErr := s.GetSite(ctx, slug)
+		if getErr == nil && existing.IsReserved() {
+			return registry.Site{}, registry.ErrReserved
+		}
 		return registry.Site{}, registry.ErrAlreadyExists
 	}
 	s.changed(slug)
@@ -136,9 +140,7 @@ func (s *RegistryStore) Import(ctx context.Context, src SitesSource) (int, error
 
 func (s *RegistryStore) GetSite(ctx context.Context, slug sitekey.Slug) (registry.Site, error) {
 	var site registry.Site
-	err := s.pool.QueryRow(ctx,
-		`SELECT slug, teams, created_at, updated_at, created_by FROM sites WHERE slug = $1`,
-		slug).Scan(&site.Slug, &site.Teams, &site.CreatedAt, &site.UpdatedAt, &site.CreatedBy)
+	err := scanSite(s.pool.QueryRow(ctx, siteColumns+` FROM sites WHERE slug = $1`, slug), &site)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return registry.Site{}, registry.ErrNotFound
 	}
@@ -148,9 +150,23 @@ func (s *RegistryStore) GetSite(ctx context.Context, slug sitekey.Slug) (registr
 	return site, nil
 }
 
+const siteColumns = `SELECT slug, teams, created_at, updated_at, created_by,
+	state, reserved_until, reserved_by`
+
+func scanSite(row rowScanner, out *registry.Site) error {
+	var reservedUntil *time.Time
+	if err := row.Scan(&out.Slug, &out.Teams, &out.CreatedAt, &out.UpdatedAt, &out.CreatedBy,
+		&out.State, &reservedUntil, &out.ReservedBy); err != nil {
+		return err
+	}
+	if reservedUntil != nil {
+		out.ReservedUntil = reservedUntil.UTC()
+	}
+	return nil
+}
+
 func (s *RegistryStore) Sites(ctx context.Context) ([]registry.Site, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT slug, teams, created_at, updated_at, created_by FROM sites ORDER BY slug`)
+	rows, err := s.pool.Query(ctx, siteColumns+` FROM sites ORDER BY slug`)
 	if err != nil {
 		return nil, fmt.Errorf("pg registry list: %w", err)
 	}
@@ -159,7 +175,7 @@ func (s *RegistryStore) Sites(ctx context.Context) ([]registry.Site, error) {
 	var out []registry.Site
 	for rows.Next() {
 		var site registry.Site
-		if err := rows.Scan(&site.Slug, &site.Teams, &site.CreatedAt, &site.UpdatedAt, &site.CreatedBy); err != nil {
+		if err := scanSite(rows, &site); err != nil {
 			return nil, fmt.Errorf("pg registry scan: %w", err)
 		}
 		out = append(out, site)

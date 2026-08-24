@@ -90,6 +90,11 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	defer cancelCommit()
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
+		if row, err := h.requireWritableSite(commitCtx, site); err != nil {
+			h.writeFenceError(w, r, "registry.get.promote",
+				"site was deleted; its alias cannot be written", row, err)
+			return errAliasWriteHandled
+		}
 		// CAS guard: read current production alias and bail on mismatch.
 		// Treat missing-alias as the empty string so callers can use CAS
 		// to assert "no prod yet" by passing ExpectedCurrent="".
@@ -221,6 +226,11 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+		if row, err := h.requireWritableSite(commitCtx, site); err != nil {
+			h.writeFenceError(w, r, "registry.get.rollback",
+				"site was deleted; its alias cannot be written", row, err)
+			return errAliasWriteHandled
+		}
 		prefix := h.deployPrefix(site, req.To)
 		exists, err := h.R2.HasPrefix(commitCtx, prefix)
 		if err != nil {

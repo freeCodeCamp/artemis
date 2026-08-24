@@ -57,6 +57,7 @@ type RegistryWriter = registry.Writer
 type R2Store interface {
 	PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error
 	PutAlias(ctx context.Context, aliasKey, deployID string) error
+	DeleteAlias(ctx context.Context, aliasKey string) error
 	GetAlias(ctx context.Context, aliasKey string) (string, error)
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
 	HasPrefix(ctx context.Context, prefix string) (bool, error)
@@ -176,6 +177,31 @@ func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn
 		return closureErr
 	}
 	return lockerErr
+}
+
+func (h *Handlers) requireWritableSite(ctx context.Context, slug sitekey.Slug) (registry.Site, error) {
+	site, err := h.Registry.GetSite(ctx, slug)
+	if err != nil {
+		return registry.Site{}, err
+	}
+	if site.IsReserved() {
+		return site, registry.ErrReserved
+	}
+	return site, nil
+}
+
+func (h *Handlers) writeFenceError(w http.ResponseWriter, r *http.Request, op, goneMessage string,
+	site registry.Site, err error) {
+	switch {
+	case errors.Is(err, registry.ErrReserved):
+		writeErrorDetail(w, http.StatusConflict, "site_reserved",
+			"site name is reserved after a delete; undelete it or wait for the reclaim",
+			map[string]any{"reservedUntil": site.ReservedUntil.UTC().Format(time.RFC3339)})
+	case errors.Is(err, registry.ErrNotFound):
+		writeError(w, http.StatusGone, "site_gone", goneMessage)
+	default:
+		writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", op, err)
+	}
 }
 
 func (h *Handlers) auditFromScope(ctx context.Context, action, outcome string, detail map[string]any) {

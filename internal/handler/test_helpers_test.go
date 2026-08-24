@@ -96,6 +96,16 @@ func (f *fakeRegistry) Delete(_ context.Context, slug sitekey.Slug) error {
 	return nil
 }
 
+func (f *fakeRegistry) reserve(slug sitekey.Slug, until time.Time) {
+	site, ok := f.bySite[slug]
+	if !ok {
+		site = registry.Site{Slug: slug}
+	}
+	site.State = registry.StateReserved
+	site.ReservedUntil = until
+	f.bySite[slug] = site
+}
+
 func (f *fakeRegistry) GetSite(_ context.Context, slug sitekey.Slug) (registry.Site, error) {
 	if f.getErr != nil {
 		return registry.Site{}, f.getErr
@@ -312,6 +322,11 @@ type fakeR2 struct {
 	// Direct-write promote (#28) + rollback CAS (#29) tests use this to
 	// assert which alias keys were/weren't probed.
 	getAliasKeys []string
+
+	deleteAliasKeys []string
+	deleteAliasFail map[string]error
+	putObjectKeys   []string
+	movePrefixSrcs  []string
 }
 
 func newFakeR2() *fakeR2 {
@@ -324,6 +339,7 @@ func newFakeR2() *fakeR2 {
 func (f *fakeR2) PutObject(_ context.Context, key string, body io.Reader, _ string, _ int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.putObjectKeys = append(f.putObjectKeys, key)
 	if f.putErr != nil {
 		return f.putErr
 	}
@@ -354,6 +370,18 @@ func (f *fakeR2) PutAlias(_ context.Context, aliasKey, deployID string) error {
 		return f.putErr
 	}
 	f.aliases[aliasKey] = deployID
+	return nil
+}
+
+func (f *fakeR2) DeleteAlias(_ context.Context, aliasKey string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteAliasKeys = append(f.deleteAliasKeys, aliasKey)
+	if err, ok := f.deleteAliasFail[aliasKey]; ok {
+		return err
+	}
+	delete(f.aliases, aliasKey)
+	delete(f.objects, aliasKey)
 	return nil
 }
 
@@ -421,6 +449,7 @@ func (f *fakeR2) MovePrefix(ctx context.Context, src, dst string) (int, error) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.movePrefixSrcs = append(f.movePrefixSrcs, src)
 	if f.listErr != nil {
 		return 0, f.listErr
 	}

@@ -14,6 +14,7 @@ const (
 	opDriftSelfCheck      = "drift.selfcheck"
 	opDriftUnreadable     = "drift.unreadable"
 	opDriftAliasedMissing = "drift.aliased_missing"
+	opDriftOrphanAliases  = "drift.orphan_aliases"
 	opDriftReclaimable    = "drift.reclaimable"
 )
 
@@ -26,7 +27,7 @@ type driftVerdict struct {
 }
 
 func classifyDrift(res sweepResult) driftVerdict {
-	unread := unreadableErr(unreadableSites(res.Reports), res.Stats.Sites)
+	unread := errors.Join(unreadableErr(unreadableSites(res.Reports), res.Stats.Sites), res.OrphanErr)
 	if err := res.Stats.validate(); err != nil {
 		return driftVerdict{Op: opDriftSelfCheck, Err: errors.Join(err, unread), Fails: true}
 	}
@@ -41,6 +42,15 @@ func classifyDrift(res sweepResult) driftVerdict {
 	}
 	if unread != nil {
 		return driftVerdict{Op: opDriftUnreadable, Err: unread, Fails: true}
+	}
+	if len(res.OrphanAliases) > 0 {
+		return driftVerdict{
+			Op: opDriftOrphanAliases,
+			Err: fmt.Errorf(
+				"%d alias key(s) serve names with no registry row (%s): a deregistered site is still on the "+
+					"public internet; unpublish each with DELETE, or release it if the name is meant to go",
+				len(res.OrphanAliases), strings.Join(orphanAliasNames(res.OrphanAliases), ", ")),
+		}
 	}
 	if reindex, tombstone, _, _ := res.totals(); reindex+tombstone >= reclaimableAlertThreshold {
 		sites := reclaimableSites(res.Reports)
@@ -97,6 +107,14 @@ func unreadableSites(reports []siteDrift) []string {
 	return out
 }
 
+func orphanAliasNames(orphans []orphanAlias) []string {
+	out := make([]string, 0, len(orphans))
+	for _, o := range orphans {
+		out = append(out, fmt.Sprintf("%s (%s)", o.Dirname, strings.Join(o.Modes, ",")))
+	}
+	return out
+}
+
 func aliasedMissingSites(reports []siteDrift) ([]string, int) {
 	var sites []string
 	total := 0
@@ -129,6 +147,7 @@ func alertOnDrift(ctx context.Context, res sweepResult) error {
 		"tombstone", tombstone,
 		"prune", prune,
 		"aliased_missing", aliased,
+		"orphan_aliases", len(res.OrphanAliases),
 		"err", v.Err)
 	captureBackground(v.Op, v.Err)
 	if v.Fails {

@@ -245,25 +245,8 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	markerKey := prefix + gc.MarkerObjectName
 	meta := fmt.Sprintf(`{"site":%q,"deployId":%q,"mode":%q,"finalizedAt":%q}`,
 		string(claims.Site), deployID, mode, time.Now().UTC().Format(time.RFC3339))
-	if err := telemetry.WithSpan(r.Context(), "r2.put.marker.finalize", func(ctx context.Context) error {
-		return h.R2.PutObject(ctx, markerKey, strings.NewReader(meta), "application/json", int64(len(meta)))
-	}); err != nil {
-		writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.marker.finalize", err)
-		return
-	}
 
 	var deployBytes int64
-	err = telemetry.WithSpan(r.Context(), "r2.list.bytes.finalize", func(ctx context.Context) error {
-		var e error
-		deployBytes, e = h.R2.PrefixBytes(ctx, prefix)
-		return e
-	})
-	if err != nil {
-		slog.WarnContext(r.Context(), "deploy.finalize.bytes_unavailable", "err", err)
-		reportUpstream(r, "bytes_unavailable", "r2.list.bytes.finalize", err)
-		deployBytes = 0
-	}
-
 	aliasKey := h.aliasKey(claims.Site, mode)
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
@@ -274,14 +257,30 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
-		if _, err := h.Registry.GetSite(commitCtx, claims.Site); err != nil {
-			if errors.Is(err, registry.ErrNotFound) {
-				writeError(w, http.StatusGone, "site_gone", "site was deleted; deploy cannot be finalized")
-				return errAliasWriteHandled
+		site, err := h.requireWritableSite(commitCtx, claims.Site)
+		if err != nil {
+			if !errors.Is(err, registry.ErrNotFound) && !errors.Is(err, registry.ErrReserved) {
+				auditFinalizeFailure("registry")
 			}
-			auditFinalizeFailure("registry")
-			writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "registry.get.finalize", err)
+			h.writeFenceError(w, r, "registry.get.finalize",
+				"site was deleted; deploy cannot be finalized", site, err)
 			return errAliasWriteHandled
+		}
+		if err := telemetry.WithSpan(commitCtx, "r2.put.marker.finalize", func(ctx context.Context) error {
+			return h.R2.PutObject(ctx, markerKey, strings.NewReader(meta), "application/json", int64(len(meta)))
+		}); err != nil {
+			auditFinalizeFailure("marker")
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.marker.finalize", err)
+			return errAliasWriteHandled
+		}
+		if bytesErr := telemetry.WithSpan(commitCtx, "r2.list.bytes.finalize", func(ctx context.Context) error {
+			var e error
+			deployBytes, e = h.R2.PrefixBytes(ctx, prefix)
+			return e
+		}); bytesErr != nil {
+			slog.WarnContext(r.Context(), "deploy.finalize.bytes_unavailable", "err", bytesErr)
+			reportUpstream(r, "bytes_unavailable", "r2.list.bytes.finalize", bytesErr)
+			deployBytes = 0
 		}
 		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.finalize", func(ctx context.Context) error {
 			return h.R2.PutAlias(ctx, aliasKey, deployID)

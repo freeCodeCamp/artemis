@@ -169,7 +169,12 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancel()
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func() error {
-		before, beforeErr = h.Registry.GetSite(opCtx, slug)
+		before, beforeErr = h.requireWritableSite(opCtx, slug)
+		if errors.Is(beforeErr, registry.ErrReserved) {
+			h.writeFenceError(w, r, "registry.get.update", "site is not registered", before, beforeErr)
+			wrote = true
+			return nil
+		}
 		var err error
 		site, err = h.Registry.UpdateTeams(opCtx, slug, req.Teams)
 		if err != nil {

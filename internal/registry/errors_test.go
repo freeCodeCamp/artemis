@@ -65,8 +65,21 @@ func TestSentinelErrors_NonNilAndDistinct(t *testing.T) {
 
 	require.Error(t, ErrAlreadyExists)
 	require.Error(t, ErrNotFound)
+	require.Error(t, ErrReserved)
 	require.NotErrorIs(t, ErrAlreadyExists, ErrNotFound)
 	require.NotErrorIs(t, ErrNotFound, ErrAlreadyExists)
+	require.NotErrorIs(t, ErrReserved, ErrAlreadyExists)
+	require.NotErrorIs(t, ErrReserved, ErrNotFound)
+	require.NotErrorIs(t, ErrAlreadyExists, ErrReserved)
+}
+
+func TestSiteIsReserved_AnUnsetStateReadsAsActive(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, Site{}.IsReserved(),
+		"a backend that stores no state — valkey — must not read as fenced")
+	require.False(t, Site{State: StateActive}.IsReserved())
+	require.True(t, Site{State: StateReserved}.IsReserved())
 }
 
 func TestSentinelErrors_MessageContract(t *testing.T) {
@@ -79,6 +92,7 @@ func TestSentinelErrors_MessageContract(t *testing.T) {
 	}{
 		{"already exists", ErrAlreadyExists, "registry: site already exists"},
 		{"not found", ErrNotFound, "registry: site not found"},
+		{"reserved", ErrReserved, "registry: site name is reserved"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
