@@ -346,7 +346,7 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 			return int(moved.Load()), fmt.Errorf("r2 moveprefix list %s: %w", srcPrefix, err)
 		}
 
-		g, gctx := errgroup.WithContext(ctx)
+		var g errgroup.Group
 		g.SetLimit(movePrefixConcurrency)
 		for _, obj := range page.Contents {
 			if obj.Key == nil {
@@ -354,7 +354,7 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 			}
 			key := *obj.Key
 			g.Go(func() error {
-				if err := c.moveObject(gctx, key, dstPrefix+strings.TrimPrefix(key, srcPrefix)); err != nil {
+				if err := c.moveObject(ctx, key, dstPrefix+strings.TrimPrefix(key, srcPrefix)); err != nil {
 					return err
 				}
 				moved.Add(1)

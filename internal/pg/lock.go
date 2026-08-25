@@ -2,7 +2,6 @@ package pg
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -76,19 +75,17 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 		}
 	}()
 
-	lockCtx, lost := context.WithCancelCause(ctx)
-	defer lost(nil)
+	lockCtx, lost := context.WithCancel(ctx)
+	defer lost()
 	stop := s.watchLiveness(ctx, site, lost)
 	defer stop()
 	return fn(lockCtx)
 }
 
-var ErrLockSessionLost = errors.New("pg: the connection holding the site lock stopped answering")
-
 const defaultLockHeartbeat = 5 * time.Second
 
 func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname,
-	lost context.CancelCauseFunc) func() {
+	lost context.CancelFunc) func() {
 	done := make(chan struct{})
 	exited := make(chan struct{})
 	go func() {
@@ -108,7 +105,7 @@ func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname,
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					slog.WarnContext(ctx, "lock.site.session_lost", "site", site, "err", err)
-					lost(fmt.Errorf("%w: %w", ErrLockSessionLost, err))
+					lost()
 					if s.onLost != nil {
 						s.onLost()
 					}

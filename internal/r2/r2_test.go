@@ -57,6 +57,7 @@ type fakeS3 struct {
 	deleteFailKeys    map[string]struct{}
 	failDeleteKeys    map[string]struct{}
 	failCopyKeys      map[string]struct{}
+	denyCopyKeys      map[string]struct{}
 	failGetKeys       map[string]struct{}
 	truncateGetKeys   map[string]struct{}
 
@@ -291,9 +292,14 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
 	f.mu.Lock()
 	_, failCopy := f.failCopyKeys[destKey]
+	_, denyCopy := f.denyCopyKeys[destKey]
 	f.mu.Unlock()
 	if failCopy {
 		writeS3Error(w, http.StatusInternalServerError, "InternalError", "copy failed")
+		return
+	}
+	if denyCopy {
+		writeS3Error(w, http.StatusForbidden, "AccessDenied", "copy denied")
 		return
 	}
 	for i := 0; i < len(copySource); i++ {
@@ -310,8 +316,11 @@ func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
 	src = strings.TrimPrefix(src, "/")
 	srcKey := strings.TrimPrefix(src, f.bucket+"/")
 
-	if f.onObjectWrite != nil {
-		f.onObjectWrite()
+	f.mu.Lock()
+	onWrite := f.onObjectWrite
+	f.mu.Unlock()
+	if onWrite != nil {
+		onWrite()
 	}
 	f.mu.Lock()
 	body, ok := f.objects[f.bucket+"/"+srcKey]
@@ -862,10 +871,12 @@ func TestMovePrefix_CopySucceedsThenDeleteFails_AbortsWithPartialProgress(t *tes
 	}
 
 	n, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
-	require.Error(t, err, "post-copy DeleteObject failure must abort the move")
+	require.Error(t, err, "post-copy DeleteObject failure must fail the move")
 	assert.Contains(t, err.Error(), "moveprefix delete",
 		"error must be wrapped with the moveprefix delete context")
-	assert.Equal(t, 1, n, "only the cleanly moved object counts; the failed one aborts the loop")
+	assert.Equal(t, 1, n,
+		"every object in the page gets its own attempt, so the count is exact rather than a race "+
+			"against whichever peer failed first")
 
 	dst, derr := c.GetAlias(context.Background(), "_trash/www/d1/b.html")
 	require.NoError(t, derr)
@@ -1024,8 +1035,7 @@ func TestMovePrefix_FinishesASiteFarLargerThanOneSerialRunCould(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, objects, moved,
-		"a serial copy+delete loop tops out near 215 objects inside the run budget, so a 900-object "+
-			"site never finished and an operator had to repeat the call")
+		"every listed object must move in one call, across every listing page")
 	assert.Greater(t, rec.peakSeen(), 1,
 		"the objects must move concurrently; a serial loop is the whole defect")
 	assert.LessOrEqual(t, rec.peakSeen(), movePrefixConcurrency,
@@ -1034,4 +1044,35 @@ func TestMovePrefix_FinishesASiteFarLargerThanOneSerialRunCould(t *testing.T) {
 	remaining, err := c.HasPrefix(context.Background(), "big.freecode.camp/")
 	require.NoError(t, err)
 	assert.False(t, remaining, "a purge that leaves objects behind answers 502 r2_move_incomplete")
+}
+
+func TestMovePrefix_AFailureLeavesNoPeerCopiedButNotDeleted(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.denyCopyKeys = map[string]struct{}{"_trash/www/d1/0000.html": {}}
+	fake.onObjectWrite = func() { time.Sleep(150 * time.Millisecond) }
+	c := newClient(t, fake)
+	const objects = 64
+	for i := range objects {
+		fake.put("b", fmt.Sprintf("www/deploys/d1/%04d.html", i), []byte("v"))
+	}
+
+	moved, err := c.MovePrefix(context.Background(), "www/deploys/d1/", "_trash/www/d1/")
+
+	require.Error(t, err)
+	assert.Equal(t, objects-1, moved,
+		"one failing copy must not cancel its peers mid-move; a cancelled peer would land at dst "+
+			"with its src copy alive and go uncounted, so the caller could not tell what survived")
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var stranded []string
+	for i := range objects {
+		key := fmt.Sprintf("www/deploys/d1/%04d.html", i)
+		_, atSrc := fake.objects["b/"+key]
+		_, atDst := fake.objects["b/_trash/www/d1/"+fmt.Sprintf("%04d.html", i)]
+		if atSrc && atDst {
+			stranded = append(stranded, key)
+		}
+	}
+	assert.Empty(t, stranded, "an object living at both src and dst is a silent duplicate nothing collects")
 }
