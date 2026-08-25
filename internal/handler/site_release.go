@@ -45,12 +45,13 @@ func (h *Handlers) SiteRelease(w http.ResponseWriter, r *http.Request) {
 		wrote bool
 	)
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
-		if err := h.NameReleaser.ReleaseReservationNow(opCtx, slug); err != nil {
-			auditReleaseFailure("release")
-			if errors.Is(err, registry.ErrNotFound) {
+		_, err := h.requireWritableSite(opCtx, slug)
+		if !errors.Is(err, registry.ErrReserved) {
+			auditReleaseFailure("state")
+			if err == nil || errors.Is(err, registry.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "not_found", "site is not a reserved name")
 			} else {
-				writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "pg.release.reservation", err)
+				writeUpstreamError(w, r, http.StatusBadGateway, "registry_read_failed", "pg.get.site", err)
 			}
 			wrote = true
 			return nil
@@ -73,6 +74,19 @@ func (h *Handlers) SiteRelease(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			auditReleaseFailure("reclaim")
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-release", err)
+			wrote = true
+			return nil
+		}
+		// COMPATIBILITY entry 19: bytes first, name second. A name freed
+		// while its objects are at the origin lets a new owner inherit
+		// a stranger's site, and SiteRegister takes no site lock.
+		if err := h.NameReleaser.ReleaseReservationNow(opCtx, slug); err != nil {
+			auditReleaseFailure("release")
+			if errors.Is(err, registry.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "site is not a reserved name")
+			} else {
+				writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "pg.release.reservation", err)
+			}
 			wrote = true
 			return nil
 		}

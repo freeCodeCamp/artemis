@@ -481,11 +481,25 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "reservation store not configured")
 		return
 	}
-	res, err := reverser.Undelete(r.Context(), slug)
-	if err != nil {
+	// The lock is shared with SiteRelease, which trashes the origin bytes
+	// before it frees the name. An undelete landing inside that window
+	// would return an emptied site to service.
+	var res registry.Reservation
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancel()
+	var undeleteErr error
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func(opCtx context.Context) error {
+		res, undeleteErr = reverser.Undelete(opCtx, slug)
+		return nil
+	})
+	if lockErr != nil {
+		writeLockError(w, r, lockErr)
+		return
+	}
+	if undeleteErr != nil {
 		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 		h.auditFromScope(r.Context(), "site.undelete", "failure", nil)
-		writeRegistryDeleteError(w, r, err)
+		writeRegistryDeleteError(w, r, undeleteErr)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")

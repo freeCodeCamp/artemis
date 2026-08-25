@@ -250,3 +250,34 @@ func TestRegistryStore_ReleaseReservationRefusesARowThatIsNoLongerReserved(t *te
 	require.NoError(t, err)
 	assert.False(t, site.IsReserved())
 }
+
+func TestRegistryStore_ReleaseReservationNowFreesAReservationBeforeItsDeadline(t *testing.T) {
+	store, _, ctx := newReservationFixture(t)
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname,
+		time.Now().UTC().Add(72*time.Hour), "bob")
+	require.NoError(t, err)
+
+	require.NoError(t, store.ReleaseReservationNow(ctx, reservationSlug),
+		"the whole point of an approver release is that the deadline has not passed")
+
+	_, err = store.GetSite(ctx, reservationSlug)
+	assert.ErrorIs(t, err, registry.ErrNotFound, "the name must be registrable again")
+}
+
+func TestRegistryStore_ReleaseReservationNowRefusesAnActiveRow(t *testing.T) {
+	store, _, ctx := newReservationFixture(t)
+
+	err := store.ReleaseReservationNow(ctx, reservationSlug)
+
+	assert.ErrorIs(t, err, registry.ErrNotFound,
+		"releasing a live site would free a name whose owner never asked for a delete")
+	site, getErr := store.GetSite(ctx, reservationSlug)
+	require.NoError(t, getErr)
+	assert.False(t, site.IsReserved())
+}
+
+func TestRegistryStore_ReleaseReservationNowIsNotFoundForAnAbsentSlug(t *testing.T) {
+	store, _, ctx := newReservationFixture(t)
+
+	assert.ErrorIs(t, store.ReleaseReservationNow(ctx, "absent"), registry.ErrNotFound)
+}
