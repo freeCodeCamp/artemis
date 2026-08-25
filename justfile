@@ -24,7 +24,7 @@ build:
 test:
     {{go}} test -race -cover {{pkg}}
 
-# CI's coverage gate: >=80% on the nine core packages
+# CI's coverage gate: >=80% on every package the release range changes
 covgate:
     {{go}} test -race -coverprofile=coverage.out {{pkg}}
     {{go}} tool cover -func=coverage.out > coverage.txt
@@ -38,6 +38,11 @@ covgate:
         -pkg github.com/freeCodeCamp/artemis/internal/telemetry \
         -pkg github.com/freeCodeCamp/artemis/internal/config \
         -pkg github.com/freeCodeCamp/artemis/internal/server \
+        -pkg github.com/freeCodeCamp/artemis/cmd/artemis \
+        -pkg github.com/freeCodeCamp/artemis/internal/r2 \
+        -pkg github.com/freeCodeCamp/artemis/internal/registry \
+        -pkg github.com/freeCodeCamp/artemis/internal/registry/valkey \
+        -pkg github.com/freeCodeCamp/artemis/internal/retryconnect \
         coverage.txt
 
 # go test with coverage profile + html report (unit only)

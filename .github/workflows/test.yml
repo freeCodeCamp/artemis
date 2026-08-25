@@ -53,7 +53,7 @@ jobs:
       - name: go test (race + cover)
         run: go test -race -coverprofile=coverage.out ./...
 
-      - name: coverage gate (>=80% on core packages)
+      - name: coverage gate (>=80% on every package the release range changes)
         run: |
           set -euo pipefail
           go tool cover -func=coverage.out > coverage.txt
@@ -68,4 +68,9 @@ jobs:
             -pkg github.com/freeCodeCamp/artemis/internal/telemetry \
             -pkg github.com/freeCodeCamp/artemis/internal/config \
             -pkg github.com/freeCodeCamp/artemis/internal/server \
+            -pkg github.com/freeCodeCamp/artemis/cmd/artemis \
+            -pkg github.com/freeCodeCamp/artemis/internal/r2 \
+            -pkg github.com/freeCodeCamp/artemis/internal/registry \
+            -pkg github.com/freeCodeCamp/artemis/internal/registry/valkey \
+            -pkg github.com/freeCodeCamp/artemis/internal/retryconnect \
             coverage.txt

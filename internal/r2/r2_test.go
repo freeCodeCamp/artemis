@@ -1123,3 +1123,24 @@ func TestHasObject_ErrorsOnUpstreamFailure(t *testing.T) {
 	require.Error(t, err,
 		"an unreachable bucket must not read as an absent alias, which would report a live site as an orphan")
 }
+
+func TestMovePrefix_Paginates(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.pageSize = 2
+	c := newClient(t, fake)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, c.PutObject(context.Background(),
+			fmtKey("s/deploys/d/f%02d.html", i), bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.MovePrefix(context.Background(), "s/deploys/d/", "_trash/s/d/")
+	require.NoError(t, err)
+	assert.Equal(t, 5, n, "a site larger than one list page must move whole, not one page of it")
+
+	src, err := c.HasPrefix(context.Background(), "s/deploys/d/")
+	require.NoError(t, err)
+	assert.False(t, src, "a partial move leaves a reserved site's bytes at the origin forever")
+	dst, err := c.HasPrefix(context.Background(), "_trash/s/d/")
+	require.NoError(t, err)
+	assert.True(t, dst)
+}
