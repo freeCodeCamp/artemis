@@ -95,9 +95,6 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 				"site was deleted; its alias cannot be written", row, err)
 			return errAliasWriteHandled
 		}
-		// CAS guard: read current production alias and bail on mismatch.
-		// Treat missing-alias as the empty string so callers can use CAS
-		// to assert "no prod yet" by passing ExpectedCurrent="".
 		if req.ExpectedCurrent != "" {
 			current, err := h.R2.GetAlias(commitCtx, prodKey)
 			if err != nil && !r2.IsNotFound(err) {
