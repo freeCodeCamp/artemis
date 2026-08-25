@@ -130,3 +130,38 @@ type movePrefixFailR2 struct {
 func (movePrefixFailR2) MovePrefix(context.Context, string, string) (int, error) {
 	return 0, errors.New("r2 down")
 }
+
+func TestSiteRelease_HoldsTheSiteLockAcrossTheWholeReclaim(t *testing.T) {
+	store := newFakeR2()
+	store.objects["www/deploys/d1/index.html"] = []byte("hi")
+	h, _, _, _ := releaseHandlers(t, adminRepoGH(), store)
+	reserveSite(h, h.Registry.(*fakeRegistry), "www", time.Now().Add(72*time.Hour))
+	log := &eventLog{}
+	h.Locker = &fakeLocker{log: log}
+	h.R2 = &loggingR2{fakeR2: store, log: log}
+
+	require.Equal(t, http.StatusOK, callRelease(h, "www", "boss", "atok").Code)
+
+	assert.Equal(t, []string{"lock:www", "move:www/", "unlock:www"}, log.events,
+		"the reclaim must run inside the lock; a move outside it races the sweep and undelete")
+}
+
+func TestSiteUndelete_TakesTheSameLockSiteReleaseHolds(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	rr := &reservedRegistry{RegistryWriter: h.Registry}
+	h.Registry = rr
+	h.Audit = &fakeAudit{}
+	log := &eventLog{}
+	h.Locker = &fakeLocker{log: log}
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, []string{"lock:www", "unlock:www"}, log.events,
+		"undelete must share SiteRelease's key, or it can return an emptied site mid-reclaim")
+}
