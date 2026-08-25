@@ -363,7 +363,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site sitekey.Slug) error {
 	teams := h.Sites.Snapshot().TeamsForSite(site)
 	if len(teams) == 0 {
-		writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+		h.denyUnregisteredSite(w, r, site)
 		return errBadRequest
 	}
 	login := LoginFromContext(r.Context())

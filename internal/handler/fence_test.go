@@ -42,7 +42,7 @@ func TestDeployFinalize_FencedReservedSiteRefusesTheAliasWrite(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, jwt, reg := fencedHandlers(t, store)
-	reg.reserve("www", fenceDeadline)
+	reserveSite(h, reg, "www", fenceDeadline)
 
 	w := callFinalize(t, h, jwt, deployID)
 
@@ -73,7 +73,7 @@ func TestSitePromote_FencedReservedSiteRefusesTheAliasWrite(t *testing.T) {
 	store.aliases["www/preview"] = "20260420-141522-abc1234"
 	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 	h, _, reg := fencedHandlers(t, store)
-	reg.reserve("www", fenceDeadline)
+	reserveSite(h, reg, "www", fenceDeadline)
 
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/promote",
 		"/api/site/www/promote", nil,
@@ -135,7 +135,7 @@ func TestSiteRollback_FencedReservedSiteRefusesTheAliasWrite(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, _, reg := fencedHandlers(t, store)
-	reg.reserve("www", fenceDeadline)
+	reserveSite(h, reg, "www", fenceDeadline)
 
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/rollback",
 		"/api/site/www/rollback", rollbackBody(t, deployID),
@@ -177,7 +177,7 @@ func TestSiteDeployRestore_FencedReservedSiteRefusesTheMove(t *testing.T) {
 	}}
 	h.TrashPrefixBase = "_trash/"
 	h.TrashRecovery = 7 * 24 * time.Hour
-	reg.reserve("www", fenceDeadline)
+	reserveSite(h, reg, "www", fenceDeadline)
 
 	w := withSiteRoute(http.MethodPost, "/api/site/{site}/deploys/{deployId}/restore",
 		"/api/site/www/deploys/"+deployID+"/restore", nil,
@@ -194,7 +194,7 @@ func TestSiteDeployRestore_FencedReservedSiteRefusesTheMove(t *testing.T) {
 func TestSiteUpdate_FencedReservedSiteRefusesTheTeamsChange(t *testing.T) {
 	store := newFakeR2()
 	h, _, reg := fencedHandlers(t, store)
-	reg.reserve("www", fenceDeadline)
+	reserveSite(h, reg, "www", fenceDeadline)
 	body, err := json.Marshal(SiteUpdateRequest{Teams: []string{"mallory-team"}})
 	require.NoError(t, err)
 

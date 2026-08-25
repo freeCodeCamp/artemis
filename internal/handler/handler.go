@@ -204,6 +204,18 @@ func (h *Handlers) requireWritableSite(ctx context.Context, slug sitekey.Slug) (
 	return site, nil
 }
 
+// The cached snapshot drops reserved sites, so a name held after a
+// delete reads there as one that never existed.
+func (h *Handlers) denyUnregisteredSite(w http.ResponseWriter, r *http.Request, slug sitekey.Slug) string {
+	site, err := h.requireWritableSite(r.Context(), slug)
+	if errors.Is(err, registry.ErrReserved) {
+		h.writeFenceError(w, r, "registry.get.authz", "", site, err)
+		return "site_reserved"
+	}
+	writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+	return "site_unauthorized"
+}
+
 func (h *Handlers) writeFenceError(w http.ResponseWriter, r *http.Request, op, goneMessage string,
 	site registry.Site, err error) {
 	switch {
