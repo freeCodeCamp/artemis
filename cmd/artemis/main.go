@@ -250,17 +250,13 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 					"closure was still running; postgres released the lock and the work in flight had no "+
 					"mutual exclusion"))
 		})
-		gcw, err = newGCWiring(cfg, lockRepo, r2Client)
-		if gcw != nil {
-			reg := pg.NewRegistryStore(pgDB)
-			gcw.Reservations = reg
-			gcw.NameReleaser = reg
-		}
+		gcw, err = newGCWiring(cfg, lockRepo, r2Client, registryWriter)
 		if err != nil {
 			return fmt.Errorf("wire gc: %w", err)
 		}
 		slog.Info("gc.wired",
 			"siteGCReady", gcw.SiteGC != nil,
+			"reservationSweepReady", gcw.Reservations != nil && gcw.NameReleaser != nil,
 			"blastCap", cfg.Cleanup.BlastCap,
 			"retentionDays", cfg.Cleanup.RetentionDays,
 			"dryRun", cfg.Cleanup.DryRun,

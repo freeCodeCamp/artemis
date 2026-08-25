@@ -203,7 +203,7 @@ func TestNewGCWiring_PlumbsBlastCapAndPrefixes(t *testing.T) {
 	repo := &pg.Repo{}
 	r2c := &r2.Client{}
 
-	w, err := newGCWiring(cfg, repo, r2c)
+	w, err := newGCWiring(cfg, repo, r2c, nil)
 	require.NoError(t, err)
 	require.NotNil(t, w)
 
@@ -236,7 +236,7 @@ func TestNewGCWiring_AuditActorActionSplit(t *testing.T) {
 		Cleanup: config.CleanupConfig{BlastCap: 5, RetentionDays: 7, RecoveryDays: 3, TrashPrefix: "_trash/"},
 	}
 
-	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, nil)
 	require.NoError(t, err)
 
 	ta, ok := w.SiteGC.Audit.(gcTombstoneAuditor)
@@ -256,7 +256,7 @@ func TestNewGCWiring_RejectsBadFormat(t *testing.T) {
 		DeployPrefixFormat: "<site>/deploys/",
 		Cleanup:            config.CleanupConfig{BlastCap: 5, TrashPrefix: "_trash/"},
 	}
-	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, nil)
 	require.Error(t, err, "a format missing the deploy-id token must fail boot wiring, not produce a degenerate prefix fn")
 	require.Nil(t, w)
 }
@@ -269,7 +269,7 @@ func TestNewGCWiring_RefusesAnAliasKeyFormatUnderADifferentSiteSegment(t *testin
 	cfg.Aliases.ProductionKeyFormat = "<site>.example.test/production"
 	cfg.Aliases.PreviewKeyFormat = "<site>.freecode.camp/preview"
 
-	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{})
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, nil)
 
 	require.Error(t, err,
 		"the wiring must refuse a config only a hand-built literal could produce: bootrun_test.go "+
@@ -363,7 +363,7 @@ func TestNewGCWiring_GivesEveryAuditorTheSlugConverter(t *testing.T) {
 	cfg.Aliases.ProductionKeyFormat = "<site>.freecode.camp/production"
 	cfg.Aliases.PreviewKeyFormat = "<site>.freecode.camp/preview"
 
-	w, err := newGCWiring(cfg, nil, nil)
+	w, err := newGCWiring(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	for name, got := range map[string]siteSlugFn{

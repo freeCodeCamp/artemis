@@ -13,6 +13,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/r2"
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
@@ -33,6 +34,7 @@ var (
 	_ backfill.Lister           = (*r2.Client)(nil)
 	_ backfill.Indexer          = (*pg.Repo)(nil)
 	_ pg.SitesSource            = (*valkey.Store)(nil)
+	_ reservationWiring         = (*pg.RegistryStore)(nil)
 )
 
 func wirePGRepo(h *handler.Handlers, repo *pg.Repo) {
@@ -202,7 +204,7 @@ type gcWiring struct {
 	OutboxRetention time.Duration
 }
 
-func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, error) {
+func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer registry.Writer) (*gcWiring, error) {
 	layout, err := newGCLayout(cfg.DeployPrefixFormat, cfg.Cleanup.TrashPrefix)
 	if err != nil {
 		return nil, err
@@ -221,8 +223,12 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client) (*gcWiring, 
 	if repo != nil {
 		outbox = repo
 	}
+	resv, _ := writer.(reservationWiring)
+
 	return &gcWiring{
-		Repo: repo,
+		Repo:         repo,
+		Reservations: resv,
+		NameReleaser: resv,
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
 			Tombstone: repo,

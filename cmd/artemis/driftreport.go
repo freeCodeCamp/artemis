@@ -350,7 +350,7 @@ func runDriftReport(ctx context.Context, out io.Writer) error {
 	}
 
 	repo := pg.NewRepo(db)
-	wiring, err := newGCWiring(cfg, repo, r2Client)
+	wiring, err := newGCWiring(cfg, repo, r2Client, nil)
 	if err != nil {
 		return fmt.Errorf("wire gc: %w", err)
 	}

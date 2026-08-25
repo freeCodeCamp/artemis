@@ -489,7 +489,7 @@ func TestNewGCWiring_SharesOneSiteLockerWithSiteGC(t *testing.T) {
 	cfg.Aliases.ProductionKeyFormat = "<site>/production"
 	cfg.Aliases.PreviewKeyFormat = "<site>/preview"
 
-	gcw, err := newGCWiring(cfg, pg.NewRepo(db), nil)
+	gcw, err := newGCWiring(cfg, pg.NewRepo(db), nil, nil)
 	require.NoError(t, err)
 
 	require.NotNil(t, gcw.Reconciler.Locker,

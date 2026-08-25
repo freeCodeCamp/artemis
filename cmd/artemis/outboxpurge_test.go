@@ -103,7 +103,7 @@ func TestNewGCWiring_CarriesTheConfiguredOutboxRetention(t *testing.T) {
 	cfg.Aliases.ProductionKeyFormat = "<site>/production"
 	cfg.Aliases.PreviewKeyFormat = "<site>/preview"
 
-	w, err := newGCWiring(cfg, nil, nil)
+	w, err := newGCWiring(cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, 14*24*time.Hour, w.OutboxRetention)
