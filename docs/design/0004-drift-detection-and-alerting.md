@@ -57,8 +57,16 @@ The job sends one event when a person must act. It stays silent when it finds on
 | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
 | `aliased-missing > 0`      | Sentry event, error level | An alias points at bytes that are lost. A live site is or will be broken.                        |
 | A site cannot be read      | Sentry event + job fails  | An unread site is unknown drift. It is never zero drift.                                         |
+| `orphan-aliases > 0`       | Sentry event, error level | An alias serves a name with no registry row. A deregistered site is on the public internet. Added 2026-08-25 with ADR 0006. |
 | The sweep self-check fails | Sentry event + job fails  | The sweep read a keyspace that no write path makes. This catches the original bug if it returns. |
 | Only reclaimable drift     | Sentry event at `reclaimableAlertThreshold` (25), else log the counts | Corrected 2026-08-24. This row read "Log the counts. No event" and the code has never matched it: `cmd/artemis/driftalert.go:20,45` sends an event at 25 or more. See the note below — the threshold is a known-wrong instrument, not a mismatch to be resolved by silencing the alert. |
+
+**A found verdict outranks a partial read.** Both the `aliased-missing` and `orphan-aliases` rows join
+any read error into their event and let it decide whether the job fails, rather than returning
+`unreadable` and discarding what they found. One flaky R2 HEAD on site 200 must not hide the orphan
+proved at site 3, because that orphan is a live deregistered site and the next clean night may be
+days away. `unreadable` is the verdict only when the scan found nothing AND could not see — which is
+genuinely unknown drift.
 
 A run that the engine kills for outrunning its budget is a third case. The timeout cancels the handler context, so `withCheckIn` still runs and closes the check-in red (`gcworkflows.go:41`). The cancellation is transient, but `drift.sweep` is a cron-shaped op (`internal/observability/sentry.go:377`), so it escapes the transient rate limiter and reaches Sentry on every occurrence instead of once.
 
@@ -76,4 +84,4 @@ Watch the check-in duration in Sentry. It records how long each run takes. A dur
 
 - A threshold that alerts when the reclaimable count GROWS. **This note predicted the trap and the code walked into it.** The threshold shipped at 25 against a count of 37, which is exactly the "under that number" case named here, so the alert has fired every night since. Production has reported an identical 35 across five consecutive nights (2026-08-20 to 08-24), so the count is flat, not growing — the level says nothing and only a change would. A level threshold cannot express that; the fix needs a durable high-water mark, which is state this job does not have today. Tracked as `#64`, and deliberately sequenced after the one-off sweep in `#67` so the number is chosen against a post-sweep baseline rather than invented a second time.
 - The alert's own wording claimed a trend it never measured. Until 2026-08-24 it read "storage is accruing faster than it is collected" while the count was flat. Corrected; an alert may state what the sweep saw and not what it infers.
-- A repair for bytes under a site name that Postgres does not know. The sweep and the reconciler both enumerate from Postgres. A prefix that exists only in R2 is invisible to both.
+- A repair for bytes under a site name that Postgres does not know. **Partly delivered 2026-08-25.** The orphan-alias phase enumerates site dirnames from the bucket, so an alias key with no registry row is now visible and reported. The bytes under such a prefix are still not reclaimed by any automated path; the reported repair is a staff `DELETE`, which unpublishes the name and answers 200. Everything else in the sweep, and the whole reconciler, still enumerate from Postgres.

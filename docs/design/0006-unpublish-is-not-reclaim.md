@@ -1,7 +1,13 @@
 # Local design 0006 — Deleting a site: unpublish now, reserve the name, reclaim later
 
-> **Status:** proposed (2026-08-21) · **Decision:** the operator's. Refines the delete semantics
-> ADR-016 leaves to implementation. Serve plane unchanged.
+> **Status:** accepted (2026-08-21), implemented except step 7b (2026-08-25) · **Decision:** the
+> operator's. Refines the delete semantics ADR-016 leaves to implementation. Serve plane unchanged.
+>
+> Steps 1-6 and 7a are on `main` and unreleased. Step 7b — the approver-gated early-release
+> endpoint — does not exist; there is no release route in `internal/server/server.go`. Two
+> statements below were true when this was written and are not now: the "seven sites are already
+> broken" remediation names `?purge=true`, which is retired by step 7a, and the current procedure
+> is a plain `DELETE` (`docs/COMPATIBILITY.md` entry 22); and `R2Store.DeleteAlias` exists.
 
 ## The decision
 

@@ -12,6 +12,7 @@
 //	POST   /api/site/register                             — GitHub bearer + registry-authz team
 //	PATCH  /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	DELETE /api/site/{slug}                               — GitHub bearer + registry-authz team
+//	POST   /api/site/{slug}/undelete                      — GitHub bearer + registry-authz team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
 //	DELETE /api/site/{site}/deploys/{deployId}            — GitHub bearer
 //	POST   /api/site/{site}/deploys/{deployId}/restore    — GitHub bearer

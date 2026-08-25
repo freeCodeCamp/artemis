@@ -61,7 +61,8 @@ Policy rides *on top of* the engine; it does not change with the substrate. Reta
 | V2  | newest `recentKeep` (3) per site never deleted, any age (rollback floor)                                        |
 | V3  | deploy younger than `graceMs` never deleted; `graceMs ≥ JWT_TTL` (max upload→finalize)                          |
 | V4  | no flow deletes bytes another is writing (grace + finalize-marker reachability)                                 |
-| V5  | every delete is a tombstone move first; byte-reclaim is a later app-driven purge pass                           |
+| V5  | every **deploy-content** delete is a tombstone move first; byte-reclaim is a later app-driven purge pass         |
+| V5a | alias objects are exempt from V5: `DELETE /api/site/{slug}` removes them outright (ADR 0006). An alias is a pointer, not content — the deploy it named is untouched and still restorable |
 | V6  | sweep aborts a site (deletes nothing) if its plan exceeds the blast-cap; plan persisted pre-delete              |
 | V7  | per-site mutations serialized + fairly scheduled (Hatchet concurrency key = site)                               |
 | V8  | alias mutations are last-writer-safe (single-writer-per-site via V7; optimistic re-read)                        |
