@@ -432,6 +432,20 @@ The pre-ADR-0006 purge code still stands in `internal/handler/site_register.go`,
 
 An origin-prefix move is only safe because the reservation has expired and the register path answers `409` for a reserved name, so the slug cannot have been re-claimed in the window. That guard is the precondition; do not lift this sweep out of the reservation flow and point it at arbitrary prefixes.
 
-**Still open, tracked as `#54`:** a site above roughly 215 objects cannot finish its move inside one `destructiveMoveTimeout`. The sweep is idempotent and re-lists on every run, so it completes across nights rather than in one. An approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today.
+**Still open:** an approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today. The object-count ceiling that stood here is closed by entry 21.
 
 **Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
+
+## 21 — a large prefix move finishes in one call
+
+**Release:** unreleased. Commit `d24258b`.
+
+**Old:** `MovePrefix` copied and deleted one object at a time, serially, at roughly 0.36 objects per second. Inside the 10-minute `destructiveMoveTimeout` that is a ceiling near 215 objects. Measured on production: site `languagegames` moved 218 of 799 objects and `prd-with-scaffolding` 214 of 906. `DELETE /api/site/{site}/deploys/{deployId}` on a large deploy answered `502 r2_move_incomplete`, and the only way to finish was to repeat the call four or five times. The operation was idempotent and re-listed its source, so repeating worked — but nothing repeated it. The one caller that knew to repeat was a human reading a runbook.
+
+**New:** each listing page moves through a bounded worker pool of 16. A 900-object site completes in one call. The bound is deliberate: unbounded fan-out would trade a slow purge for an R2 rate-limit outage, and `TestMovePrefix_FinishesASiteFarLargerThanOneSerialRunCould` fails under both mutations — set the limit to 1 and the concurrency assertion fails, remove the limit and the bound assertion fails.
+
+**The `moved` count is unchanged in meaning.** It is the number of objects that completed both their copy and their delete, counted atomically. Audit rows and the `r2_move_incomplete` verdict read the same number they always did.
+
+**Nightly reclaim benefits identically.** `reclaimSiteBytes` in the reservation sweep calls the same `MovePrefix`, so a reserved site's origin bytes now clear in one sweep pass rather than across nights.
+
+**Action:** none. A caller that looped on `502 r2_move_incomplete` can keep the loop; it will exit on the first pass.
