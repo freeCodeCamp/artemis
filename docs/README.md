@@ -104,7 +104,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | ------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)        |
 | `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                        |
-| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating approve/reject/delete; placeholder — production must override           |
+| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating repo approve/reject/delete and site release; placeholder — production must override |
 | `AUDIT_READ_AUTHZ_TEAM`   | `staff`                      | GH team (in `GH_REPO_ORG`) gating `GET /api/audit`; probed via the Universe-org client |
 | `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                               |
 | `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
