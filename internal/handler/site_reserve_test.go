@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -19,10 +20,18 @@ type fakeReservations struct {
 	until []time.Time
 	by    []string
 	err   error
+	// reg mirrors internal/pg/reservation.go:24 — Reserve locks the sites
+	// row first and answers ErrNotFound when there is none.
+	reg *fakeRegistry
 }
 
-func (f *fakeReservations) Reserve(_ context.Context, slug sitekey.Slug, _ sitekey.Dirname,
+func (f *fakeReservations) Reserve(ctx context.Context, slug sitekey.Slug, _ sitekey.Dirname,
 	until time.Time, by string) (registry.Reservation, error) {
+	if f.reg != nil {
+		if _, err := f.reg.GetSite(ctx, slug); err != nil {
+			return registry.Reservation{}, err
+		}
+	}
 	f.calls = append(f.calls, slug)
 	f.until = append(f.until, until)
 	f.by = append(f.by, by)
@@ -48,6 +57,9 @@ func reserveHandlers(t *testing.T, store R2Store) (*Handlers, *fakeReservations,
 	t.Helper()
 	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
 	res := &fakeReservations{}
+	if reg, ok := h.Registry.(*fakeRegistry); ok {
+		res.reg = reg
+	}
 	fa := &fakeAudit{}
 	h.Reservations = res
 	h.ReservationGrace = 72 * time.Hour
@@ -122,4 +134,70 @@ func TestSiteDelete_RepeatingADeleteOverAbsentAliasesStillReachesReserve(t *test
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.Len(t, res.calls, 1,
 		"a retry after a reserve failure must not stall on aliases the first attempt already removed")
+}
+
+func TestSiteDelete_OrphanedAliasWithNoRegistryRowUnpublishesAndSaysSo(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["ghost/production"] = "20260420-141522-abc1234"
+	store.aliases["ghost/preview"] = "20260420-141522-abc1234"
+	h, res, fa := reserveHandlers(t, store)
+
+	w := callDelete(h, "ghost", "alice", "tok")
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, store.aliases, "ghost/production",
+		"the orphan is only cleared once the serve plane stops answering")
+	assert.NotContains(t, store.aliases, "ghost/preview")
+	assert.Empty(t, res.calls, "there is no row to reserve, so no name is held")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "unpublished", body["status"])
+	assert.Equal(t, false, body["reserved"],
+		"the caller must learn undelete cannot bring this one back")
+
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "site.delete", fa.events[0].Action)
+	assert.Equal(t, "success", fa.events[0].Outcome,
+		"the audit trail must name what the call did, not report a failure it did not have")
+}
+
+func TestSiteDelete_OrphanedAliasDeleteIsIdempotent(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["ghost/production"] = "20260420-141522-abc1234"
+	h, _, _ := reserveHandlers(t, store)
+
+	require.Equal(t, http.StatusOK, callDelete(h, "ghost", "alice", "tok").Code)
+
+	w := callDelete(h, "ghost", "alice", "tok")
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "not_found",
+		"once the orphan is gone the name is absent, and absent is the 404 the matrix documents")
+}
+
+type headFailR2 struct {
+	*fakeR2
+	failKey string
+}
+
+func (d *headFailR2) HasObject(ctx context.Context, key string) (bool, error) {
+	if key == d.failKey {
+		return false, errors.New("r2 head timeout")
+	}
+	return d.fakeR2.HasObject(ctx, key)
+}
+
+func TestSiteDelete_AnUnreadableAliasProbeIsUnknownNotAbsent(t *testing.T) {
+	inner := newFakeR2()
+	inner.aliases["ghost/production"] = "20260420-141522-abc1234"
+	store := &headFailR2{fakeR2: inner, failKey: "ghost/production"}
+	h, _, fa := reserveHandlers(t, store)
+
+	w := callDelete(h, "ghost", "alice", "tok")
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, inner.aliases, "ghost/production")
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "success", fa.events[0].Outcome,
+		"a probe that could not read is unknown, not zero; 404 would assert nothing was served")
 }

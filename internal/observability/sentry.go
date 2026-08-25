@@ -384,7 +384,9 @@ var cronShapedOps = map[string]bool{
 	"drift.unreadable":      true,
 	"drift.aliased_missing": true,
 	"drift.reclaimable":     true,
+	"drift.orphan_aliases":  true,
 	"tombstone.purge":       true,
+	"reservation.sweep":     true,
 }
 
 // CaptureBackground reports an error raised outside any HTTP request

@@ -223,3 +223,21 @@ func TestClassifyDrift_ReclaimableAlertClaimsNoTrendItDidNotMeasure(t *testing.T
 	assert.Contains(t, v.Err.Error(), "artemis reconcile",
 		"an alert a human must answer has to carry the command that answers it")
 }
+
+func TestClassifyDrift_StillNamesAnOrphanFoundBeforeTheScanFailed(t *testing.T) {
+	res := healthySweep()
+	res.OrphanAliases = []orphanAlias{{Dirname: "ghost.freecode.camp", Modes: []string{"production"}}}
+	res.OrphanErr = errors.New("head alias other.freecode.camp/production: connection refused")
+
+	v := classifyDrift(res)
+
+	require.Equal(t, opDriftOrphanAliases, v.Op,
+		"an orphan already found must page; suppressing it behind a later read failure hides a live "+
+			"deregistered site until a night with no R2 hiccup")
+	require.Error(t, v.Err)
+	assert.Contains(t, v.Err.Error(), "ghost.freecode.camp")
+	assert.Contains(t, v.Err.Error(), "connection refused",
+		"the payload must still say the scan was incomplete, or the operator reads one orphan as the whole set")
+	assert.True(t, v.Fails,
+		"the scan did not finish, so the run goes red even though the orphan is what pages")
+}

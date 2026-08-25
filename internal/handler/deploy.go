@@ -62,8 +62,8 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 
 	teams := h.Sites.Snapshot().TeamsForSite(req.Site)
 	if len(teams) == 0 {
-		h.logAction(r.Context(), "deploy.init", "denied", slog.String("reason", "site_unauthorized"))
-		writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+		reason := h.denyUnregisteredSite(w, r, req.Site)
+		h.logAction(r.Context(), "deploy.init", "denied", slog.String("reason", reason))
 		return
 	}
 

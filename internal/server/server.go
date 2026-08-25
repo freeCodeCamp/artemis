@@ -12,6 +12,8 @@
 //	POST   /api/site/register                             — GitHub bearer + registry-authz team
 //	PATCH  /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	DELETE /api/site/{slug}                               — GitHub bearer + registry-authz team
+//	POST   /api/site/{slug}/undelete                      — GitHub bearer + registry-authz team
+//	POST   /api/site/{slug}/release                       — GitHub bearer + repo-approve team
 //	GET    /api/site/{site}/deploys                       — GitHub bearer
 //	DELETE /api/site/{site}/deploys/{deployId}            — GitHub bearer
 //	POST   /api/site/{site}/deploys/{deployId}/restore    — GitHub bearer
@@ -87,6 +89,7 @@ func newWithUploadTimeout(h *handler.Handlers, uploadTimeout time.Duration) http
 			r.Patch("/site/{slug}", h.SiteUpdate)
 			r.Delete("/site/{slug}", h.SiteDelete)
 			r.Post("/site/{slug}/undelete", h.SiteUndelete)
+			r.Post("/site/{slug}/release", h.SiteRelease)
 			r.Get("/site/{site}/deploys", h.SiteDeploys)
 			r.Delete("/site/{site}/deploys/{deployId}", h.SiteDeployDelete)
 			r.Post("/site/{site}/deploys/{deployId}/restore", h.SiteDeployRestore)

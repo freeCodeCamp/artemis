@@ -15,7 +15,9 @@ POST   /api/deploy/init                   { site, sha, files? } → { deployId, 
 GET    /api/sites                         [?slug=…]             → { count, sites: [SiteRow] }
 POST   /api/site/register                 { slug, teams? }      → 201 SiteRow
 PATCH  /api/site/{slug}                   { teams }             → 200 SiteRow
-DELETE /api/site/{slug}                   [?purge=true]         → 204 · or 200 { slug, status: "purged", moved } when purging
+DELETE /api/site/{slug}                   [?purge=true ignored] → 204 · or 200 { slug, status: "unpublished", reserved: false }
+POST   /api/site/{slug}/undelete                                → 200 { slug, prevProduction, prevPreview } · 404 not_found
+POST   /api/site/{slug}/release                                 → 200 { slug, status: "released", moved } · 403 · 404 not_found
 GET    /api/site/{site}/deploys                                 → [{ deployId, actor? }]
 DELETE /api/site/{site}/deploys/{deployId}                      → 200 { site, deployId, status: "tombstoned", moved } · 409 deploy_aliased
 POST   /api/site/{site}/deploys/{deployId}/restore              → 200 { site, deployId, status: "restored", moved, bytes } · 410 site_gone/already_purged
@@ -40,7 +42,7 @@ POST   /api/deploy/{deployId}/finalize    { mode }              → { url } · 4
 
 `/readyz` probes the three upstreams concurrently (5 s each, `internal/handler/readyz.go`). The grades differ by upstream. Valkey is the only hard failure: unreachable, it returns `503 valkey_unreachable` and the pod leaves the Service. An unreachable R2 or Postgres returns `200 {"ready":true,"degraded":true}` and the pod stays in rotation, logging `readyz.r2.degraded` or `readyz.postgres.degraded` at Warn. R2 degrades rather than drains because every replica shares one bucket, so an R2 fault hits all of them at once and a `503` would empty the Service; the endpoints that need R2 still answer their own `502` per request. A failing Valkey or R2 probe reaches Sentry only after `readyzPageThreshold` (3) consecutive failures, and then once per outage until the probe recovers — R2 still pages on that threshold even though the pod stays ready. The R2 probe is one `ListObjectsV2` with retries disabled and its own 3 s HTTP ceiling (`internal/r2/r2.go`), so a probe failure measures R2, not the SDK's retry budget.
 
-`/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}` removes both R2 alias objects and then reserves the name for `SITE_RESERVATION_GRACE` (default 72h); see ADR 0006 and `docs/COMPATIBILITY.md` entries 19-20. The site stops serving within the 15s serve-cache TTL. `?purge=true` is retired: it is accepted and ignored, so a caller that sends it gets the same reserving delete. `POST /api/site/{slug}/undelete` returns a reserved name to service inside the grace window; past the deadline it answers `404`, because the reclaim sweep owns the row from that moment. Every delete writes one `audit_log` row — `outcome=success`, or `outcome=failure` with `detail.stage` of `unpublish` or `reserve` naming how far it got. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone. It moves the bytes back from `_trash/` and marks the deploy active again. `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` after `trashedAt`).
+`/api/repo*` is mounted only when `RepoEnabled()` is true (Apollo-11 App credentials configured — see Configuration). `DELETE /api/site/{slug}` removes both R2 alias objects and then reserves the name for `SITE_RESERVATION_GRACE` (default 72h); see ADR 0006 and `docs/COMPATIBILITY.md` entries 19-20. The HTML stops serving within the 15s serve-cache TTL; Cloudflare caches non-HTML assets for up to 4h (`max-age=14400`), so an asset URL can still answer from an edge after the site is dark. That window self-heals and is accepted — delete is not instant for assets. `?purge=true` is retired: it is accepted and ignored, so a caller that sends it gets the same reserving delete. `POST /api/site/{slug}/undelete` returns a reserved name to service inside the grace window; past the deadline it answers `404`, because the reclaim sweep owns the row from that moment. `POST /api/site/{slug}/release` ends the reservation early and reclaims the bytes at once; it is gated on `REPO_APPROVE_AUTHZ_TEAM`, not `REGISTRY_AUTHZ_TEAM`, because delete is reversible and release is not. A `DELETE` on a name the serve plane answers but the registry does not know — an orphaned alias, the state `drift-detect` reports as `drift.orphan_aliases` — removes the aliases and answers `200 { slug, status: "unpublished", reserved: false }`. Nothing is reserved there, so `undelete` cannot bring it back. A name that nothing served and nothing registered still answers `404`. Every delete writes one `audit_log` row — `outcome=success`, or `outcome=failure` with `detail.stage` of `unpublish` or `reserve` naming how far it got. `POST /api/site/{site}/deploys/{deployId}/restore` reverses a `DELETE .../deploys/{deployId}` tombstone. It moves the bytes back from `_trash/` and marks the deploy active again. `GET /api/site/{site}/trash` lists the site's tombstoned deploys with their purge-eligibility `expiresAt` (`CLEANUP_RECOVERY_DAYS` after `trashedAt`).
 
 A deploy becomes live only if the serve plane can serve it at `/`. When the target deploy has no root `index.html` — the one object the serve plane requires for `/` — `finalize`, `promote`, and `rollback` reject with `422 missing_index`. The alias does not change, and the previous deploy continues to serve. On `finalize` the `422` body also carries an advisory `hint` when the upload looks like a framework build directory (for example a raw `.next` server build) and not a static export. See ADR-016 §2026-07-26.
 
@@ -53,7 +55,7 @@ Auth headers (`/api/*` except `/healthz`, `/readyz`):
 | `GET /api/*`, `POST /api/deploy/init`, `POST /api/site/*`, `POST`/`GET`/`DELETE /api/repo*` | GitHub token (PAT / OIDC)                                                    |
 | `PUT /api/deploy/{deployId}/upload`, `POST /api/deploy/{deployId}/finalize`                 | Deploy-session JWT (HS256, ≤15 min, scoped to one `(login, site, deployId)`) |
 
-These routes have a team gate beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM` — the only team-gated read, because the trail is cross-tenant). All other `/api/*` reads are open to any authenticated GitHub bearer.
+These routes have a team gate beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}`, `POST /api/site/{slug}/release` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM` — the only team-gated read, because the trail is cross-tenant). All other `/api/*` reads are open to any authenticated GitHub bearer.
 
 ## Configuration (env-driven)
 
@@ -102,7 +104,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | ------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
 | `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)        |
 | `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                        |
-| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating approve/reject/delete; placeholder — production must override           |
+| `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating repo approve/reject/delete and site release; placeholder — production must override |
 | `AUDIT_READ_AUTHZ_TEAM`   | `staff`                      | GH team (in `GH_REPO_ORG`) gating `GET /api/audit`; probed via the Universe-org client |
 | `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                               |
 | `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
@@ -128,6 +130,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `BACKFILL_ON_BOOT`        | `false`                   | One-shot: scan R2, backfill the Postgres deploy index, then exit (requires `DATABASE_URL`)   |
 | `HATCHET_CLIENT_TOKEN`    | _(empty)_                 | Hatchet engine auth token                                                                    |
 | `HATCHET_ADDR`            | _(empty → workflows off)_ | Hatchet gRPC address; empty leaves GC wired but workflow scheduling + outbox relay unstarted |
+| `SITE_RESERVATION_GRACE`  | `72h`                     | How long a deleted site's name is held before the nightly sweep frees it (positive duration) |
 | `CLEANUP_RETENTION_DAYS`  | `7`                       | Days before a superseded deploy becomes GC-eligible                                          |
 | `CLEANUP_RECENT_KEEP`     | `3`                       | Newest N deploys per site kept regardless of age (rollback floor)                            |
 | `CLEANUP_GRACE`           | `72h`                     | Minimum deploy age before GC; must be ≥ `JWT_TTL_SECONDS` and ≥ the 15s serve-cache TTL      |
@@ -240,7 +243,9 @@ Authoritative store: Postgres when `DATABASE_URL` is set, else Valkey (`VALKEY_A
 POST   /api/site/register      { slug, teams? }      → 201 SiteRow
 GET    /api/sites              [?slug=…]             → { count, sites: [SiteRow] }
 PATCH  /api/site/{slug}        { teams }             → 200 SiteRow
-DELETE /api/site/{slug}                              → 204
+DELETE /api/site/{slug}                              → 204 · 200 when the name was an orphan
+POST   /api/site/{slug}/undelete                     → 200 · 404 past the grace deadline
+POST   /api/site/{slug}/release                      → 200 · approver-gated early reclaim
 ```
 
 Write endpoints are gated on `REGISTRY_AUTHZ_TEAM` (default `staff`). The read endpoint is open to any GitHub bearer.

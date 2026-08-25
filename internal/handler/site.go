@@ -95,9 +95,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 				"site was deleted; its alias cannot be written", row, err)
 			return errAliasWriteHandled
 		}
-		// CAS guard: read current production alias and bail on mismatch.
-		// Treat missing-alias as the empty string so callers can use CAS
-		// to assert "no prod yet" by passing ExpectedCurrent="".
+		// accepted defect: dossier B20 — an empty ExpectedCurrent skips
+		// the CAS entirely, and the shipped CLI sends exactly that.
+		// Behaviour fix is gated on universe-cli #58.
 		if req.ExpectedCurrent != "" {
 			current, err := h.R2.GetAlias(commitCtx, prodKey)
 			if err != nil && !r2.IsNotFound(err) {
@@ -363,7 +363,7 @@ func (h *Handlers) SiteDeploys(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) requireSiteAuthz(w http.ResponseWriter, r *http.Request, site sitekey.Slug) error {
 	teams := h.Sites.Snapshot().TeamsForSite(site)
 	if len(teams) == 0 {
-		writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+		h.denyUnregisteredSite(w, r, site)
 		return errBadRequest
 	}
 	login := LoginFromContext(r.Context())

@@ -105,6 +105,12 @@ type ReservationReverser interface {
 	Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
 }
 
+// NameReleaser carries no deadline predicate, unlike the sweep's
+// ReleaseReservation, which is why its caller is approver-gated.
+type NameReleaser interface {
+	ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 }
@@ -136,6 +142,7 @@ type Handlers struct {
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
+	NameReleaser           NameReleaser
 	ReservationGrace       time.Duration
 	TrashPrefixBase        string // e.g. "_trash/"
 	Trash                  TrashStore
@@ -202,6 +209,18 @@ func (h *Handlers) requireWritableSite(ctx context.Context, slug sitekey.Slug) (
 		return site, registry.ErrReserved
 	}
 	return site, nil
+}
+
+// The cached snapshot drops reserved sites, so a name held after a
+// delete reads there as one that never existed.
+func (h *Handlers) denyUnregisteredSite(w http.ResponseWriter, r *http.Request, slug sitekey.Slug) string {
+	site, err := h.requireWritableSite(r.Context(), slug)
+	if errors.Is(err, registry.ErrReserved) {
+		h.writeFenceError(w, r, "registry.get.authz", "", site, err)
+		return "site_reserved"
+	}
+	writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+	return "site_unauthorized"
 }
 
 func (h *Handlers) writeFenceError(w http.ResponseWriter, r *http.Request, op, goneMessage string,

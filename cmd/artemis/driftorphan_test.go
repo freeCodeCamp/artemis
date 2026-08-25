@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 )
 
 type orphanBucket struct {
-	dirnames []string
-	objects  map[string]bool
-	listErr  error
-	headErr  error
+	dirnames    []string
+	objects     map[string]bool
+	listErr     error
+	headErr     error
+	headErrKeys map[string]error
 }
 
 func (b orphanBucket) ListSites(context.Context) ([]string, error) {
@@ -29,6 +31,9 @@ func (b orphanBucket) ListSites(context.Context) ([]string, error) {
 }
 
 func (b orphanBucket) HasObject(_ context.Context, key string) (bool, error) {
+	if b.headErrKeys[key] != nil {
+		return false, b.headErrKeys[key]
+	}
 	if b.headErr != nil {
 		return false, b.headErr
 	}
@@ -159,4 +164,26 @@ func TestDriftSweep_OrphanAliasPhaseIsSkippedForAScopedSweep(t *testing.T) {
 
 	assert.Empty(t, res.OrphanAliases,
 		"one site's reconcile must not report the whole bucket's orphans")
+}
+
+func TestDriftSweep_OrphanAliasKeepsWhatItFoundWhenOneHeadFails(t *testing.T) {
+	t.Parallel()
+
+	bucket := orphanBucket{
+		dirnames: []string{"ghost.freecode.camp", "flaky.freecode.camp"},
+		objects:  map[string]bool{"ghost.freecode.camp/production": true},
+		headErrKeys: map[string]error{
+			"flaky.freecode.camp/production": errors.New("r2 head timeout"),
+		},
+	}
+	repo := orphanRepo{dirnames: []sitekey.Dirname{"ghost.freecode.camp", "flaky.freecode.camp"}}
+	reg := statefulRegistryReader{}
+
+	res, err := newOrphanSweeper(t, bucket, repo, reg).Run(context.Background())
+	require.NoError(t, err, "a partial orphan scan is degraded, not a failed sweep")
+
+	assert.Equal(t, []orphanAlias{{Dirname: "ghost.freecode.camp", Modes: []string{"production"}}}, res.OrphanAliases,
+		"one flaky HEAD must not hide an orphan the scan already proved")
+	require.Error(t, res.OrphanErr,
+		"the unscanned name is unknown, not clean, and the verdict must say so")
 }

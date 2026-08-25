@@ -40,17 +40,19 @@ func classifyDrift(res sweepResult) driftVerdict {
 			Fails: unread != nil,
 		}
 	}
+	if len(res.OrphanAliases) > 0 {
+		err := fmt.Errorf(
+			"%d alias key(s) serve names with no registry row (%s): a deregistered site is still on the "+
+				"public internet; unpublish each with DELETE, or release it if the name is meant to go",
+			len(res.OrphanAliases), strings.Join(orphanAliasNames(res.OrphanAliases), ", "))
+		return driftVerdict{
+			Op:    opDriftOrphanAliases,
+			Err:   errors.Join(err, unread),
+			Fails: unread != nil,
+		}
+	}
 	if unread != nil {
 		return driftVerdict{Op: opDriftUnreadable, Err: unread, Fails: true}
-	}
-	if len(res.OrphanAliases) > 0 {
-		return driftVerdict{
-			Op: opDriftOrphanAliases,
-			Err: fmt.Errorf(
-				"%d alias key(s) serve names with no registry row (%s): a deregistered site is still on the "+
-					"public internet; unpublish each with DELETE, or release it if the name is meant to go",
-				len(res.OrphanAliases), strings.Join(orphanAliasNames(res.OrphanAliases), ", ")),
-		}
 	}
 	if reindex, tombstone, _, _ := res.totals(); reindex+tombstone >= reclaimableAlertThreshold {
 		sites := reclaimableSites(res.Reports)

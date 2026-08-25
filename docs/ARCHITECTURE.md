@@ -140,7 +140,7 @@ After the alias write, artemis writes the alias row and puts a `site.changed` ev
 
 ## 5. How a developer removes a deploy or a site
 
-Each removal in artemis is a move first, and a hard delete much later. All the destructive moves run on a context that ignores a client disconnect, with a limit of 10 minutes.
+A deploy removal in artemis is a move first, and a hard delete much later. A site removal is not a move at all: it takes the site dark and holds the name. Every removal runs on a context that ignores a client disconnect. A deploy move has a limit of 10 minutes. A site removal has a limit of 60 seconds, because it only rewrites two alias objects.
 
 ### Remove one deploy
 
@@ -155,12 +155,23 @@ The move is a copy and then a delete, for each object. It has no rollback. A fai
 
 ### Remove a site
 
-`DELETE /api/site/{slug}` has two behaviours:
+`DELETE /api/site/{slug}` unpublishes the site and reserves its name. It does not reclaim the bytes. ADR 0006 gives the reasoning.
 
-- **Without `?purge=true`** — artemis removes the registry row only. It touches no R2 bytes. It returns 204.
-- **With `?purge=true`** — artemis writes a whole-site tombstone, moves the full `<dirname>/` prefix into `_trash/<dirname>/`, and then removes the registry row. It returns 200. The prefix is the storage dirname (section 9), not the slug, and the tombstone row lands before the move — the order every removal in artemis follows.
+1. Artemis removes both R2 alias objects. The serve plane reads those objects directly, so the site is dark as soon as they are gone.
+1. Artemis flips the registry row to `reserved`, with an expiry of `SITE_RESERVATION_GRACE` (default 72h).
+1. Artemis returns 204.
 
-The purge moves the alias objects too, because they are under the same `<slug>/` prefix.
+The order is deliberate. If step 1 fails, artemis stops and returns 502. The site stays registered and stays published — a visible state the caller can retry. No ordering may leave a site deregistered and still serving.
+
+The deploy bytes under `<dirname>/` stay in R2 through the whole grace period. Only the two alias objects go.
+
+`?purge=true` is retired. Artemis accepts the flag and ignores it, so a caller that still sends it gets the reserving delete.
+
+A `DELETE` on a name the serve plane answers but the registry does not know — an orphaned alias — removes the aliases and returns 200 with `{"status": "unpublished", "reserved": false}`. There is no row to reserve, so no name is held. A name that nothing served and nothing registered returns 404.
+
+`POST /api/site/{slug}/undelete` returns a reserved name to service inside the grace window. Past the deadline it returns 404, because the nightly 03:00 sweep owns the row from that moment and frees the name.
+
+`POST /api/site/{slug}/release` ends a reservation early. It refuses anything that is not `reserved`, records the whole-site tombstone, moves `<dirname>/` into `_trash/`, and frees the registry row last — the same order as the nightly sweep, so `tombstone-purge` owns the bytes either way. The order is the safety property. `POST /api/site/register` takes no site lock, so the reserved row is the only thing refusing a concurrent claim on the name; freeing it before the move would let a new owner register and then have their own upload swept into `_trash/`. Its authorization is `REPO_APPROVE_AUTHZ_TEAM`, not `REGISTRY_AUTHZ_TEAM`: a delete is reversible for 72h and a release is not, so the two must not share a gate. A slug with no `reserved` row returns 404 before the handler touches any bytes.
 
 ### What you can recover
 
@@ -168,10 +179,12 @@ The purge moves the alias objects too, because they are under the same `<slug>/`
 | ------------------------------------------- | -------------------- | ------------------------------------------------------------------------- |
 | Deploy in the trash, tombstone present      | Yes                  | `POST .../deploys/{deployId}/restore`                                     |
 | Deploy in the trash, recovery window passed | No                   | The nightly purge deletes the bytes                                       |
-| Site removed without a purge                | The bytes stay in R2 | Register the slug again                                                   |
-| Site purged                                 | Not through the API  | The whole-site tombstone holds an empty deploy id, and restore rejects it |
+| Site deleted, inside the grace window       | Yes                  | `POST /api/site/{slug}/undelete`                                          |
+| Site deleted, grace window passed           | No                   | The nightly sweep freed the name; the bytes await the reclaim path        |
+| Site released early by an approver          | No                   | Release is the irreversible form; the bytes follow the tombstone clock    |
+| Site purged before 1.10.0                   | Not through the API  | The whole-site tombstone holds an empty deploy id, and restore rejects it |
 
-The recovery window is 7 days by default. `GET /api/site/{site}/trash` shows each tombstone with its `expiresAt` time.
+The deploy recovery window is 7 days by default. `GET /api/site/{site}/trash` shows each tombstone with its `expiresAt` time. The site-name grace window is separate and is 72h by default. While a name is reserved, registering it again returns 409 `site_reserved` — the previous owner's bytes are still there, and a new owner must not inherit them.
 
 Restore moves the bytes back and makes the deploy row again. **Restore never writes an alias.** A restored deploy is in storage again, but it is not live. The developer must promote it.
 

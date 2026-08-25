@@ -144,7 +144,7 @@ func (h *Handlers) RequireDeployJWT(next http.Handler) http.Handler {
 			return
 		}
 		if len(h.Sites.Snapshot().TeamsForSite(claims.Site)) == 0 {
-			writeError(w, http.StatusForbidden, "site_unauthorized", "site is not registered or has no authorized teams")
+			h.denyUnregisteredSite(w, r, claims.Site)
 			return
 		}
 		telemetry.FromContext(r.Context()).SetActor(claims.Subject)

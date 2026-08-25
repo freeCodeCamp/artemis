@@ -17,8 +17,9 @@ import (
 
 type reservedRegistry struct {
 	RegistryWriter
-	reserved  sitekey.Slug
-	undeleted []sitekey.Slug
+	reserved    sitekey.Slug
+	undeleted   []sitekey.Slug
+	undeleteErr error
 }
 
 func (rr *reservedRegistry) Register(ctx context.Context, slug sitekey.Slug, teams []string, by string) (registry.Site, error) {
@@ -30,6 +31,9 @@ func (rr *reservedRegistry) Register(ctx context.Context, slug sitekey.Slug, tea
 
 func (rr *reservedRegistry) Undelete(_ context.Context, slug sitekey.Slug) (registry.Reservation, error) {
 	rr.undeleted = append(rr.undeleted, slug)
+	if rr.undeleteErr != nil {
+		return registry.Reservation{}, rr.undeleteErr
+	}
 	return registry.Reservation{Slug: slug}, nil
 }
 
@@ -82,4 +86,27 @@ func TestSiteDelete_PurgeFlagNoLongerReclaims(t *testing.T) {
 		"?purge=true is retired: it must reserve like any delete, never skip the grace period")
 	assert.Contains(t, store.objects, "www.freecode.camp/deploys/d/index.html",
 		"the destructive reading of the flag fails closed; bytes survive until the reclaim")
+}
+
+func TestSiteUndelete_AuditsTheFailureWhenTheDeadlineHasPassed(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	rr := &reservedRegistry{RegistryWriter: h.Registry, undeleteErr: registry.ErrNotFound}
+	h.Registry = rr
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	fa := &fakeAudit{}
+	h.Audit = fa
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.Len(t, fa.events, 1,
+		"a refused undelete is a staff action that changed nothing, and the trail must say which")
+	assert.Equal(t, "site.undelete", fa.events[0].Action)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
 }

@@ -220,10 +220,11 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 //
 // Status matrix:
 //
+//	200 OK             — an orphaned alias was unpublished; no row to reserve
 //	204 No Content     — unpublished, name reserved
 //	400 Bad Request    — invalid slug
 //	403 Forbidden      — caller not in authz team
-//	404 Not Found      — slug not registered
+//	404 Not Found      — slug not registered and no alias served it
 //	502 Bad Gateway    — R2 alias delete or registry write failed
 //	503 Service Unavail — github membership probe upstream error
 //
@@ -411,10 +412,16 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		h.auditFromScope(r.Context(), "site.delete", "failure", map[string]any{"stage": stage})
 	}
 
-	var wrote bool
+	var wrote, servedOrphan bool
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
+		var served bool
 		for _, mode := range []string{"production", "preview"} {
-			if err := h.R2.DeleteAlias(opCtx, h.aliasKey(slug, mode)); err != nil {
+			aliasKey := h.aliasKey(slug, mode)
+			has, err := h.R2.HasObject(opCtx, aliasKey)
+			if err != nil || has {
+				served = true
+			}
+			if err := h.R2.DeleteAlias(opCtx, aliasKey); err != nil {
 				auditDeleteFailure("unpublish")
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_delete_failed", "r2.delete.alias", err)
 				wrote = true
@@ -423,6 +430,10 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		}
 		until := h.Now().UTC().Add(h.ReservationGrace)
 		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context())); err != nil {
+			if errors.Is(err, registry.ErrNotFound) && served {
+				servedOrphan = true
+				return nil
+			}
 			auditDeleteFailure("reserve")
 			writeRegistryDeleteError(w, r, err)
 			wrote = true
@@ -438,6 +449,15 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
+	if servedOrphan {
+		h.logAction(r.Context(), "site.delete", "success", slog.Bool("orphan", true))
+		h.auditFromScope(r.Context(), "site.delete", "success",
+			map[string]any{"orphan": true, "reserved": false})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"slug": string(slug), "status": "unpublished", "reserved": false,
+		})
+		return
+	}
 	h.logAction(r.Context(), "site.delete", "success")
 	h.auditFromScope(r.Context(), "site.delete", "success", nil)
 	w.WriteHeader(http.StatusNoContent)
@@ -461,11 +481,25 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "reservation store not configured")
 		return
 	}
-	res, err := reverser.Undelete(r.Context(), slug)
-	if err != nil {
+	// The lock is shared with SiteRelease, which trashes the origin bytes
+	// before it frees the name. An undelete landing inside that window
+	// would return an emptied site to service.
+	var res registry.Reservation
+	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
+	defer cancel()
+	var undeleteErr error
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func(opCtx context.Context) error {
+		res, undeleteErr = reverser.Undelete(opCtx, slug)
+		return nil
+	})
+	if lockErr != nil {
+		writeLockError(w, r, lockErr)
+		return
+	}
+	if undeleteErr != nil {
 		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 		h.auditFromScope(r.Context(), "site.undelete", "failure", nil)
-		writeRegistryDeleteError(w, r, err)
+		writeRegistryDeleteError(w, r, undeleteErr)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")

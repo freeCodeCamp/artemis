@@ -25,6 +25,14 @@ type reservationReleaser interface {
 	ReleaseReservation(ctx context.Context, slug sitekey.Slug) error
 }
 
+// reservationWiring is what the GC side needs from the registry writer
+// to run the nightly sweep. *pg.RegistryStore satisfies it; a
+// valkey-only writer does not.
+type reservationWiring interface {
+	expiredReservationSource
+	reservationReleaser
+}
+
 // siteReclaimer moves a released site's remaining bytes off the origin
 // prefix. tombstone-purge collects _trash only, so a site whose name is
 // freed without this leaves its objects at the origin with no collector
@@ -47,6 +55,8 @@ type reclaimDeps struct {
 func sweepExpiredReservations(ctx context.Context, src expiredReservationSource,
 	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool) (int, error) {
 	if src == nil || rel == nil {
+		slog.WarnContext(ctx, "reservation.sweep.unwired",
+			"source", src != nil, "releaser", rel != nil)
 		return 0, nil
 	}
 	expired, err := src.ExpiredReservations(ctx, now().UTC(), reservationSweepLimit)

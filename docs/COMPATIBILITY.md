@@ -42,6 +42,10 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 18 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | unreleased | Sentry and alert-rule readers |
 | 19 | `DELETE /api/site/{slug}` takes the site dark and reserves its name | unreleased | API callers |
 | 20 | `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new | unreleased | API callers |
+| 21 | A large prefix move finishes in one call | unreleased | API callers and operators |
+| 22 | `DELETE` on an orphaned alias answers `200`, not `404` | unreleased | API callers |
+| 23 | An orphaned alias is a new `drift-detect` verdict | unreleased | Sentry and alert-rule readers |
+| 24 | `POST /api/site/{slug}/release` is new — approver-gated early reclaim | unreleased | API callers and operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -229,7 +233,7 @@ An orphaned site has no registry row by definition, so this was the normal path 
 
 **New:** `ErrNotFound` from `Registry.Delete` satisfies the purge. The handler answers `200 {"slug","status":"purged","moved"}` and writes the audit row (`internal/handler/site_register.go`).
 
-**The bare `DELETE` is unchanged.** Without `?purge=true` an absent slug still returns `404`.
+**Superseded by entries 19, 20 and 22.** On 1.10.0 no boot configuration reaches this purge branch: it needs `Tombstones` without `Reservations`, and both arrive from the same `DATABASE_URL` (`TestWiring_NoBootConfigurationReachesTheLegacyPurge`). Entry 9 is kept as the record of what `v1.9.1` did. For current `DELETE` behaviour read entry 19, and entry 22 for the absent-row case.
 
 **Action:** stop treating `404` from a purge as "nothing happened". On `v1.9.1` and earlier it meant the opposite.
 
@@ -248,6 +252,8 @@ After the bulk move the handler probes `HasPrefix(<dirname>/)`. A probe error an
 **Consequence:** a large site may now need several `DELETE ?purge=true` calls. The operation is idempotent — `RecordSitePurge` is `ON CONFLICT DO UPDATE` (`internal/pg/repo.go:183-184`) and `MovePrefix` re-lists the source each time — so repeating the request resumes it. Each retry resets `trashed_at`, restarting the recovery clock.
 
 **Action:** treat `502 r2_move_incomplete` as "call again", not as an error to escalate. Do not infer completion from a single `200` on a large site; the `moved` count in the body is authoritative for that call only.
+
+**Superseded by entries 19 and 21.** The purge branch this describes is unreachable on 1.10.0, and entry 21 removed the size ceiling from `MovePrefix` itself.
 
 ## 11 — `audit_log.outcome` gains `failure`, and a failed purge is recorded
 
@@ -398,13 +404,23 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **New:** a `DELETE` first removes both alias objects, then flips the registry row to `reserved` with an expiry of `SITE_RESERVATION_GRACE` (default 72h). The site is dark as soon as the aliases are gone — subject to the 15-second serve-cache TTL — and the name is held for the grace period rather than freed.
 
+**Delete is not instant for assets.** The HTML goes dark inside the 15-second serve cache. Cloudflare caches non-HTML assets for up to 4h (`max-age=14400`), so an asset URL can still answer from an edge after the site is dark. The window self-heals and is accepted; no purge call is made. A caller that must prove a site is gone should check the HTML, not an asset.
+
 **The ordering is the safety property and it is pinned by a test.** Aliases are removed *before* the registry state flips, inside the per-site advisory lock. If alias removal fails the operation ABORTS: the site stays registered and published, which is visible and retryable. No ordering produces deregistered-and-still-serving, which is the failure the whole design exists to prevent. `TestSiteDelete_AliasFailureAbortsAndLeavesTheSiteRegistered` fails if the two steps are transposed.
 
-**Status codes:** `204` on success, unchanged. A failure to remove an alias is `502 r2_delete_failed`. A failure to reserve keeps the existing registry-delete error mapping.
+**Status codes:** `204` on success, unchanged. A failure to remove an alias is `502 r2_delete_failed`. A failure to reserve keeps the existing registry-delete error mapping, except for the absent-row case in entry 22.
 
 **`audit_log`:** `site.delete` now writes an `outcome=failure` row carrying `detail.stage`, one of `unpublish` or `reserve`. As in entries 11 and 14, `outcome` is unconstrained `TEXT` so no migration is needed.
 
 **`undelete` refuses a reservation past its deadline.** `POST /api/site/{slug}/undelete` answers `404` once `reserved_until` has passed, rather than restoring the row. From that moment the nightly sweep owns the name: it trashes the origin bytes and then frees the row, and a restore landing between those two steps would return a site to service whose bytes were already moving. Both the refusal and the sweep's release compare against Postgres `now()`, not a Go clock, so the handler pod and the GC worker cannot disagree about the deadline.
+
+**When the bytes are actually gone: roughly 11 days, not 3.** The grace period is only the first leg.
+
+1. `DELETE` — the aliases go, the row is reserved, `reserved_until = now + 72h`. The origin bytes are untouched.
+1. The 03:00 sweep, on the first run after the deadline — `reclaimSiteBytes` moves `<dirname>/` into `_trash/` and writes the tombstone, then frees the name.
+1. The 03:00 `tombstone-purge`, `CLEANUP_RECOVERY_DAYS` (default 7) after `trashed_at` — the bytes are hard-deleted.
+
+72h plus up to a day of sweep latency plus 7 days plus up to a day of purge latency is about 11 days end to end. The name is reusable after leg 2. Anyone reasoning about storage cost or a data-removal request must use the full chain, not the 72h figure.
 
 **Steps 5, 6 and 7 land in entry 20.**
 
@@ -432,9 +448,9 @@ The pre-ADR-0006 purge code still stands in `internal/handler/site_register.go`,
 
 An origin-prefix move is only safe because the reservation has expired and the register path answers `409` for a reserved name, so the slug cannot have been re-claimed in the window. That guard is the precondition; do not lift this sweep out of the reservation flow and point it at arbitrary prefixes.
 
-**Still open:** an approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today. The object-count ceiling that stood here is closed by entry 21.
+**Early release shipped.** `POST /api/site/{slug}/release` ends a reservation before its deadline and reclaims the bytes in the same order this sweep uses — tombstone, move, then free the name. It is gated on `REPO_APPROVE_AUTHZ_TEAM`, not the team that may delete; entry 24 has the full shape. The object-count ceiling that also stood here is closed by entry 21.
 
-**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
+**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, the replacement is `POST /api/site/{slug}/release`, gated on `REPO_APPROVE_AUTHZ_TEAM` — see entry 24. Without an approver the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
 
 ## 21 — a large prefix move finishes in one call
 
@@ -449,3 +465,74 @@ An origin-prefix move is only safe because the reservation has expired and the r
 **Nightly reclaim benefits identically.** `reclaimSiteBytes` in the reservation sweep calls the same `MovePrefix`, so a reserved site's origin bytes now clear in one sweep pass rather than across nights.
 
 **Action:** none. A caller that looped on `502 r2_move_incomplete` can keep the loop; it will exit on the first pass.
+
+## 22 — `DELETE` on an orphaned alias answers `200`, not `404`
+
+**Release:** unreleased.
+
+**An orphaned alias is a name the serve plane answers with no registry row behind it** — the state entry 19 describes as the old defect, and the state entry 23's new `drift-detect` verdict reports. Seven were live on 2026-08-22.
+
+**Old:** the `DELETE` removed both alias objects, then `Reserve` found no `sites` row and returned `ErrNotFound` (`internal/pg/reservation.go:24`). The handler answered `404 not_found` and wrote an `audit_log` row with `outcome=failure` and `detail.stage=reserve`. The public exposure was closed and the operator was told nothing happened — on exactly the sites `drift-detect` tells the operator to clear this way.
+
+**New:** the handler probes each alias key before deleting it. If any alias served and `Reserve` then reports no row, the call answers `200 {"slug","status":"unpublished","reserved":false}` and writes `outcome=success` with `detail.orphan=true`.
+
+**`reserved: false` is load-bearing.** No name is held, so `POST /api/site/{slug}/undelete` cannot bring that site back. That is correct — there was no owner to return it to.
+
+**A name that nothing served and nothing registered still answers `404`,** which is what makes a second `DELETE` on the same orphan idempotent: the first cleared the aliases, so the second finds nothing to unpublish.
+
+**Action:** treat `200` from a `DELETE` as success, and read `reserved` to decide whether `undelete` is available. Stop treating `404` as proof that nothing changed — on `v1.9.1` and earlier it could mean the opposite.
+
+## 23 — an orphaned alias is a new `drift-detect` verdict
+
+**Release:** unreleased.
+
+**This is an operational change, not an API one.** The audience is the operator reading Sentry.
+
+**New op:** the nightly 04:00 `drift-detect` run now enumerates site dirnames from the bucket and reports any alias key with no registry row as `drift.orphan_aliases`, at error level. Everything else in the sweep, and the whole reconciler, still enumerate from Postgres. The repair the event names is a staff `DELETE`, which behaves per entry 22.
+
+**A found verdict outranks a partial read.** A read failure part-way through the scan no longer discards the orphans already proved: the scan continues and the verdict carries the read error alongside. `drift.unreadable` is now returned only when the scan found nothing AND could not see. Without this, one flaky R2 HEAD hid a live deregistered site until a night with no hiccup.
+
+**Two new cron-shaped ops:** `drift.orphan_aliases` and `reservation.sweep` are added to `cronShapedOps` (`internal/observability/sentry.go`). As with `drift.sweep`, they escape the transient rate limiter and reach Sentry on every occurrence rather than once. A nightly job that fails silently after its first report is a job nobody trusts.
+
+**Action:** expect a new Sentry issue shape under `op=drift.orphan_aliases`. Any alert rule enumerating background ops by name needs both new tokens added.
+
+## 24 — `POST /api/site/{slug}/release` is new — approver-gated early reclaim
+
+**Release:** unreleased. Implements ADR 0006 step 7b, the last open step.
+
+**Old:** nothing freed a reserved name before its grace period expired. `?purge=true` had been the
+operator's remedy and entry 20 retires it, so between entry 20 and this entry there was no path at
+all — a DMCA takedown that must also free the name needed a manual `psql` write.
+
+**New:** `POST /api/site/{slug}/release` ends the reservation immediately and reclaims the bytes in
+the same order the nightly sweep uses: refuse anything that is not `state='reserved'`, record the
+whole-site tombstone, move `<dirname>/` into `_trash/`, and free the registry row **last**.
+`tombstone-purge` becomes responsible for the bytes either way and `CLEANUP_RECOVERY_DAYS` still
+applies.
+
+**Bytes first, name second — the rule entry 19 states for the sweep binds here too, and for a
+sharper reason.** `POST /api/site/register` takes no site lock, so the only thing refusing a
+concurrent claim on the slug is the reserved registry row still being there. Free the name before
+the move and a new owner can register in the gap and then have their own freshly-uploaded bytes
+swept into `_trash/` by the release still in flight — a window of minutes on a large site, not a
+nanosecond. `TestSiteRelease_FreesTheNameOnlyAfterTheBytesAreTrashed` fails if the two are
+transposed. `POST …/undelete` now takes the same site lock, so it cannot return an emptied site to
+service mid-release.
+
+**The authorization is deliberately not `REGISTRY_AUTHZ_TEAM`.** That team may delete, and a delete
+is reversible for 72h through `undelete`. Release is not reversible. It is gated on
+`REPO_APPROVE_AUTHZ_TEAM` — the same approvers as repo creation — so the irreversible form of the
+operation needs a different, smaller set of people than the safe form.
+`TestSiteRelease_RefusesACallerWhoMayOnlyDelete` fails if the two gates are swapped.
+
+**Status codes:** `200 {"slug","status":"released","moved"}` on success. `400 invalid_slug`.
+`403 user_unauthorized` for a caller outside the approver team. `404 not_found` when the slug has no
+**reserved** row — an active site is not releasable, and the handler returns before it touches any
+bytes. `502` on a tombstone or R2 failure — and on that path the name stays reserved, so the call is safe
+to retry. `503 unavailable` on a deployment with no reservation store.
+
+**`audit_log`:** one `site.release` row, `outcome=success` with `detail.moved`, or `outcome=failure`
+with `detail.stage` of `state`, `tombstone`, `reclaim` or `release` naming how far it got.
+
+**Action:** none for existing callers — the endpoint is purely additive and no shipped client calls
+it. Operators handling a takedown should use it instead of a manual database write.
