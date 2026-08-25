@@ -59,6 +59,14 @@ type fakeS3 struct {
 	failCopyKeys      map[string]struct{}
 	failGetKeys       map[string]struct{}
 	truncateGetKeys   map[string]struct{}
+
+	onObjectWrite func()
+}
+
+func (f *fakeS3) put(bucket, key string, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.objects[bucket+"/"+key] = body
 }
 
 func newFakeS3(t *testing.T, bucket string) *fakeS3 {
@@ -302,6 +310,9 @@ func (f *fakeS3) copyObject(w http.ResponseWriter, destKey, copySource string) {
 	src = strings.TrimPrefix(src, "/")
 	srcKey := strings.TrimPrefix(src, f.bucket+"/")
 
+	if f.onObjectWrite != nil {
+		f.onObjectWrite()
+	}
 	f.mu.Lock()
 	body, ok := f.objects[f.bucket+"/"+srcKey]
 	if ok {
@@ -966,4 +977,61 @@ func TestClient_DeleteAlias_AbsentKeyIsNotAnError(t *testing.T) {
 	require.NoError(t, c.DeleteAlias(context.Background(), "www/production"))
 	require.NoError(t, c.DeleteAlias(context.Background(), "www/production"),
 		"a retried unpublish must stay idempotent")
+}
+
+type concurrencyRecorder struct {
+	mu     sync.Mutex
+	inHTTP int
+	peak   int
+}
+
+func (c *concurrencyRecorder) enter() {
+	c.mu.Lock()
+	c.inHTTP++
+	if c.inHTTP > c.peak {
+		c.peak = c.inHTTP
+	}
+	c.mu.Unlock()
+}
+
+func (c *concurrencyRecorder) leave() {
+	c.mu.Lock()
+	c.inHTTP--
+	c.mu.Unlock()
+}
+
+func (c *concurrencyRecorder) peakSeen() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.peak
+}
+
+func TestMovePrefix_FinishesASiteFarLargerThanOneSerialRunCould(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	rec := &concurrencyRecorder{}
+	fake.onObjectWrite = func() {
+		rec.enter()
+		time.Sleep(2 * time.Millisecond)
+		rec.leave()
+	}
+	const objects = 900
+	for i := range objects {
+		fake.put("b", fmt.Sprintf("big.freecode.camp/deploy/%04d.html", i), []byte("x"))
+	}
+	c := newClient(t, fake)
+
+	moved, err := c.MovePrefix(context.Background(), "big.freecode.camp/", "_trash/big.freecode.camp/")
+
+	require.NoError(t, err)
+	assert.Equal(t, objects, moved,
+		"a serial copy+delete loop tops out near 215 objects inside the run budget, so a 900-object "+
+			"site never finished and an operator had to repeat the call")
+	assert.Greater(t, rec.peakSeen(), 1,
+		"the objects must move concurrently; a serial loop is the whole defect")
+	assert.LessOrEqual(t, rec.peakSeen(), movePrefixConcurrency,
+		"unbounded fan-out would replace a slow purge with an R2 rate-limit outage")
+
+	remaining, err := c.HasPrefix(context.Background(), "big.freecode.camp/")
+	require.NoError(t, err)
+	assert.False(t, remaining, "a purge that leaves objects behind answers 502 r2_move_incomplete")
 }

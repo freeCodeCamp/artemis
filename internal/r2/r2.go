@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
@@ -26,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithy "github.com/aws/smithy-go"
+	"golang.org/x/sync/errgroup"
 )
 
 const defaultProbeTimeout = 3 * time.Second
@@ -329,8 +331,10 @@ func (c *Client) deleteBatch(ctx context.Context, ids []s3types.ObjectIdentifier
 	return len(ids), nil
 }
 
+const movePrefixConcurrency = 16
+
 func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (int, error) {
-	var moved int
+	var moved atomic.Int64
 	var token *string
 	for {
 		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -339,33 +343,48 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 			ContinuationToken: token,
 		})
 		if err != nil {
-			return moved, fmt.Errorf("r2 moveprefix list %s: %w", srcPrefix, err)
+			return int(moved.Load()), fmt.Errorf("r2 moveprefix list %s: %w", srcPrefix, err)
 		}
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(movePrefixConcurrency)
 		for _, obj := range page.Contents {
 			if obj.Key == nil {
 				continue
 			}
 			key := *obj.Key
-			dstKey := dstPrefix + strings.TrimPrefix(key, srcPrefix)
-			_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
-				Bucket:     awsv2.String(c.bucket),
-				Key:        awsv2.String(dstKey),
-				CopySource: awsv2.String(encodeCopySource(c.bucket, key)),
+			g.Go(func() error {
+				if err := c.moveObject(gctx, key, dstPrefix+strings.TrimPrefix(key, srcPrefix)); err != nil {
+					return err
+				}
+				moved.Add(1)
+				return nil
 			})
-			if err != nil {
-				return moved, fmt.Errorf("r2 moveprefix copy %s->%s: %w", key, dstKey, err)
-			}
-			if err := c.DeleteObject(ctx, key); err != nil {
-				return moved, fmt.Errorf("r2 moveprefix delete %s: %w", key, err)
-			}
-			moved++
 		}
+		if err := g.Wait(); err != nil {
+			return int(moved.Load()), err
+		}
+
 		if page.IsTruncated == nil || !*page.IsTruncated {
 			break
 		}
 		token = page.NextContinuationToken
 	}
-	return moved, nil
+	return int(moved.Load()), nil
+}
+
+func (c *Client) moveObject(ctx context.Context, key, dstKey string) error {
+	if _, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     awsv2.String(c.bucket),
+		Key:        awsv2.String(dstKey),
+		CopySource: awsv2.String(encodeCopySource(c.bucket, key)),
+	}); err != nil {
+		return fmt.Errorf("r2 moveprefix copy %s->%s: %w", key, dstKey, err)
+	}
+	if err := c.DeleteObject(ctx, key); err != nil {
+		return fmt.Errorf("r2 moveprefix delete %s: %w", key, err)
+	}
+	return nil
 }
 
 func (c *Client) ListSites(ctx context.Context) ([]string, error) {
