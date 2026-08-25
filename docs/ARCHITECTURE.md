@@ -171,6 +171,8 @@ A `DELETE` on a name the serve plane answers but the registry does not know — 
 
 `POST /api/site/{slug}/undelete` returns a reserved name to service inside the grace window. Past the deadline it returns 404, because the nightly 03:00 sweep owns the row from that moment and frees the name.
 
+`POST /api/site/{slug}/release` ends a reservation early. It frees the registry row, records the whole-site tombstone, and moves `<dirname>/` into `_trash/` — the same order and the same code path as the nightly sweep, so `tombstone-purge` owns the bytes either way. Its authorization is `REPO_APPROVE_AUTHZ_TEAM`, not `REGISTRY_AUTHZ_TEAM`: a delete is reversible for 72h and a release is not, so the two must not share a gate. A slug with no `reserved` row returns 404 before the handler touches any bytes.
+
 ### What you can recover
 
 | State                                       | Recoverable          | How                                                                       |
@@ -179,6 +181,7 @@ A `DELETE` on a name the serve plane answers but the registry does not know — 
 | Deploy in the trash, recovery window passed | No                   | The nightly purge deletes the bytes                                       |
 | Site deleted, inside the grace window       | Yes                  | `POST /api/site/{slug}/undelete`                                          |
 | Site deleted, grace window passed           | No                   | The nightly sweep freed the name; the bytes await the reclaim path        |
+| Site released early by an approver          | No                   | Release is the irreversible form; the bytes follow the tombstone clock    |
 | Site purged before 1.10.0                   | Not through the API  | The whole-site tombstone holds an empty deploy id, and restore rejects it |
 
 The deploy recovery window is 7 days by default. `GET /api/site/{site}/trash` shows each tombstone with its `expiresAt` time. The site-name grace window is separate and is 72h by default. While a name is reserved, registering it again returns 409 `site_reserved` — the previous owner's bytes are still there, and a new owner must not inherit them.

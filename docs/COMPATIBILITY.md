@@ -45,6 +45,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 21 | A large prefix move finishes in one call | unreleased | API callers and operators |
 | 22 | `DELETE` on an orphaned alias answers `200`, not `404` | unreleased | API callers |
 | 23 | An orphaned alias is a new `drift-detect` verdict | unreleased | Sentry and alert-rule readers |
+| 24 | `POST /api/site/{slug}/release` is new — approver-gated early reclaim | unreleased | API callers and operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -449,7 +450,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 **Still open:** an approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today. The object-count ceiling that stood here is closed by entry 21.
 
-**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, there is no replacement yet; the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
+**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, the replacement is `POST /api/site/{slug}/release`, gated on `REPO_APPROVE_AUTHZ_TEAM` — see entry 24. Without an approver the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
 
 ## 21 — a large prefix move finishes in one call
 
@@ -494,3 +495,34 @@ An origin-prefix move is only safe because the reservation has expired and the r
 **Two new cron-shaped ops:** `drift.orphan_aliases` and `reservation.sweep` are added to `cronShapedOps` (`internal/observability/sentry.go`). As with `drift.sweep`, they escape the transient rate limiter and reach Sentry on every occurrence rather than once. A nightly job that fails silently after its first report is a job nobody trusts.
 
 **Action:** expect a new Sentry issue shape under `op=drift.orphan_aliases`. Any alert rule enumerating background ops by name needs both new tokens added.
+
+## 24 — `POST /api/site/{slug}/release` is new — approver-gated early reclaim
+
+**Release:** unreleased. Implements ADR 0006 step 7b, the last open step.
+
+**Old:** nothing freed a reserved name before its grace period expired. `?purge=true` had been the
+operator's remedy and entry 20 retires it, so between entry 20 and this entry there was no path at
+all — a DMCA takedown that must also free the name needed a manual `psql` write.
+
+**New:** `POST /api/site/{slug}/release` ends the reservation immediately and reclaims the bytes in
+the same order the nightly sweep uses: free the registry row, record the whole-site tombstone, then
+move `<dirname>/` into `_trash/`. One code path owns reclamation, so `tombstone-purge` becomes
+responsible for the bytes either way and `CLEANUP_RECOVERY_DAYS` still applies.
+
+**The authorization is deliberately not `REGISTRY_AUTHZ_TEAM`.** That team may delete, and a delete
+is reversible for 72h through `undelete`. Release is not reversible. It is gated on
+`REPO_APPROVE_AUTHZ_TEAM` — the same approvers as repo creation — so the irreversible form of the
+operation needs a different, smaller set of people than the safe form.
+`TestSiteRelease_RefusesACallerWhoMayOnlyDelete` fails if the two gates are swapped.
+
+**Status codes:** `200 {"slug","status":"released","moved"}` on success. `400 invalid_slug`.
+`403 user_unauthorized` for a caller outside the approver team. `404 not_found` when the slug has no
+**reserved** row — an active site is not releasable, and the handler returns before it touches any
+bytes. `502` on a tombstone or R2 failure. `503 unavailable` on a deployment with no reservation
+store.
+
+**`audit_log`:** one `site.release` row, `outcome=success` with `detail.moved`, or `outcome=failure`
+with `detail.stage` of `release`, `tombstone` or `reclaim`.
+
+**Action:** none for existing callers — the endpoint is purely additive and no shipped client calls
+it. Operators handling a takedown should use it instead of a manual database write.
