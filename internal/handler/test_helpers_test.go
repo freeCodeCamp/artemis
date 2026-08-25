@@ -439,6 +439,9 @@ func (f *fakeR2) HasObject(_ context.Context, key string) (bool, error) {
 	if f.listErr != nil {
 		return false, f.listErr
 	}
+	if _, ok := f.aliases[key]; ok {
+		return true, nil
+	}
 	_, ok := f.objects[key]
 	return ok, nil
 }

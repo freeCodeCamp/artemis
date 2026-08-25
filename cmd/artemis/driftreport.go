@@ -214,7 +214,10 @@ func (s *driftSweep) orphanAliases(ctx context.Context) ([]orphanAlias, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list bucket sites: %w", err)
 	}
-	var out []orphanAlias
+	var (
+		out      []orphanAlias
+		headErrs []error
+	)
 	for _, dirname := range dirnames {
 		if strings.HasPrefix(dirname, artemisOwnedPrefixMarker) {
 			continue
@@ -226,7 +229,8 @@ func (s *driftSweep) orphanAliases(ctx context.Context) ([]orphanAlias, error) {
 		for _, tail := range s.aliasTails {
 			has, err := s.bucket.HasObject(ctx, dirname+"/"+tail)
 			if err != nil {
-				return nil, fmt.Errorf("head alias %s/%s: %w", dirname, tail, err)
+				headErrs = append(headErrs, fmt.Errorf("head alias %s/%s: %w", dirname, tail, err))
+				continue
 			}
 			if has {
 				modes = append(modes, tail)
@@ -237,7 +241,7 @@ func (s *driftSweep) orphanAliases(ctx context.Context) ([]orphanAlias, error) {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Dirname < out[j].Dirname })
-	return out, nil
+	return out, errors.Join(headErrs...)
 }
 
 func (s *driftSweep) Run(ctx context.Context) (sweepResult, error) {

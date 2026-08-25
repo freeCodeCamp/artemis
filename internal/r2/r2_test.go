@@ -56,6 +56,7 @@ type fakeS3 struct {
 	failDeleteObjects bool
 	deleteFailKeys    map[string]struct{}
 	failDeleteKeys    map[string]struct{}
+	failHeadKeys      map[string]struct{}
 	failCopyKeys      map[string]struct{}
 	denyCopyKeys      map[string]struct{}
 	failGetKeys       map[string]struct{}
@@ -153,6 +154,20 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write(body)
+	case http.MethodHead:
+		f.mu.Lock()
+		_, failHead := f.failHeadKeys[key]
+		_, ok := f.objects[f.bucket+"/"+key]
+		f.mu.Unlock()
+		if failHead {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	case http.MethodDelete:
 		f.mu.Lock()
 		_, failDel := f.failDeleteKeys[key]
@@ -1075,4 +1090,36 @@ func TestMovePrefix_AFailureLeavesNoPeerCopiedButNotDeleted(t *testing.T) {
 		}
 	}
 	assert.Empty(t, stranded, "an object living at both src and dst is a silent duplicate nothing collects")
+}
+
+// HasObject decides the drift.orphan_aliases verdict and, since ADR 0006,
+// whether DELETE on an unregistered name reports what it unpublished.
+func TestHasObject_TrueWhenKeyExists(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+	require.NoError(t, c.PutAlias(context.Background(), "www/production", "20260420-141522-abc1234"))
+
+	ok, err := c.HasObject(context.Background(), "www/production")
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestHasObject_FalseAndNoErrorWhenKeyIsMissing(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	c := newClient(t, fake)
+
+	ok, err := c.HasObject(context.Background(), "ghost/production")
+	require.NoError(t, err,
+		"a missing alias is the answer, not a failure; erroring here turns every clean nightly sweep into drift.unreadable")
+	assert.False(t, ok)
+}
+
+func TestHasObject_ErrorsOnUpstreamFailure(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.failHeadKeys = map[string]struct{}{"www/production": {}}
+	c := newClient(t, fake)
+
+	_, err := c.HasObject(context.Background(), "www/production")
+	require.Error(t, err,
+		"an unreachable bucket must not read as an absent alias, which would report a live site as an orphan")
 }
