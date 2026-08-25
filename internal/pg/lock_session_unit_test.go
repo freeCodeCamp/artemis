@@ -35,7 +35,7 @@ func TestLockSession_UnlockFailure_ClosesConnWithoutPromoting(t *testing.T) {
 	fc := &fakeSessionConn{failUnlock: true}
 	s := &lockSession{conn: fc}
 
-	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func() error { return nil })
+	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func(context.Context) error { return nil })
 
 	require.NoError(t, err,
 		"closing the session conn releases every session-scoped advisory lock, so a failed unlock "+
@@ -48,7 +48,7 @@ func TestLockSession_UnlockFailure_KeepsTheClosureError(t *testing.T) {
 	fc := &fakeSessionConn{failUnlock: true}
 	s := &lockSession{conn: fc}
 
-	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func() error { return errClosureVerdict })
+	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func(context.Context) error { return errClosureVerdict })
 
 	require.ErrorIs(t, err, errClosureVerdict,
 		"the closure's error is the caller's answer; a later unlock failure must not replace it")
@@ -58,7 +58,7 @@ func TestLockSession_UnlockSuccess_NoClose_NoError(t *testing.T) {
 	fc := &fakeSessionConn{}
 	s := &lockSession{conn: fc}
 
-	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func() error { return nil })
+	err := s.WithSiteLock(context.Background(), "www.freecode.camp", func(context.Context) error { return nil })
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, fc.closed, "happy path keeps the session conn open for reuse across candidates")

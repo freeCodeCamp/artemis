@@ -171,7 +171,7 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 	)
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancel()
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func(opCtx context.Context) error {
 		before, beforeErr = h.requireWritableSite(opCtx, slug)
 		if errors.Is(beforeErr, registry.ErrReserved) {
 			h.writeFenceError(w, r, "registry.get.update", "site is not registered", before, beforeErr)
@@ -273,7 +273,7 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 		h.auditFromScope(r.Context(), "site.purge", "failure",
 			map[string]any{"stage": stage, "moved": moved})
 	}
-	lockErr := h.withSiteLock(opCtx, dirname, func() error {
+	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
 			auditPurgeFailure("tombstone")
 			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
@@ -412,7 +412,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	}
 
 	var wrote bool
-	lockErr := h.withSiteLock(opCtx, dirname, func() error {
+	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		for _, mode := range []string{"production", "preview"} {
 			if err := h.R2.DeleteAlias(opCtx, h.aliasKey(slug, mode)); err != nil {
 				auditDeleteFailure("unpublish")

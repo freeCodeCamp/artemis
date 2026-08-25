@@ -54,14 +54,14 @@ func TestRepo_ConcurrentTombstoneAndReindexNeverBothWin(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			tombErr = repo.WithSiteLock(ctx, "www", func() error {
+			tombErr = repo.WithSiteLock(ctx, "www", func(context.Context) error {
 				return repo.RecordTombstone(ctx, "www", id, 100)
 			})
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			reindexErr = repo.WithSiteLock(ctx, "www", func() error {
+			reindexErr = repo.WithSiteLock(ctx, "www", func(context.Context) error {
 				_, err := repo.ReindexDeploy(ctx, "www", id, t0, true)
 				return err
 			})

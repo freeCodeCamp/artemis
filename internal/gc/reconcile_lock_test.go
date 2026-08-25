@@ -19,14 +19,14 @@ type recordingLockSession struct {
 	underLock bool
 }
 
-func (s *recordingLockSession) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
+func (s *recordingLockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	if s.lockErr != nil {
 		return s.lockErr
 	}
 	s.sites = append(s.sites, string(site))
 	s.underLock = true
 	defer func() { s.underLock = false }()
-	return fn()
+	return fn(ctx)
 }
 
 func (s *recordingLockSession) Close(context.Context) { s.closed = true }

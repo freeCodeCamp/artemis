@@ -112,8 +112,8 @@ func newReconciler(lister ReconcileLister, store ReconcileStore, mover Mover) *R
 
 type passthroughSession struct{}
 
-func (passthroughSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
-	return fn()
+func (passthroughSession) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
+	return fn(ctx)
 }
 func (passthroughSession) Close(context.Context) {}
 

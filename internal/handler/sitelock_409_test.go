@@ -16,7 +16,7 @@ import (
 
 type fakeErrLocker struct{ err error }
 
-func (l *fakeErrLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, _ func() error) error {
+func (l *fakeErrLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, _ func(context.Context) error) error {
 	return l.err
 }
 

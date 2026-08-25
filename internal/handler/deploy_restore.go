@@ -39,7 +39,7 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		liveBytes int64
 		outcome   string
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func(opCtx context.Context) error {
 		if row, err := h.requireWritableSite(opCtx, site); err != nil {
 			h.writeFenceError(w, r, "registry.get.restore",
 				"site was deleted; deploy cannot be restored", row, err)

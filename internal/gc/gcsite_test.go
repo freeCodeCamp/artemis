@@ -67,10 +67,10 @@ func (l *fakeLocker) NewLockSession(_ context.Context) (LockSession, error) {
 	return l, nil
 }
 
-func (l *fakeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
+func (l *fakeLocker) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	l.calls++
 	l.sites = append(l.sites, string(site))
-	return fn()
+	return fn(ctx)
 }
 
 func (l *fakeLocker) Close(context.Context) { l.closed++ }
@@ -132,9 +132,9 @@ func (l *orderRecordingLocker) NewLockSession(_ context.Context) (LockSession, e
 	return l, nil
 }
 
-func (l *orderRecordingLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
+func (l *orderRecordingLocker) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
 	*l.log = append(*l.log, "lock")
-	err := fn()
+	err := fn(ctx)
 	*l.log = append(*l.log, "unlock")
 	return err
 }

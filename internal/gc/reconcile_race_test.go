@@ -91,14 +91,14 @@ type racingSession struct {
 	locks  int
 }
 
-func (s *racingSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
+func (s *racingSession) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
 	s.locks++
 	if s.inject != nil {
 		run := s.inject
 		s.inject = nil
 		run()
 	}
-	return fn()
+	return fn(ctx)
 }
 
 func (s *racingSession) Close(context.Context) {}
@@ -754,8 +754,8 @@ func (l sessionLocker) NewLockSession(context.Context) (LockSession, error) { re
 
 type unlockFailSession struct{ err error }
 
-func (s *unlockFailSession) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
-	if err := fn(); err != nil {
+func (s *unlockFailSession) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
+	if err := fn(ctx); err != nil {
 		return err
 	}
 	return s.err

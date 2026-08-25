@@ -88,7 +88,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	var deployID string
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func(commitCtx context.Context) error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		if row, err := h.requireWritableSite(commitCtx, site); err != nil {
 			h.writeFenceError(w, r, "registry.get.promote",
@@ -225,7 +225,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func(commitCtx context.Context) error {
 		if row, err := h.requireWritableSite(commitCtx, site); err != nil {
 			h.writeFenceError(w, r, "registry.get.rollback",
 				"site was deleted; its alias cannot be written", row, err)

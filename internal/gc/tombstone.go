@@ -27,7 +27,7 @@ type Deleter interface {
 }
 
 type SiteLocker interface {
-	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 }
 
 type PurgeAuditor interface {
@@ -45,9 +45,9 @@ type TombstonePurge struct {
 	BlastCap  int
 }
 
-func (p *TombstonePurge) withLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
+func (p *TombstonePurge) withLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	if p.Locker == nil {
-		return fn()
+		return fn(ctx)
 	}
 	return p.Locker.WithSiteLock(ctx, site, fn)
 }
@@ -95,11 +95,11 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 			continue
 		}
 		var cleared bool
-		lockErr := p.withLock(ctx, t.Site, func() error {
-			if _, err := p.Deleter.DeletePrefix(ctx, p.trashPrefix(t)); err != nil {
+		lockErr := p.withLock(ctx, t.Site, func(lockCtx context.Context) error {
+			if _, err := p.Deleter.DeletePrefix(lockCtx, p.trashPrefix(t)); err != nil {
 				return fmt.Errorf("tombstone-purge: delete %s: %w", label, err)
 			}
-			c, err := p.Store.ClearTombstone(ctx, t.Site, t.ID)
+			c, err := p.Store.ClearTombstone(lockCtx, t.Site, t.ID)
 			if err != nil {
 				return fmt.Errorf("tombstone-purge: clear %s: %w", label, err)
 			}

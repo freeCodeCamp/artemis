@@ -29,9 +29,9 @@ type fakeLocker struct {
 	log *eventLog
 }
 
-func (l *fakeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
+func (l *fakeLocker) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	l.log.add("lock:" + string(site))
-	err := fn()
+	err := fn(ctx)
 	l.log.add("unlock:" + string(site))
 	return err
 }
@@ -252,4 +252,39 @@ func TestDeployFinalize_AliasWriteUnderSiteLock(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	assertInsideLock(t, log, "www.freecode.camp", "putAlias:www/preview")
+}
+
+type sessionLostLocker struct{ site sitekey.Dirname }
+
+func (l *sessionLostLocker) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
+	l.site = site
+	lockCtx, lost := context.WithCancel(ctx)
+	lost()
+	return fn(lockCtx)
+}
+
+func TestWithSiteLock_HandsTheClosureTheLockContextNotTheOuterOne(t *testing.T) {
+	h := &Handlers{Locker: &sessionLostLocker{}}
+
+	var seen error
+	err := h.withSiteLock(context.Background(), "www.freecode.camp", func(ctx context.Context) error {
+		seen = ctx.Err()
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.ErrorIs(t, seen, context.Canceled,
+		"a signature change alone is cosmetic; the closure must read the context the lock session "+
+			"cancels, or a dead session still lets destructive work run on with no mutual exclusion")
+}
+
+func TestWithSiteLock_WithNoLockerStillRunsTheClosure(t *testing.T) {
+	h := &Handlers{}
+
+	ran := false
+	require.NoError(t, h.withSiteLock(context.Background(), "www.freecode.camp", func(context.Context) error {
+		ran = true
+		return nil
+	}))
+	assert.True(t, ran)
 }

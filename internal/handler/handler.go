@@ -106,7 +106,7 @@ type ReservationReverser interface {
 }
 
 type SiteLocker interface {
-	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 }
 
 // RegistryHealth is the readiness probe contract for the registry
@@ -176,15 +176,15 @@ type Handlers struct {
 
 var errAliasWriteHandled = errors.New("alias write failure already written to response")
 
-func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn func() error) error {
+func (h *Handlers) withSiteLock(ctx context.Context, dirname sitekey.Dirname, fn func(context.Context) error) error {
 	if h.Locker == nil {
-		return fn()
+		return fn(ctx)
 	}
 	var closureErr error
 	var closureRan bool
-	lockerErr := h.Locker.WithSiteLock(ctx, dirname, func() error {
+	lockerErr := h.Locker.WithSiteLock(ctx, dirname, func(lockCtx context.Context) error {
 		closureRan = true
-		closureErr = fn()
+		closureErr = fn(lockCtx)
 		return closureErr
 	})
 	if closureRan {

@@ -40,7 +40,7 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		moved   int
 		success bool
 	)
-	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func() error {
+	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func(opCtx context.Context) error {
 		for _, mode := range []string{"production", "preview"} {
 			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
 			if err != nil && !r2.IsNotFound(err) {

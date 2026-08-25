@@ -362,9 +362,9 @@ func (rc *Reconciler) locked(ctx context.Context, sess LockSession, site sitekey
 	defer cancel()
 
 	var done bool
-	err := sess.WithSiteLock(opCtx, site, func() error {
+	err := sess.WithSiteLock(opCtx, site, func(lockCtx context.Context) error {
 		var fnErr error
-		done, fnErr = fn(opCtx)
+		done, fnErr = fn(lockCtx)
 		return fnErr
 	})
 	return done, err

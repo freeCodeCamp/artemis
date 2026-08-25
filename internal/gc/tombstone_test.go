@@ -89,10 +89,10 @@ type fakePurgeLocker struct {
 	sites []string
 }
 
-func (f *fakePurgeLocker) WithSiteLock(_ context.Context, site sitekey.Dirname, fn func() error) error {
+func (f *fakePurgeLocker) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	f.calls++
 	f.sites = append(f.sites, string(site))
-	return fn()
+	return fn(ctx)
 }
 
 type fakePurgeAuditor struct {

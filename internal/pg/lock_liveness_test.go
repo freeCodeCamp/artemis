@@ -38,7 +38,7 @@ func TestWithSiteLock_CancelsTheClosureWhenTheSessionDies(t *testing.T) {
 	sess := &lockSession{conn: conn, onLost: func() { lost.Store(true) }, heartbeat: 20 * time.Millisecond}
 
 	start := time.Now()
-	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func() error {
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func(context.Context) error {
 		for time.Since(start) < 500*time.Millisecond {
 			if lost.Load() {
 				return nil
@@ -61,7 +61,7 @@ func TestWithSiteLock_LeavesALiveSessionAlone(t *testing.T) {
 	var lost atomic.Bool
 	sess := &lockSession{conn: conn, onLost: func() { lost.Store(true) }, heartbeat: 20 * time.Millisecond}
 
-	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func() error {
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func(context.Context) error {
 		time.Sleep(80 * time.Millisecond)
 		return nil
 	})
@@ -70,14 +70,40 @@ func TestWithSiteLock_LeavesALiveSessionAlone(t *testing.T) {
 	assert.False(t, lost.Load(), "a healthy session must not be torn down by its own watchdog")
 }
 
-func TestWithSiteLock_NoHookIsANoOp(t *testing.T) {
+func TestWithSiteLock_CancelsTheClosureContextWhenTheSessionDies(t *testing.T) {
 	conn := &deadConn{}
 	sess := &lockSession{conn: conn, heartbeat: 20 * time.Millisecond}
 
-	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func() error { return nil })
+	var observed error
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			observed = ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		return nil
+	})
 
 	require.NoError(t, err)
-	assert.Zero(t, conn.pings.Load(), "without a hook there is nobody to tell, so do not pay for the probe")
+	assert.ErrorIs(t, observed, context.Canceled,
+		"postgres already released the lock; the closure must stop moving objects rather than finish "+
+			"without mutual exclusion, and it must do so whether or not a paging hook is registered")
+}
+
+func TestWithSiteLock_LeavesALiveClosureContextAlone(t *testing.T) {
+	conn := &deadConn{}
+	conn.alive.Store(true)
+	sess := &lockSession{conn: conn, heartbeat: 20 * time.Millisecond}
+
+	var observed error
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func(ctx context.Context) error {
+		time.Sleep(80 * time.Millisecond)
+		observed = ctx.Err()
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.NoError(t, observed, "a healthy session must not cancel the work it is protecting")
 }
 
 type slowPingConn struct {
@@ -108,7 +134,7 @@ func TestWithSiteLock_UnlockNeverRunsBesideAnInFlightPing(t *testing.T) {
 	conn := &slowPingConn{}
 	sess := &lockSession{conn: conn, onLost: func() {}, heartbeat: 10 * time.Millisecond}
 
-	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func() error {
+	err := sess.WithSiteLock(context.Background(), sitekey.Dirname("www.freecode.camp"), func(context.Context) error {
 		time.Sleep(50 * time.Millisecond)
 		return nil
 	})

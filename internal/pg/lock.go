@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-func (r *Repo) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
+func (r *Repo) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	sess, err := r.NewLockSession(ctx)
 	if err != nil {
 		return fmt.Errorf("site lock %s: %w", site, err)
@@ -60,7 +61,7 @@ func (s *lockSession) beat() time.Duration {
 	return defaultLockHeartbeat
 }
 
-func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error {
+func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
 	if _, lockErr := s.conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, site); lockErr != nil {
 		return fmt.Errorf("site lock %s: %w", site, lockErr)
 	}
@@ -75,17 +76,19 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 		}
 	}()
 
-	stop := s.watchLiveness(ctx, site)
+	lockCtx, lost := context.WithCancelCause(ctx)
+	defer lost(nil)
+	stop := s.watchLiveness(ctx, site, lost)
 	defer stop()
-	return fn()
+	return fn(lockCtx)
 }
+
+var ErrLockSessionLost = errors.New("pg: the connection holding the site lock stopped answering")
 
 const defaultLockHeartbeat = 5 * time.Second
 
-func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) func() {
-	if s.onLost == nil {
-		return func() {}
-	}
+func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname,
+	lost context.CancelCauseFunc) func() {
 	done := make(chan struct{})
 	exited := make(chan struct{})
 	go func() {
@@ -105,7 +108,10 @@ func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname) f
 				cancel()
 				if err != nil && ctx.Err() == nil {
 					slog.WarnContext(ctx, "lock.site.session_lost", "site", site, "err", err)
-					s.onLost()
+					lost(fmt.Errorf("%w: %w", ErrLockSessionLost, err))
+					if s.onLost != nil {
+						s.onLost()
+					}
 					return
 				}
 			}

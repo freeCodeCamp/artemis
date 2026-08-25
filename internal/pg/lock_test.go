@@ -23,7 +23,7 @@ func TestWithSiteLock_MutualExclusion(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := repo.WithSiteLock(ctx, "www.freecode.camp", func() error {
+			err := repo.WithSiteLock(ctx, "www.freecode.camp", func(context.Context) error {
 				mu.Lock()
 				inside++
 				if inside > maxInside {
@@ -50,7 +50,7 @@ func TestWithSiteLock_DistinctSitesDoNotBlock(t *testing.T) {
 	release := make(chan struct{})
 	held := make(chan struct{})
 	go func() {
-		_ = repo.WithSiteLock(ctx, "a.freecode.camp", func() error {
+		_ = repo.WithSiteLock(ctx, "a.freecode.camp", func(context.Context) error {
 			close(held)
 			<-release
 			return nil
@@ -60,7 +60,7 @@ func TestWithSiteLock_DistinctSitesDoNotBlock(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_ = repo.WithSiteLock(ctx, "b.freecode.camp", func() error { return nil })
+		_ = repo.WithSiteLock(ctx, "b.freecode.camp", func(context.Context) error { return nil })
 		close(done)
 	}()
 	select {
@@ -102,7 +102,7 @@ func TestLockSession_PerMoveReleaseAcrossSessions(t *testing.T) {
 	defer sessA.Close(ctx)
 
 	for range 3 {
-		require.NoError(t, sessA.WithSiteLock(ctx, "www.freecode.camp", func() error { return nil }))
+		require.NoError(t, sessA.WithSiteLock(ctx, "www.freecode.camp", func(context.Context) error { return nil }))
 	}
 
 	sessB, err := repo.NewLockSession(ctx)
@@ -111,7 +111,7 @@ func TestLockSession_PerMoveReleaseAcrossSessions(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_ = sessB.WithSiteLock(ctx, "www.freecode.camp", func() error { return nil })
+		_ = sessB.WithSiteLock(ctx, "www.freecode.camp", func(context.Context) error { return nil })
 		close(done)
 	}()
 	select {
@@ -135,7 +135,7 @@ func TestLockSession_MutualExclusionAcrossSessions(t *testing.T) {
 	aDone := make(chan struct{})
 	go func() {
 		defer close(aDone)
-		_ = sessA.WithSiteLock(ctx, "s.freecode.camp", func() error {
+		_ = sessA.WithSiteLock(ctx, "s.freecode.camp", func(context.Context) error {
 			close(held)
 			<-release
 			return nil
@@ -147,7 +147,7 @@ func TestLockSession_MutualExclusionAcrossSessions(t *testing.T) {
 	bDone := make(chan struct{})
 	go func() {
 		defer close(bDone)
-		_ = sessB.WithSiteLock(ctx, "s.freecode.camp", func() error {
+		_ = sessB.WithSiteLock(ctx, "s.freecode.camp", func(context.Context) error {
 			close(acquired)
 			return nil
 		})

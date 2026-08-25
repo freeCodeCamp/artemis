@@ -54,7 +54,7 @@ func TestWithSiteLock_NoPoolSelfDeadlock(t *testing.T) {
 			go func(n int) {
 				defer wg.Done()
 				site := []sitekey.Dirname{"a.freecode.camp", "b.freecode.camp"}[n]
-				err := repo.WithSiteLock(ctx, site, func() error {
+				err := repo.WithSiteLock(ctx, site, func(context.Context) error {
 					return repo.FinalizeAtomic(ctx, site, "20260101-000000-aaaaaaa", "production", now, 0)
 				})
 				assert.NoError(t, err)
@@ -87,7 +87,7 @@ func TestLockSession_NoPoolSelfDeadlock(t *testing.T) {
 				sess, err := repo.NewLockSession(ctx)
 				assert.NoError(t, err)
 				defer sess.Close(ctx)
-				err = sess.WithSiteLock(ctx, site, func() error {
+				err = sess.WithSiteLock(ctx, site, func(context.Context) error {
 					return repo.FinalizeAtomic(ctx, site, "20260101-000000-aaaaaaa", "production", now, 0)
 				})
 				assert.NoError(t, err)

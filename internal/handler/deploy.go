@@ -255,7 +255,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		h.auditFromScope(r.Context(), "deploy.finalize", "failure",
 			map[string]any{"stage": stage, "mode": mode})
 	}
-	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func() error {
+	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(claims.Site), func(commitCtx context.Context) error {
 		telemetry.Breadcrumb(commitCtx, "lock", "site lock acquired")
 		site, err := h.requireWritableSite(commitCtx, claims.Site)
 		if err != nil {

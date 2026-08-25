@@ -34,7 +34,7 @@ type GCAuditor interface {
 }
 
 type LockSession interface {
-	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func() error) error
+	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 	Close(ctx context.Context)
 }
 
@@ -123,7 +123,7 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 		d := d
 		var tombstoned bool
 		opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
-		err := sess.WithSiteLock(opCtx, site, func() error {
+		err := sess.WithSiteLock(opCtx, site, func(opCtx context.Context) error {
 			live, err := g.LiveAliases(opCtx, site)
 			if err != nil {
 				return fmt.Errorf("re-read live aliases: %w", err)

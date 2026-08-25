@@ -157,8 +157,8 @@ func TestSitePurge_RefusesSuccessWhileObjectsRemain(t *testing.T) {
 
 type unlockErrLocker struct{}
 
-func (unlockErrLocker) WithSiteLock(_ context.Context, _ sitekey.Dirname, fn func() error) error {
-	if err := fn(); err != nil {
+func (unlockErrLocker) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
+	if err := fn(ctx); err != nil {
 		return err
 	}
 	return errors.New("site unlock example: conn closed")

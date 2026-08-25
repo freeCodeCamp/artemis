@@ -19,7 +19,7 @@ func TestLockSession_CancelledAcquireUnwrapsToContextCanceled(t *testing.T) {
 	cancelled, cancel := context.WithCancel(live)
 	cancel()
 
-	err = sess.WithSiteLock(cancelled, "cancel-probe.freecode.camp", func() error {
+	err = sess.WithSiteLock(cancelled, "cancel-probe.freecode.camp", func(context.Context) error {
 		t.Fatal("the closure must not run once acquisition fails")
 		return nil
 	})
@@ -47,7 +47,7 @@ func TestLockSession_CancelledMidWaitUnwrapsToContextCanceled(t *testing.T) {
 	holderDone := make(chan struct{})
 	go func() {
 		defer close(holderDone)
-		_ = holder.WithSiteLock(live, site, func() error {
+		_ = holder.WithSiteLock(live, site, func(context.Context) error {
 			close(held)
 			<-release
 			return nil
@@ -58,7 +58,7 @@ func TestLockSession_CancelledMidWaitUnwrapsToContextCanceled(t *testing.T) {
 	waitCtx, cancelWait := context.WithCancel(live)
 	waitErr := make(chan error, 1)
 	go func() {
-		waitErr <- waiter.WithSiteLock(waitCtx, site, func() error {
+		waitErr <- waiter.WithSiteLock(waitCtx, site, func(context.Context) error {
 			return nil
 		})
 	}()
