@@ -448,7 +448,7 @@ The pre-ADR-0006 purge code still stands in `internal/handler/site_register.go`,
 
 An origin-prefix move is only safe because the reservation has expired and the register path answers `409` for a reserved name, so the slug cannot have been re-claimed in the window. That guard is the precondition; do not lift this sweep out of the reservation flow and point it at arbitrary prefixes.
 
-**Still open:** an approver-gated early-release endpoint is not implemented; releasing before the grace expires has no path today. The object-count ceiling that stood here is closed by entry 21.
+**Early release shipped.** `POST /api/site/{slug}/release` ends a reservation before its deadline and reclaims the bytes in the same order this sweep uses — tombstone, move, then free the name. It is gated on `REPO_APPROVE_AUTHZ_TEAM`, not the team that may delete; entry 24 has the full shape. The object-count ceiling that also stood here is closed by entry 21.
 
 **Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, the replacement is `POST /api/site/{slug}/release`, gated on `REPO_APPROVE_AUTHZ_TEAM` — see entry 24. Without an approver the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
 
@@ -505,9 +505,19 @@ operator's remedy and entry 20 retires it, so between entry 20 and this entry th
 all — a DMCA takedown that must also free the name needed a manual `psql` write.
 
 **New:** `POST /api/site/{slug}/release` ends the reservation immediately and reclaims the bytes in
-the same order the nightly sweep uses: free the registry row, record the whole-site tombstone, then
-move `<dirname>/` into `_trash/`. One code path owns reclamation, so `tombstone-purge` becomes
-responsible for the bytes either way and `CLEANUP_RECOVERY_DAYS` still applies.
+the same order the nightly sweep uses: refuse anything that is not `state='reserved'`, record the
+whole-site tombstone, move `<dirname>/` into `_trash/`, and free the registry row **last**.
+`tombstone-purge` becomes responsible for the bytes either way and `CLEANUP_RECOVERY_DAYS` still
+applies.
+
+**Bytes first, name second — the rule entry 19 states for the sweep binds here too, and for a
+sharper reason.** `POST /api/site/register` takes no site lock, so the only thing refusing a
+concurrent claim on the slug is the reserved registry row still being there. Free the name before
+the move and a new owner can register in the gap and then have their own freshly-uploaded bytes
+swept into `_trash/` by the release still in flight — a window of minutes on a large site, not a
+nanosecond. `TestSiteRelease_FreesTheNameOnlyAfterTheBytesAreTrashed` fails if the two are
+transposed. `POST …/undelete` now takes the same site lock, so it cannot return an emptied site to
+service mid-release.
 
 **The authorization is deliberately not `REGISTRY_AUTHZ_TEAM`.** That team may delete, and a delete
 is reversible for 72h through `undelete`. Release is not reversible. It is gated on
@@ -518,11 +528,11 @@ operation needs a different, smaller set of people than the safe form.
 **Status codes:** `200 {"slug","status":"released","moved"}` on success. `400 invalid_slug`.
 `403 user_unauthorized` for a caller outside the approver team. `404 not_found` when the slug has no
 **reserved** row — an active site is not releasable, and the handler returns before it touches any
-bytes. `502` on a tombstone or R2 failure. `503 unavailable` on a deployment with no reservation
-store.
+bytes. `502` on a tombstone or R2 failure — and on that path the name stays reserved, so the call is safe
+to retry. `503 unavailable` on a deployment with no reservation store.
 
 **`audit_log`:** one `site.release` row, `outcome=success` with `detail.moved`, or `outcome=failure`
-with `detail.stage` of `release`, `tombstone` or `reclaim`.
+with `detail.stage` of `state`, `tombstone`, `reclaim` or `release` naming how far it got.
 
 **Action:** none for existing callers — the endpoint is purely additive and no shipped client calls
 it. Operators handling a takedown should use it instead of a manual database write.

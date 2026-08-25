@@ -171,7 +171,7 @@ A `DELETE` on a name the serve plane answers but the registry does not know — 
 
 `POST /api/site/{slug}/undelete` returns a reserved name to service inside the grace window. Past the deadline it returns 404, because the nightly 03:00 sweep owns the row from that moment and frees the name.
 
-`POST /api/site/{slug}/release` ends a reservation early. It frees the registry row, records the whole-site tombstone, and moves `<dirname>/` into `_trash/` — the same order and the same code path as the nightly sweep, so `tombstone-purge` owns the bytes either way. Its authorization is `REPO_APPROVE_AUTHZ_TEAM`, not `REGISTRY_AUTHZ_TEAM`: a delete is reversible for 72h and a release is not, so the two must not share a gate. A slug with no `reserved` row returns 404 before the handler touches any bytes.
+`POST /api/site/{slug}/release` ends a reservation early. It refuses anything that is not `reserved`, records the whole-site tombstone, moves `<dirname>/` into `_trash/`, and frees the registry row last — the same order as the nightly sweep, so `tombstone-purge` owns the bytes either way. The order is the safety property. `POST /api/site/register` takes no site lock, so the reserved row is the only thing refusing a concurrent claim on the name; freeing it before the move would let a new owner register and then have their own upload swept into `_trash/`. Its authorization is `REPO_APPROVE_AUTHZ_TEAM`, not `REGISTRY_AUTHZ_TEAM`: a delete is reversible for 72h and a release is not, so the two must not share a gate. A slug with no `reserved` row returns 404 before the handler touches any bytes.
 
 ### What you can recover
 
