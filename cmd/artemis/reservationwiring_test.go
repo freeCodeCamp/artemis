@@ -22,6 +22,7 @@ import (
 var (
 	_ handler.ReservationStore    = (*pg.RegistryStore)(nil)
 	_ handler.ReservationReverser = (*pg.RegistryStore)(nil)
+	_ handler.NameReleaser        = (*pg.RegistryStore)(nil)
 )
 
 type legacyOnlyRegistry struct{ handler.RegistryWriter }
@@ -34,6 +35,8 @@ type reservingRegistry struct{ handler.RegistryWriter }
 func (reservingRegistry) Reserve(context.Context, sitekey.Slug, sitekey.Dirname, time.Time, string) (registry.Reservation, error) {
 	return registry.Reservation{}, nil
 }
+
+func (reservingRegistry) ReleaseReservationNow(context.Context, sitekey.Slug) error { return nil }
 
 func TestBuildHandlers_WiresTheReservationStoreWhenTheWriterSupportsIt(t *testing.T) {
 	cfg := &config.Config{}
@@ -48,6 +51,9 @@ func TestBuildHandlers_WiresTheReservationStoreWhenTheWriterSupportsIt(t *testin
 			"live, site still serving — the exact orphan defect ADR 0006 exists to fix")
 	assert.Equal(t, 72*time.Hour, h.ReservationGrace,
 		"a zero grace would reserve a name that expires the instant it is set")
+	require.NotNil(t, h.NameReleaser,
+		"a nil NameReleaser answers 503 on every release, so an approver has no path but a manual psql "+
+			"write — the gap this release closes by retiring ?purge=true")
 }
 
 func TestBuildHandlers_LeavesReservationsNilForAWriterWithoutIt(t *testing.T) {
@@ -58,6 +64,8 @@ func TestBuildHandlers_LeavesReservationsNilForAWriterWithoutIt(t *testing.T) {
 
 	assert.Nil(t, h.Reservations,
 		"a valkey-only deployment has no reservation table; it must keep the legacy delete rather than panic")
+	assert.Nil(t, h.NameReleaser,
+		"the same deployment has no reserved rows to release")
 }
 
 func TestWiring_NoBootConfigurationReachesTheLegacyPurge(t *testing.T) {

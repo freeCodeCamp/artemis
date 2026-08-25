@@ -95,6 +95,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 				"site was deleted; its alias cannot be written", row, err)
 			return errAliasWriteHandled
 		}
+		// accepted defect: dossier B20 — an empty ExpectedCurrent skips
+		// the CAS entirely, and the shipped CLI sends exactly that.
+		// Behaviour fix is gated on universe-cli #58.
 		if req.ExpectedCurrent != "" {
 			current, err := h.R2.GetAlias(commitCtx, prodKey)
 			if err != nil && !r2.IsNotFound(err) {

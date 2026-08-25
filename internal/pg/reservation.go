@@ -101,6 +101,20 @@ func (s *RegistryStore) ReleaseReservation(ctx context.Context, slug sitekey.Slu
 	return nil
 }
 
+func (s *RegistryStore) ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM sites WHERE slug = $1 AND state = $2`,
+		slug, registry.StateReserved)
+	if err != nil {
+		return fmt.Errorf("pg release reservation now %s: %w", slug, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return registry.ErrNotFound
+	}
+	s.changed(slug)
+	return nil
+}
+
 func (s *RegistryStore) ExpiredReservations(ctx context.Context, before time.Time, limit int) ([]registry.Reservation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview

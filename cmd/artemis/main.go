@@ -527,6 +527,9 @@ func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 		h.Reservations = rs
 		h.ReservationGrace = cfg.Registry.ReservationGrace
 	}
+	if nr, ok := d.registry.(handler.NameReleaser); ok {
+		h.NameReleaser = nr
+	}
 	return h
 }
 

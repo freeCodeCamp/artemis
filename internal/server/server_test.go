@@ -193,3 +193,17 @@ func TestRouter_SentryMiddlewareMountedWhenClientConfigured(t *testing.T) {
 	require.NotEmpty(t, names, "sentryhttp middleware mounted so a transaction was emitted; total events=%d", len(tr.events))
 	assert.Contains(t, names, "GET /healthz", "retagTransaction set the tx name to the chi route pattern")
 }
+
+func TestRouter_SiteLifecycleRoutesAreMounted(t *testing.T) {
+	r := New(&handler.Handlers{})
+	for _, target := range []string{
+		"/api/site/www/undelete",
+		"/api/site/www/release",
+	} {
+		req := httptest.NewRequest(http.MethodPost, target, nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"%s must be mounted; an unmounted route answers 404 and the handler behind it is dead code", target)
+	}
+}

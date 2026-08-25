@@ -105,6 +105,12 @@ type ReservationReverser interface {
 	Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
 }
 
+// NameReleaser carries no deadline predicate, unlike the sweep's
+// ReleaseReservation, which is why its caller is approver-gated.
+type NameReleaser interface {
+	ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 }
@@ -136,6 +142,7 @@ type Handlers struct {
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
+	NameReleaser           NameReleaser
 	ReservationGrace       time.Duration
 	TrashPrefixBase        string // e.g. "_trash/"
 	Trash                  TrashStore
