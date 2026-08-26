@@ -491,3 +491,118 @@ func TestGitHubTokenHandler_RejectsOverCapAppJWT(t *testing.T) {
 		t.Errorf("body = %q, want exp-too-far rejection", body)
 	}
 }
+
+func TestIsTransient(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"context canceled", cancelled.Err(), true},
+		{"deadline exceeded", context.DeadlineExceeded, true},
+		{"wrapped deadline", fmt.Errorf("create repo: %w", context.DeadlineExceeded), true},
+		{"retryable user-facing", &UserFacingError{Msg: "GitHub API temporarily unavailable", Retryable: true}, true},
+		{"wrapped retryable", fmt.Errorf("create repo: %w", &UserFacingError{Msg: "5xx", Retryable: true}), true},
+		{"permanent user-facing", &UserFacingError{Msg: "lacks permission"}, false},
+		{"plain error", fmt.Errorf("boom"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsTransient(tc.err); got != tc.want {
+				t.Errorf("IsTransient(%v) = %v, want %v; a misclassified permanent error retries forever and a misclassified transient one fails a request GitHub would have served", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatGitHubError(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		template  string
+		want      string
+		retryable bool
+	}{
+		{"template not accessible", http.StatusUnprocessableEntity,
+			`{"message":"Could not clone: repository not found"}`, "starter", "Contents:read", false},
+		{"forbidden with message", http.StatusForbidden,
+			`{"message":"Resource not accessible by integration"}`, "", "Resource not accessible by integration", false},
+		{"forbidden without message", http.StatusForbidden, ``, "", "contact an org admin", false},
+		{"server error is retryable", http.StatusBadGateway, ``, "", "temporarily unavailable", true},
+		{"other with message", http.StatusUnprocessableEntity,
+			`{"message":"name already exists on this account"}`, "", "name already exists on this account", false},
+		{"other without message", http.StatusTeapot, `not json`, "", "GitHub API error (418)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := formatGitHubError(tc.status, []byte(tc.body), tc.template)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want to contain %q", err, tc.want)
+			}
+			if got := IsTransient(err); got != tc.retryable {
+				t.Errorf("IsTransient = %v, want %v; only a 5xx may be retried, or a rejected create loops", got, tc.retryable)
+			}
+		})
+	}
+}
+
+func TestClient_RepoExists(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		want    bool
+		wantURL string
+		wantErr string
+	}{
+		{"present", http.StatusOK, `{"html_url":"https://github.com/` + testOrg + `/live"}`, true, "https://github.com/" + testOrg + "/live", ""},
+		{"absent", http.StatusNotFound, ``, false, "", ""},
+		{"error with message", http.StatusForbidden, `{"message":"blocked by policy"}`, false, "", "blocked by policy"},
+		{"error without message", http.StatusBadGateway, `not json`, false, "", "existence check status 502"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/access_tokens"):
+					tokenResponse(w)
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/"+testOrg+"/probe":
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, tc.body)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+
+			ok, url, err := newClient(t, srv.URL).RepoExists(context.Background(), "probe")
+
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want to contain %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if ok != tc.want || url != tc.wantURL {
+				t.Errorf("got (%v, %q), want (%v, %q); a false absent lets register clobber a live repo", ok, url, tc.want, tc.wantURL)
+			}
+		})
+	}
+}
+
+func TestClient_RepoExistsSurfacesATokenFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"message":"bad app credentials"}`)
+	}))
+	defer srv.Close()
+
+	_, _, err := newClient(t, srv.URL).RepoExists(context.Background(), "probe")
+	if err == nil || !strings.Contains(err.Error(), "bad app credentials") {
+		t.Fatalf("err = %v, want the GitHub message; an unauthenticated probe must not read as 'absent'", err)
+	}
+}
