@@ -165,7 +165,7 @@ The order is deliberate. If step 1 fails, artemis stops and returns 502. The sit
 
 The deploy bytes under `<dirname>/` stay in R2 through the whole grace period. Only the two alias objects go.
 
-`?purge=true` is retired. Artemis accepts the flag and ignores it, so a caller that still sends it gets the reserving delete.
+`?purge` is retired and refused. Artemis answers `400 purge_retired` and performs no delete at all, so a caller that still sends it learns immediately rather than believing bytes were reclaimed. The replacement is `POST /api/site/{slug}/release`.
 
 A `DELETE` on a name the serve plane answers but the registry does not know — an orphaned alias — removes the aliases and returns 200 with `{"status": "unpublished", "reserved": false}`. There is no row to reserve, so no name is held. A name that nothing served and nothing registered returns 404.
 

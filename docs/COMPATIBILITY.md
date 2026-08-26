@@ -430,7 +430,7 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **Release:** unreleased. Completes `docs/design/0006-unpublish-is-not-reclaim.md`, steps 5-7.
 
-**`?purge=true` no longer reclaims.** Once a delete unpublishes and reserves, the flag would have meant "skip the grace period and destroy the bytes now" — the one irreversible action in this design, sharing a URL and a permission with the safe form. A query parameter that silently escalates an operation from reversible to final cannot be read from a route table, and the two forms need different authorization: `REGISTRY_AUTHZ_TEAM` may delete, only `REPO_APPROVE_AUTHZ_TEAM` may release early. The flag is now accepted and ignored: a `DELETE` with it behaves exactly like a `DELETE` without it.
+**`?purge=true` no longer reclaims.** Once a delete unpublishes and reserves, the flag would have meant "skip the grace period and destroy the bytes now" — the one irreversible action in this design, sharing a URL and a permission with the safe form. A query parameter that silently escalates an operation from reversible to final cannot be read from a route table, and the two forms need different authorization: `REGISTRY_AUTHZ_TEAM` may delete, only `REPO_APPROVE_AUTHZ_TEAM` may release early. The flag is now **refused**: any true-ish value (`true`, `1`, `TRUE`, `t`, `yes`, `on`, or a bare `?purge`) answers `400 purge_retired` and performs no delete at all. Ignoring it was tried first and was worse — a `204` satisfies a caller who meant "make it dark" while lying to the caller who meant "reclaim the bytes", and only the second runs storage accounting and takedown compliance. Refusing lies to neither. An explicit `?purge=false` is an ordinary delete.
 
 **This fails closed.** The destructive reading of the flag is the one that stops working, so a caller that sent it gets *less* destruction than it asked for, never more. `universe-cli` never sent it (`src/lib/proxy-client.ts:667-674`), so no shipped caller is affected.
 
@@ -450,7 +450,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 **Early release shipped.** `POST /api/site/{slug}/release` ends a reservation before its deadline and reclaims the bytes in the same order this sweep uses — tombstone, move, then free the name. It is gated on `REPO_APPROVE_AUTHZ_TEAM`, not the team that may delete; entry 24 has the full shape. The object-count ceiling that also stood here is closed by entry 21.
 
-**Action:** drop `?purge=true` from any script — it is inert. If you relied on it to reclaim immediately, the replacement is `POST /api/site/{slug}/release`, gated on `REPO_APPROVE_AUTHZ_TEAM` — see entry 24. Without an approver the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
+**Action:** drop `?purge=true` from any script — it is now refused with `400 purge_retired` and the delete does not happen, so a script that still sends it stops working rather than silently under-delivering. If you relied on it to reclaim immediately, the replacement is `POST /api/site/{slug}/release`, gated on `REPO_APPROVE_AUTHZ_TEAM` — see entry 24. Without an approver the name and bytes are held for `SITE_RESERVATION_GRACE` (default 72h).
 
 ## 21 — a large prefix move finishes in one call
 
