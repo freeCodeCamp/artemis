@@ -121,6 +121,18 @@ func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reserva
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reservationReclaimTimeout)
 	defer cancel()
 	lockErr := sess.WithSiteLock(opCtx, deps.Dirname(res.Slug), func(opCtx context.Context) error {
+		if guard, ok := rel.(heldNameSource); ok {
+			held, err := guard.IsHeld(opCtx, res.Slug)
+			if err != nil {
+				return fmt.Errorf("reservation sweep held check %s: %w", res.Slug, err)
+			}
+			if held {
+				slog.WarnContext(opCtx, "reservation.sweep.still_held",
+					"slug", res.Slug, "reservedUntil", res.ReservedUntil,
+					"detail", "the row was selected on the app clock but the database still holds it; the bytes stay until the next run")
+				return nil
+			}
+		}
 		if err := reclaimSiteBytes(opCtx, deps, res.Slug); err != nil {
 			return err
 		}

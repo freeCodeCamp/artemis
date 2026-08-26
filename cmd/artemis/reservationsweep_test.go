@@ -312,3 +312,39 @@ func (r *refusingReleaser) ReleaseReservation(_ context.Context, slug sitekey.Sl
 	r.released = append(r.released, slug)
 	return nil
 }
+
+type heldGuardReleaser struct {
+	held     map[sitekey.Slug]bool
+	released []sitekey.Slug
+}
+
+func (r *heldGuardReleaser) IsHeld(_ context.Context, slug sitekey.Slug) (bool, error) {
+	return r.held[slug], nil
+}
+
+func (r *heldGuardReleaser) ReleaseReservation(_ context.Context, slug sitekey.Slug) error {
+	r.released = append(r.released, slug)
+	return nil
+}
+
+func TestSweepExpiredReservations_SkipsARowTheDatabaseStillConsidersHeld(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{
+		{Slug: "not-yet", ReservedUntil: fixedNow().Add(-time.Second)},
+		{Slug: "genuinely-old", ReservedUntil: fixedNow().Add(-time.Hour)},
+	}}
+	rel := &heldGuardReleaser{held: map[sitekey.Slug]bool{"not-yet": true}}
+	mover := &recordingMover{}
+	deps := lockOnlyDeps(&recordingLocker{})
+	deps.Mover = mover
+	deps.Tombstone = &recordingTombstones{}
+
+	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []sitekey.Slug{"genuinely-old"}, rel.released,
+		"ExpiredReservations selects on the app clock while every other predicate uses the database clock; an app clock running ahead would destroy a site undelete still considers restorable")
+	require.Len(t, mover.moved, 1)
+	assert.Equal(t, "genuinely-old.freecode.camp/", mover.moved[0][0],
+		"the skipped row's bytes must not move either")
+}
