@@ -49,7 +49,10 @@ func TestSiteDelete_RefusesTheRetiredPurgeFlag(t *testing.T) {
 }
 
 func TestSiteDelete_RefusesEveryTrueishSpellingOfTheRetiredFlag(t *testing.T) {
-	for _, q := range []string{"purge=true", "purge=1", "purge=TRUE", "purge=True", "purge=t", "purge=yes", "purge=on", "purge="} {
+	for _, q := range []string{
+		"purge=true", "purge=1", "purge=TRUE", "purge=True", "purge=t", "purge=yes", "purge=on", "purge=",
+		"purge=false&purge=true", "purge=true&purge=false", "purge=0&purge=yes",
+	} {
 		t.Run(q, func(t *testing.T) {
 			store := newFakeR2()
 			store.aliases["www/production"] = "20260420-141522-abc1234"
@@ -86,4 +89,24 @@ func TestSiteDelete_AnUnrelatedQueryParamIsAnOrdinaryDelete(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.Len(t, res.calls, 1)
+}
+
+func TestSiteDelete_LeavesEveryDeployByteInPlace(t *testing.T) {
+	store := newFakeR2()
+	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
+	store.aliases["www/production"] = "20260420-141522-abc1234"
+	h, res, _ := reserveHandlers(t, store)
+
+	w := callDelete(h, "www", "alice", "tok")
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, res.calls, 1)
+
+	store.mu.Lock()
+	_, stillThere := store.objects["www/deploys/20260420-141522-abc1234/index.html"]
+	store.mu.Unlock()
+	assert.True(t, stillThere,
+		"ADR-0006's headline invariant: delete unpublishes, it does not reclaim. Moving the deploy prefix here would destroy the bytes undelete restores, inside the grace, with the caller told 204")
+	assert.NotContains(t, store.aliases, "www/production",
+		"the alias objects are the only thing a delete removes; leaving them serving is the pre-1.10.0 orphan bug")
 }

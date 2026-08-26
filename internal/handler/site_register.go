@@ -260,12 +260,17 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func requestsPurge(r *http.Request) bool {
-	q := r.URL.Query()
-	if !q.Has("purge") {
+	values, ok := r.URL.Query()["purge"]
+	if !ok {
 		return false
 	}
-	purge, err := strconv.ParseBool(q.Get("purge"))
-	return err != nil || purge
+	for _, v := range values {
+		purge, err := strconv.ParseBool(v)
+		if err != nil || purge {
+			return true
+		}
+	}
+	return false
 }
 
 func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error) {
