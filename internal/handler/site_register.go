@@ -21,21 +21,33 @@ import (
 // register / list / update endpoints. The shape is stable so
 // universe-cli can decode the same struct from any of them.
 type SiteRow struct {
-	Slug      sitekey.Slug `json:"slug"`
-	Teams     []string     `json:"teams"`
-	CreatedAt time.Time    `json:"createdAt"`
-	UpdatedAt time.Time    `json:"updatedAt"`
-	CreatedBy string       `json:"createdBy"`
+	Slug          sitekey.Slug `json:"slug"`
+	Teams         []string     `json:"teams"`
+	CreatedAt     time.Time    `json:"createdAt"`
+	UpdatedAt     time.Time    `json:"updatedAt"`
+	CreatedBy     string       `json:"createdBy"`
+	State         string       `json:"state"`
+	ReservedUntil *time.Time   `json:"reservedUntil,omitempty"`
 }
 
 func toSiteRow(s registry.Site) SiteRow {
-	return SiteRow{
+	state := s.State
+	if state == "" {
+		state = registry.StateActive
+	}
+	row := SiteRow{
 		Slug:      s.Slug,
 		Teams:     s.Teams,
 		CreatedAt: s.CreatedAt,
 		UpdatedAt: s.UpdatedAt,
 		CreatedBy: s.CreatedBy,
+		State:     state,
 	}
+	if s.IsReserved() && !s.ReservedUntil.IsZero() {
+		until := s.ReservedUntil
+		row.ReservedUntil = &until
+	}
+	return row
 }
 
 // SiteRegisterRequest is the body of POST /api/site/register.

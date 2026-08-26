@@ -213,3 +213,30 @@ func TestSiteUndelete_AuditsTheFailureWhenTheDeadlineHasPassed(t *testing.T) {
 	assert.Equal(t, "site.undelete", fa.events[0].Action)
 	assert.Equal(t, "failure", fa.events[0].Outcome)
 }
+
+func TestToSiteRow_CarriesTheReservedStateAndDeadline(t *testing.T) {
+	until := time.Date(2026, 8, 29, 3, 0, 0, 0, time.UTC)
+	row := toSiteRow(registry.Site{Slug: "held", State: registry.StateReserved, ReservedUntil: until})
+
+	require.NotNil(t, row.ReservedUntil,
+		"universe sites ls shows a held name as live unless the deadline reaches the caller")
+	assert.Equal(t, registry.StateReserved, row.State)
+	assert.Equal(t, until, *row.ReservedUntil)
+
+	b, err := json.Marshal(row)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"state":"reserved"`)
+	assert.Contains(t, string(b), `"reservedUntil":"2026-08-29T03:00:00Z"`)
+}
+
+func TestToSiteRow_DefaultsAStatelessStoreToActiveAndOmitsTheDeadline(t *testing.T) {
+	row := toSiteRow(registry.Site{Slug: "live"})
+
+	assert.Equal(t, registry.StateActive, row.State,
+		"a store with no reservation concept holds an active site; omitting the field would leave a client unable to tell absent from unknown")
+	assert.Nil(t, row.ReservedUntil)
+
+	b, err := json.Marshal(row)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "reservedUntil")
+}
