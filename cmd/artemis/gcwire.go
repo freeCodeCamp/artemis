@@ -232,6 +232,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
 			Tombstone: repo,
+			Locker:    repo,
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 		},

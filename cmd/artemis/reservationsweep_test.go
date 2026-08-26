@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
@@ -42,6 +44,60 @@ func (r *recordingReleaser) ReleaseReservation(_ context.Context, slug sitekey.S
 	return nil
 }
 
+type recordingLocker struct {
+	mu       sync.Mutex
+	sessions int
+	locked   []sitekey.Dirname
+	held     []sitekey.Dirname
+	newErr   error
+	lockErr  error
+	closed   int
+}
+
+func (l *recordingLocker) NewLockSession(context.Context) (gc.LockSession, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.newErr != nil {
+		return nil, l.newErr
+	}
+	l.sessions++
+	return &recordingLockSession{parent: l}, nil
+}
+
+type recordingLockSession struct{ parent *recordingLocker }
+
+func (s *recordingLockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
+	l := s.parent
+	l.mu.Lock()
+	if l.lockErr != nil {
+		err := l.lockErr
+		l.mu.Unlock()
+		return err
+	}
+	l.locked = append(l.locked, site)
+	l.held = append(l.held, site)
+	l.mu.Unlock()
+	err := fn(ctx)
+	l.mu.Lock()
+	l.held = l.held[:len(l.held)-1]
+	l.mu.Unlock()
+	return err
+}
+
+func (s *recordingLockSession) Close(context.Context) {
+	s.parent.mu.Lock()
+	s.parent.closed++
+	s.parent.mu.Unlock()
+}
+
+func testDirname(s sitekey.Slug) sitekey.Dirname {
+	return sitekey.Dirname(string(s) + ".freecode.camp")
+}
+
+func lockOnlyDeps(l *recordingLocker) reclaimDeps {
+	return reclaimDeps{Locker: l, Dirname: testDirname, TrashBase: "_trash/"}
+}
+
 func fixedNow() time.Time { return time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC) }
 
 func TestSweepExpiredReservations_FreesOnlyNamesPastTheirGrace(t *testing.T) {
@@ -51,7 +107,7 @@ func TestSweepExpiredReservations_FreesOnlyNamesPastTheirGrace(t *testing.T) {
 	}}
 	rel := &recordingReleaser{}
 
-	n, err := sweepExpiredReservations(context.Background(), src, rel, reclaimDeps{}, fixedNow, false)
+	n, err := sweepExpiredReservations(context.Background(), src, rel, lockOnlyDeps(&recordingLocker{}), fixedNow, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
@@ -64,24 +120,64 @@ func TestSweepExpiredReservations_FreesOnlyNamesPastTheirGrace(t *testing.T) {
 func TestSweepExpiredReservations_DryRunReleasesNothing(t *testing.T) {
 	src := &scriptedReservations{expired: []registry.Reservation{{Slug: "old-one"}}}
 	rel := &recordingReleaser{}
+	lk := &recordingLocker{}
 
-	n, err := sweepExpiredReservations(context.Background(), src, rel, reclaimDeps{}, fixedNow, true)
+	n, err := sweepExpiredReservations(context.Background(), src, rel, lockOnlyDeps(lk), fixedNow, true)
 
 	require.NoError(t, err)
 	assert.Zero(t, n)
 	assert.Empty(t, rel.released, "CLEANUP_DRY_RUN must reach every destructive leg, including this one")
+	assert.Zero(t, lk.sessions, "a dry run touches nothing, so it must not take a lock either")
 }
 
-func TestSweepExpiredReservations_StopsAtTheFirstReleaseFailure(t *testing.T) {
-	src := &scriptedReservations{expired: []registry.Reservation{{Slug: "a"}, {Slug: "b"}}}
-	rel := &recordingReleaser{err: errors.New("pg down")}
+func TestSweepExpiredReservations_ContinuesPastAFailingSiteAndSurfacesTheFailure(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{
+		{Slug: "wedged", ReservedUntil: fixedNow().Add(-time.Hour)},
+		{Slug: "healthy", ReservedUntil: fixedNow().Add(-time.Hour)},
+	}}
+	rel := &recordingReleaser{}
+	deps := lockOnlyDeps(&recordingLocker{})
+	deps.Mover = &failingSiteMover{fail: "wedged.freecode.camp"}
+	deps.Tombstone = &recordingTombstones{}
 
-	n, err := sweepExpiredReservations(context.Background(), src, rel, reclaimDeps{}, fixedNow, false)
+	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
 
-	require.Error(t, err)
+	require.Error(t, err, "a site the sweep could not reclaim must surface, never be swallowed")
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []sitekey.Slug{"healthy"}, rel.released,
+		"ExpiredReservations sorts by deadline ascending, so a permanently failing first row would block every later row forever")
+}
+
+func TestSweepExpiredReservations_ReclaimsAndReleasesUnderTheSiteLock(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{{Slug: "gone", ReservedUntil: fixedNow().Add(-time.Hour)}}}
+	lk := &recordingLocker{}
+	mover := &lockAssertingMover{locker: lk}
+	rel := &lockAssertingReleaser{locker: lk}
+	deps := lockOnlyDeps(lk)
+	deps.Mover = mover
+	deps.Tombstone = &recordingTombstones{}
+
+	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []sitekey.Dirname{"gone.freecode.camp"}, lk.locked,
+		"an unlocked MovePrefix races SiteRelease on the same prefix and deletes an object the peer is still copying")
+	assert.True(t, mover.sawLock, "the origin-prefix move must run inside the site lock")
+	assert.True(t, rel.sawLock, "freeing the name must run inside the same lock that moved its bytes")
+	assert.Equal(t, 1, lk.closed, "the lock session must be released when the run ends")
+}
+
+func TestSweepExpiredReservations_LiveRunWithoutALockerIsAWiringError(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{{Slug: "gone", ReservedUntil: fixedNow().Add(-time.Hour)}}}
+	rel := &recordingReleaser{}
+
+	n, err := sweepExpiredReservations(context.Background(), src, rel,
+		reclaimDeps{Dirname: testDirname, TrashBase: "_trash/"}, fixedNow, false)
+
+	require.Error(t, err, "a sweep wired without a Locker must refuse, not silently reclaim unlocked")
 	assert.Zero(t, n)
-	assert.Empty(t, rel.released,
-		"a half-swept run must surface, not report success over a failure it walked past")
+	assert.Empty(t, rel.released)
 }
 
 func TestSweepExpiredReservations_NoStoreIsANoOp(t *testing.T) {
@@ -103,6 +199,43 @@ func (m *recordingMover) MovePrefix(_ context.Context, src, dst string) (int, er
 	return 3, nil
 }
 
+type failingSiteMover struct {
+	fail  sitekey.Dirname
+	moved [][2]string
+}
+
+func (m *failingSiteMover) MovePrefix(_ context.Context, src, dst string) (int, error) {
+	if src == string(m.fail)+"/" {
+		return 0, errors.New("r2 down for this site")
+	}
+	m.moved = append(m.moved, [2]string{src, dst})
+	return 3, nil
+}
+
+type lockAssertingMover struct {
+	locker  *recordingLocker
+	sawLock bool
+}
+
+func (m *lockAssertingMover) MovePrefix(_ context.Context, _, _ string) (int, error) {
+	m.locker.mu.Lock()
+	m.sawLock = len(m.locker.held) > 0
+	m.locker.mu.Unlock()
+	return 3, nil
+}
+
+type lockAssertingReleaser struct {
+	locker  *recordingLocker
+	sawLock bool
+}
+
+func (r *lockAssertingReleaser) ReleaseReservation(context.Context, sitekey.Slug) error {
+	r.locker.mu.Lock()
+	r.sawLock = len(r.locker.held) > 0
+	r.locker.mu.Unlock()
+	return nil
+}
+
 type recordingTombstones struct{ sites []sitekey.Dirname }
 
 func (r *recordingTombstones) RecordSitePurge(_ context.Context, site sitekey.Dirname) error {
@@ -114,7 +247,8 @@ func testReclaimDeps(m *recordingMover, tb *recordingTombstones) reclaimDeps {
 	return reclaimDeps{
 		Mover:     m,
 		Tombstone: tb,
-		Dirname:   func(s sitekey.Slug) sitekey.Dirname { return sitekey.Dirname(string(s) + ".freecode.camp") },
+		Locker:    &recordingLocker{},
+		Dirname:   testDirname,
 		TrashBase: "_trash/",
 	}
 }
@@ -158,7 +292,7 @@ func TestSweepExpiredReservations_SkipsARowWhoseClaimWasLostAndKeepsGoing(t *tes
 	}}
 	rel := &refusingReleaser{refuse: "gone"}
 
-	n, err := sweepExpiredReservations(context.Background(), src, rel, reclaimDeps{}, fixedNow, false)
+	n, err := sweepExpiredReservations(context.Background(), src, rel, lockOnlyDeps(&recordingLocker{}), fixedNow, false)
 
 	require.NoError(t, err, "one row that stopped being an expired reservation is not a sweep failure")
 	assert.Equal(t, 1, n)
