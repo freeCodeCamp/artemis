@@ -48,12 +48,42 @@ func TestSiteDelete_RefusesTheRetiredPurgeFlag(t *testing.T) {
 	assert.Empty(t, fa.events, "a refused request must not write an audit row claiming work happened")
 }
 
-func TestSiteDelete_IgnoresAFalsePurgeFlag(t *testing.T) {
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
-	h.Reservations = &fakeReservations{}
+func TestSiteDelete_RefusesEveryTrueishSpellingOfTheRetiredFlag(t *testing.T) {
+	for _, q := range []string{"purge=true", "purge=1", "purge=TRUE", "purge=True", "purge=t", "purge=yes", "purge=on", "purge="} {
+		t.Run(q, func(t *testing.T) {
+			store := newFakeR2()
+			store.aliases["www/production"] = "20260420-141522-abc1234"
+			h, res, _ := reserveHandlers(t, store)
 
-	w := callDeleteWithQuery(h, "www", "purge=false", "alice", "tok")
+			w := callDeleteWithQuery(h, "www", q, "alice", "tok")
 
-	assert.NotEqual(t, http.StatusBadRequest, w.Code,
-		"only the retired flag is refused; an ordinary delete carrying unrelated query params still works")
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String(),
+				"matching only the exact string \"true\" leaves the silent 204 open for every other spelling a caller might send")
+			assert.Empty(t, res.calls, "a refused request must take no action")
+			assert.Contains(t, store.aliases, "www/production", "a refused delete must not take the site dark")
+		})
+	}
+}
+
+func TestSiteDelete_AnExplicitlyFalsePurgeFlagIsAnOrdinaryDelete(t *testing.T) {
+	for _, q := range []string{"purge=false", "purge=0", "purge=FALSE", "purge=f"} {
+		t.Run(q, func(t *testing.T) {
+			h, res, _ := reserveHandlers(t, newFakeR2())
+
+			w := callDeleteWithQuery(h, "www", q, "alice", "tok")
+
+			require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+			require.Len(t, res.calls, 1,
+				"an explicit false is not the retired flag; the delete must still reserve the name")
+		})
+	}
+}
+
+func TestSiteDelete_AnUnrelatedQueryParamIsAnOrdinaryDelete(t *testing.T) {
+	h, res, _ := reserveHandlers(t, newFakeR2())
+
+	w := callDeleteWithQuery(h, "www", "reason=cleanup", "alice", "tok")
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, res.calls, 1)
 }

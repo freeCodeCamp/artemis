@@ -53,7 +53,7 @@ func TestBuildHandlers_WiresTheReservationStoreWhenTheWriterSupportsIt(t *testin
 		"a zero grace would reserve a name that expires the instant it is set")
 	require.NotNil(t, h.NameReleaser,
 		"a nil NameReleaser answers 503 on every release, so an approver has no path but a manual psql "+
-			"write — the gap this release closes by retiring ?purge=true")
+			"write — the gap this release closes by retiring ?purge")
 }
 
 func TestBuildHandlers_LeavesReservationsNilForAWriterWithoutIt(t *testing.T) {
@@ -68,7 +68,7 @@ func TestBuildHandlers_LeavesReservationsNilForAWriterWithoutIt(t *testing.T) {
 		"the same deployment has no reserved rows to release")
 }
 
-func TestWiring_NoBootConfigurationReachesTheLegacyPurge(t *testing.T) {
+func TestWiring_ReservationsAndTombstonesArriveTogether(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Registry.ReservationGrace = 72 * time.Hour
 	cfg.Aliases.ProductionKeyFormat = "<site>/production"
@@ -88,8 +88,8 @@ func TestWiring_NoBootConfigurationReachesTheLegacyPurge(t *testing.T) {
 			wirePGRepo(h, tc.repo)
 
 			assert.Equal(t, h.Reservations != nil, h.Tombstones != nil,
-				"SiteDelete's ?purge=true block runs only with Tombstones set and Reservations nil; "+
-					"both arrive from the same DATABASE_URL, so that pair cannot exist")
+				"both arrive from the same DATABASE_URL; a boot with one and not the other would "+
+					"leave the reserving delete unable to tombstone what it reclaims")
 		})
 	}
 }

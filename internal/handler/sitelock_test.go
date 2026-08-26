@@ -113,30 +113,6 @@ func TestSiteDeployDelete_SerializedUnderSiteLock(t *testing.T) {
 	assertInsideLock(t, log, "www.freecode.camp", "move:www.freecode.camp/deploys/"+deployID+"/")
 }
 
-func TestSitePurge_SerializedUnderSiteLock(t *testing.T) {
-	log := &eventLog{}
-	store := &loggingR2{fakeR2: newFakeR2(), log: log}
-	store.objects["example.freecode.camp/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
-
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
-	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
-	h.Tombstones = &fakeTombstones{}
-	h.Locker = &fakeLocker{log: log}
-
-	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
-	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
-
-	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
-		"/api/site/example?purge=true", nil,
-		map[string]string{},
-		h.SiteDelete,
-		contextWithLogin(context.Background(), "alice", "tok"),
-	)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	assertInsideLock(t, log, "example.freecode.camp", "move:example.freecode.camp/")
-}
-
 func TestSitePromote_AliasWriteUnderSiteLock(t *testing.T) {
 	log := &eventLog{}
 	store := &loggingR2{fakeR2: newFakeR2(), log: log}

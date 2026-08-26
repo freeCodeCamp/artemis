@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -11,37 +9,6 @@ import (
 )
 
 const prodShapedFormat = "<site>.freecode.camp/deploys/<ts>-<sha>/"
-
-func TestSitePurge_DirnameKeyedBytesAndTombstone(t *testing.T) {
-	store := newFakeR2()
-	store.objects["example.freecode.camp/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
-
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
-	h.DeployPrefix = mustDeployPrefixTemplate(prodShapedFormat)
-	tomb := &fakeTombstones{}
-	h.Tombstones = tomb
-
-	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
-	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
-
-	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
-		"/api/site/example?purge=true", nil,
-		map[string]string{},
-		h.SiteDelete,
-		contextWithLogin(context.Background(), "alice", "tok"),
-	)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	require.NotEmpty(t, store.objects)
-	for k := range store.objects {
-		assert.Truef(t, hasPrefix(k, "_trash/example.freecode.camp/"),
-			"every site object cascades into the dirname-keyed trash prefix, found %q", k)
-	}
-	assert.Equal(t, []string{"example.freecode.camp"}, tomb.purged,
-		"the site purge is keyed by dirname so tombstone-purge deletes the real trash prefix")
-}
 
 func TestSiteDeployDelete_DirnameKeyedTombstone(t *testing.T) {
 	deployID := "20260101-000000-old0001"

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -227,24 +228,19 @@ func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
 
 // SiteDelete implements DELETE /api/site/{slug} per ADR 0006: remove both
 // R2 alias objects, then reserve the name for h.ReservationGrace. Authz:
-// caller in h.RegistryAuthzTeam. ?purge=true is retired — it is accepted
-// and ignored.
+// caller in h.RegistryAuthzTeam. ?purge is retired and now refused, so no
+// caller can mistake a reserving delete for a byte reclaim; POST
+// /api/site/{slug}/release performs the reclaim, gated on the approver team.
 //
 // Status matrix:
 //
 //	200 OK             — an orphaned alias was unpublished; no row to reserve
 //	204 No Content     — unpublished, name reserved
-//	400 Bad Request    — invalid slug
+//	400 Bad Request    — invalid slug, or the retired ?purge flag
 //	403 Forbidden      — caller not in authz team
 //	404 Not Found      — slug not registered and no alias served it
 //	502 Bad Gateway    — R2 alias delete or registry write failed
 //	503 Service Unavail — github membership probe upstream error
-//
-// The ?purge=true block below is the pre-ADR-0006 path, live only for a
-// deployment with no DATABASE_URL. TestWiring_NoBootConfigurationReaches
-// TheLegacyPurge pins that no boot configuration reaches its R2 moves:
-// Tombstones and Reservations arrive from the same DATABASE_URL, and the
-// block needs the first without the second.
 func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireRegistryAuthz(w, r); err != nil {
 		return
@@ -255,97 +251,21 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 			"slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]")
 		return
 	}
+	if requestsPurge(r) {
+		writeError(w, http.StatusBadRequest, "purge_retired",
+			"?purge is retired: DELETE unpublishes and holds the name for its grace. To reclaim the bytes and free the name now, call POST /api/site/{slug}/release")
+		return
+	}
+	h.siteDeleteReserving(w, r, slug)
+}
 
-	if h.Reservations != nil {
-		if r.URL.Query().Get("purge") == "true" {
-			writeError(w, http.StatusBadRequest, "purge_retired",
-				"?purge=true is retired: DELETE unpublishes and holds the name for its grace. To reclaim the bytes and free the name now, call POST /api/site/{slug}/release")
-			return
-		}
-		h.siteDeleteReserving(w, r, slug)
-		return
+func requestsPurge(r *http.Request) bool {
+	q := r.URL.Query()
+	if !q.Has("purge") {
+		return false
 	}
-
-	if r.URL.Query().Get("purge") != "true" {
-		h.siteDeleteReserving(w, r, slug)
-		return
-	}
-
-	if h.Tombstones == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "tombstone store not configured")
-		return
-	}
-	base := h.TrashPrefixBase
-	if base == "" {
-		base = "_trash/"
-	}
-	dirname := h.DeployPrefix.SiteDirname(slug)
-	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), destructiveMoveTimeout)
-	defer cancel()
-	var (
-		moved   int
-		success bool
-	)
-	auditPurgeFailure := func(stage string) {
-		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
-		h.auditFromScope(r.Context(), "site.purge", "failure",
-			map[string]any{"stage": stage, "moved": moved})
-	}
-	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
-		if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
-			auditPurgeFailure("tombstone")
-			writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-purge", err)
-			return nil
-		}
-		for _, mode := range []string{"production", "preview"} {
-			aliasKey := h.aliasKey(slug, mode)
-			n, err := h.R2.MovePrefix(opCtx, aliasKey, base+aliasKey)
-			moved += n
-			if err != nil {
-				auditPurgeFailure("unpublish")
-				writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-unpublish", err)
-				return nil
-			}
-		}
-		n, err := h.R2.MovePrefix(opCtx, string(dirname)+"/", base+string(dirname)+"/")
-		moved += n
-		if err != nil {
-			auditPurgeFailure("move")
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_failed", "r2.move.site-purge", err)
-			return nil
-		}
-		remaining, err := h.R2.HasPrefix(opCtx, string(dirname)+"/")
-		if err != nil {
-			auditPurgeFailure("verify")
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_verify_failed", "r2.verify.site-purge", err)
-			return nil
-		}
-		if remaining {
-			auditPurgeFailure("incomplete")
-			writeUpstreamError(w, r, http.StatusBadGateway, "r2_move_incomplete", "r2.verify.site-purge",
-				fmt.Errorf("site prefix %s/ still lists objects after moving %d", dirname, moved))
-			return nil
-		}
-		if err := h.Registry.Delete(opCtx, slug); err != nil && !errors.Is(err, registry.ErrNotFound) {
-			auditPurgeFailure("registry")
-			writeRegistryDeleteError(w, r, err)
-			return nil
-		}
-		success = true
-		return nil
-	})
-	if lockErr != nil {
-		writeLockError(w, r, lockErr)
-		return
-	}
-	if !success {
-		return
-	}
-
-	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
-	h.logAction(r.Context(), "site.purge", "success", slog.Int("moved", moved))
-	h.auditFromScope(r.Context(), "site.purge", "success", map[string]any{"moved": moved})
-	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "status": "purged", "moved": moved})
+	purge, err := strconv.ParseBool(q.Get("purge"))
+	return err != nil || purge
 }
 
 func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error) {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -45,50 +44,6 @@ func registerExample(t *testing.T, h *Handlers) {
 	t.Helper()
 	regBody, _ := json.Marshal(SiteRegisterRequest{Slug: "example", Teams: []string{"staff"}})
 	require.Equal(t, http.StatusCreated, callRegister(h, regBody, "alice", "tok").Code)
-}
-
-func callPurge(h *Handlers) *httptest.ResponseRecorder {
-	return callPurgeSlug(h, "example")
-}
-
-func TestSitePurge_RecordsTheSiteTombstoneBeforeMovingBytes(t *testing.T) {
-	log := &orderLog{}
-	store := &orderR2{fakeR2: newFakeR2(), log: log}
-	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
-
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
-	tomb := &orderTombstones{log: log}
-	h.Tombstones = tomb
-	registerExample(t, h)
-
-	w := callPurge(h)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	require.NotEmpty(t, log.ops)
-	assert.Equal(t, "row", log.ops[0],
-		"a crash between the two writes must leave a site tombstone naming bytes still in place — never a "+
-			"whole site in _trash/ that no tombstone dates, which tombstone-purge, the index and reconcile "+
-			"all fail to list, forever")
-}
-
-func TestSitePurge_LeavesBytesInPlaceWhenTheRowWriteFails(t *testing.T) {
-	store := newFakeR2()
-	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
-
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
-	h.Tombstones = &fakeTombstones{err: errors.New("pg down")}
-	registerExample(t, h)
-
-	w := callPurge(h)
-	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "tombstone_record_failed")
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	_, live := store.objects["example/deploys/20260420-141522-abc1234/index.html"]
-	assert.True(t, live,
-		"bytes must not move once the row that would date them is known to have failed; the site stays "+
-			"registered and the purge is retryable")
 }
 
 func TestSiteDeployDelete_RecordsTheTombstoneBeforeMovingBytes(t *testing.T) {

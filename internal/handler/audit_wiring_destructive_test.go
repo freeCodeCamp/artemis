@@ -33,31 +33,6 @@ func TestSiteDelete_RecordsExactlyOneAudit(t *testing.T) {
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }
 
-func TestSitePurge_RecordsExactlyOneAudit(t *testing.T) {
-	store := newFakeR2()
-	store.objects["example/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
-	store.aliases["example/production"] = "20260420-141522-abc1234"
-	store.objects["example/production"] = []byte("20260420-141522-abc1234")
-
-	h, _ := newTestHandlers(t, staffCallerGH(),
-		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, store)
-	h.Tombstones = &fakeTombstones{}
-	fa := &fakeAudit{}
-	h.Audit = fa
-
-	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
-		"/api/site/example?purge=true", nil, bearerTok(),
-		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.SiteDelete))).ServeHTTP,
-		context.Background())
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-
-	require.Len(t, fa.events, 1, "a whole-site purge records exactly one audit row")
-	assert.Equal(t, "site.purge", fa.events[0].Action)
-	assert.Equal(t, "alice", fa.events[0].Actor)
-	assert.Equal(t, "example", fa.events[0].Site)
-	assert.Equal(t, "success", fa.events[0].Outcome)
-}
-
 func TestSiteRollback_RecordsExactlyOneAudit(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/20260419-090000-d2/index.html"] = []byte("ok")

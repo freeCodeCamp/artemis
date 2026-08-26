@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const unlockFailDeployID = "20260420-141522-abc1234"
@@ -39,23 +41,6 @@ func runUnlockFailUpdate(t *testing.T, broken bool) (*httptest.ResponseRecorder,
 	}
 	body, _ := json.Marshal(SiteUpdateRequest{Teams: []string{"platform"}})
 	return callUpdate(h, "example", body, "alice", "tok"), fa
-}
-
-func runUnlockFailPurge(t *testing.T, broken bool) (*httptest.ResponseRecorder, *fakeAudit) {
-	t.Helper()
-	base := newFakeR2()
-	base.objects["example/deploys/"+unlockFailDeployID+"/index.html"] = []byte("hi")
-	var store R2Store = base
-	if broken {
-		store = &failBulkMoveR2{fakeR2: base, bulkPrefix: "example/"}
-	}
-	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
-	h.Locker = unlockErrLocker{}
-	h.Tombstones = &fakeTombstones{}
-	registerExample(t, h)
-	fa := &fakeAudit{}
-	h.Audit = fa
-	return callPurgeSlug(h, "example"), fa
 }
 
 func runUnlockFailDeployDelete(t *testing.T, broken bool) (*httptest.ResponseRecorder, *fakeAudit) {
@@ -158,7 +143,6 @@ type unlockFailRow struct {
 func unlockFailRows() []unlockFailRow {
 	return []unlockFailRow{
 		{"site.update", "site.update", http.StatusOK, "slug", "example", "registry_write_failed", runUnlockFailUpdate},
-		{"site.purge", "site.purge", http.StatusOK, "status", "purged", "r2_move_failed", runUnlockFailPurge},
 		{"site.deploy.delete", "site.deploy.delete", http.StatusOK, "status", "tombstoned", "r2_move_failed", runUnlockFailDeployDelete},
 		{"site.deploy.restore", "site.deploy.restore", http.StatusOK, "status", "restored", "r2_move_failed", runUnlockFailDeployRestore},
 		{"site.promote", "site.promote", http.StatusOK, "deployId", unlockFailDeployID, "pg_write_failed", runUnlockFailPromote},
@@ -195,4 +179,13 @@ func TestUnlockFail_HandledFailureWritesOneBody(t *testing.T) {
 			assert.Equal(t, row.failCode, errObj["code"])
 		})
 	}
+}
+
+type unlockErrLocker struct{}
+
+func (unlockErrLocker) WithSiteLock(ctx context.Context, _ sitekey.Dirname, fn func(context.Context) error) error {
+	if err := fn(ctx); err != nil {
+		return err
+	}
+	return errors.New("site unlock example: conn closed")
 }
