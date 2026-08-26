@@ -119,7 +119,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `SENTRY_DSN`                | _(empty → off)_ | Sentry DSN; empty disables the SDK entirely |
 | `ENVIRONMENT`               | _(empty)_       | Sentry environment tag (`production`, …)    |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.2`           | Tracing sample rate `[0,1]`; probes dropped |
-| `SENTRY_DEBUG`              | `false`         | Log SDK internals to stderr (`1`/`true`)    |
+| `SENTRY_DEBUG`              | `false`         | Log SDK internals to stderr                 |
 
 **Postgres + retention GC + Hatchet** (feature-gated on `DATABASE_URL`; see [local ADR 0001](design/0001-durable-execution-model.md))
 
@@ -139,6 +139,8 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `CLEANUP_RECOVERY_DAYS`   | `7`                       | Days a tombstone survives before the purge pass hard-deletes it                              |
 | `CLEANUP_OUTBOX_RETENTION_DAYS` | `30`                | Days a **published** outbox row is kept; unpublished rows are never purged, at any age       |
 | `CLEANUP_DRY_RUN`         | `false`                   | Plan-only GC: compute + log the delete set, execute nothing                                  |
+
+The three boolean variables above — `SENTRY_DEBUG`, `BACKFILL_ON_BOOT` and `CLEANUP_DRY_RUN` — are parsed with `strconv.ParseBool`. Accepted: `1`, `t`, `T`, `TRUE`, `true`, `True`, `0`, `f`, `F`, `FALSE`, `false`, `False`. Any other non-empty value **refuses the boot** with a named error. It is not silently read as false, because a `CLEANUP_DRY_RUN=yes` typed for safety would otherwise arm a destructive sweep.
 
 ## Observability
 

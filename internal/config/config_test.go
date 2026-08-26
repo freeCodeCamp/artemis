@@ -478,3 +478,47 @@ func TestLoadCleanup_ReadsTheOutboxRetentionOverride(t *testing.T) {
 	require.NoError(t, loadCleanup(&c))
 	assert.Equal(t, 7, c.OutboxRetentionDays)
 }
+
+func TestConfigLoad_BooleanEnvRefusesAnUnparseableValue(t *testing.T) {
+	for _, tc := range []struct {
+		key string
+		val string
+	}{
+		{"CLEANUP_DRY_RUN", "yes"},
+		{"CLEANUP_DRY_RUN", "on"},
+		{"CLEANUP_DRY_RUN", "True "},
+		{"BACKFILL_ON_BOOT", "yes"},
+		{"SENTRY_DEBUG", "on"},
+	} {
+		t.Run(tc.key+"="+tc.val, func(t *testing.T) {
+			configtest.Hermetic(t, EnvKeys(), requiredEnv())
+			t.Setenv(tc.key, tc.val)
+
+			_, err := Load()
+
+			require.Error(t, err,
+				"a value the parser cannot read must stop the boot; silently choosing false arms a destructive sweep for an operator who typed a true-ish spelling to be safe")
+			require.ErrorContains(t, err, tc.key)
+		})
+	}
+}
+
+func TestConfigLoad_BooleanEnvAcceptsEveryParseBoolSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want bool
+	}{
+		{"1", true}, {"t", true}, {"T", true}, {"TRUE", true}, {"true", true}, {"True", true},
+		{"0", false}, {"f", false}, {"F", false}, {"FALSE", false}, {"false", false}, {"False", false},
+	} {
+		t.Run("CLEANUP_DRY_RUN="+tc.val, func(t *testing.T) {
+			configtest.Hermetic(t, EnvKeys(), requiredEnv())
+			t.Setenv("CLEANUP_DRY_RUN", tc.val)
+
+			cfg, err := Load()
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.Cleanup.DryRun)
+		})
+	}
+}

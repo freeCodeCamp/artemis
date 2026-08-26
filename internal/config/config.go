@@ -383,8 +383,8 @@ func Load() (*Config, error) {
 		}
 		cfg.Sentry.TracesSampleRate = rate
 	}
-	if v, ok := os.LookupEnv("SENTRY_DEBUG"); ok {
-		cfg.Sentry.Debug = v == "1" || strings.EqualFold(v, "true")
+	if err := getEnvBool("SENTRY_DEBUG", &cfg.Sentry.Debug); err != nil {
+		return nil, err
 	}
 
 	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
@@ -396,8 +396,8 @@ func Load() (*Config, error) {
 		}
 		cfg.PGConnectRetryWindow = d
 	}
-	if v := os.Getenv("BACKFILL_ON_BOOT"); v != "" {
-		cfg.BackfillOnBoot = v == "1" || strings.EqualFold(v, "true")
+	if err := getEnvBool("BACKFILL_ON_BOOT", &cfg.BackfillOnBoot); err != nil {
+		return nil, err
 	}
 	cfg.Hatchet.ClientToken = os.Getenv("HATCHET_CLIENT_TOKEN")
 	cfg.Hatchet.Addr = os.Getenv("HATCHET_ADDR")
@@ -638,6 +638,19 @@ func isLoopbackHost(host string) bool {
 
 func (c *Config) GCEnabled() bool { return c.DatabaseURL != "" }
 
+func getEnvBool(key string, dst *bool) error {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fmt.Errorf("invalid %s %q: must be one of 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False", key, v)
+	}
+	*dst = b
+	return nil
+}
+
 func loadCleanup(c *CleanupConfig) error {
 	if v, ok := os.LookupEnv("CLEANUP_RETENTION_DAYS"); ok {
 		n, err := strconv.Atoi(v)
@@ -688,8 +701,8 @@ func loadCleanup(c *CleanupConfig) error {
 		}
 		c.OutboxRetentionDays = n
 	}
-	if v, ok := os.LookupEnv("CLEANUP_DRY_RUN"); ok {
-		c.DryRun = v == "1" || strings.EqualFold(v, "true")
+	if err := getEnvBool("CLEANUP_DRY_RUN", &c.DryRun); err != nil {
+		return err
 	}
 	return nil
 }
