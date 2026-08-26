@@ -30,8 +30,9 @@ func TestR3SameSiteNeverConcurrent(t *testing.T) {
 
 func TestR3DistinctSitesRunConcurrent(t *testing.T) {
 	obs := newObserver()
+	rv := newRendezvous(2)
 	h := startHarness(t, obs, map[string]worker.Handler{
-		harnessWorkflowB: instrumented(obs, 1500*time.Millisecond, nil),
+		harnessWorkflowB: rendezvousHandler(obs, rv, distinctSitesHold),
 	})
 
 	siteA := "r3-distinct-a"
@@ -40,8 +41,12 @@ func TestR3DistinctSitesRunConcurrent(t *testing.T) {
 	h.fire(t, harnessWorkflowB, siteB)
 
 	h.waitStarts(t, siteA, 1, "site A never ran")
-	h.waitStarts(t, siteB, 1, "site B never ran")
+	h.waitStarts(t, siteB, 1,
+		"site B never ran while A held the barrier — if the engine serialised two DIFFERENT sites, "+
+			"A cannot release until its hold expires and B cannot start at all, which is the defect this test exists to catch")
 
 	require.GreaterOrEqual(t, h.observed.peakGlobalConcurrency(), 2,
-		"distinct sites must overlap in execution, not merely both start eventually")
+		"each handler holds until the other arrives, so both were in flight at the same instant "+
+			"unless the engine serialised two different sites; dispatch skew is absorbed by the barrier "+
+			"rather than deciding the result")
 }

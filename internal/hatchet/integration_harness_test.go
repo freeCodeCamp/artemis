@@ -23,10 +23,49 @@ const (
 	harnessWorkflowC = "artemis.it.workflow-c"
 )
 
+type rendezvous struct {
+	mu      sync.Mutex
+	arrived int
+	want    int
+	ready   chan struct{}
+	once    sync.Once
+}
+
+func newRendezvous(want int) *rendezvous {
+	return &rendezvous{want: want, ready: make(chan struct{})}
+}
+
+func (r *rendezvous) arrive(ctx context.Context, hold time.Duration) {
+	r.mu.Lock()
+	r.arrived++
+	reached := r.arrived >= r.want
+	r.mu.Unlock()
+	if reached {
+		r.once.Do(func() { close(r.ready) })
+	}
+	select {
+	case <-r.ready:
+	case <-ctx.Done():
+	case <-time.After(hold):
+	}
+}
+
+func rendezvousHandler(obs *observer, rv *rendezvous, hold time.Duration) worker.Handler {
+	return func(ctx context.Context, input map[string]any) error {
+		site := siteOf(input)
+		obs.enter(site)
+		defer obs.leave(site)
+		rv.arrive(ctx, hold)
+		return nil
+	}
+}
+
 const (
-	pollInterval    = 250 * time.Millisecond
-	startupTimeout  = 30 * time.Second
-	runReadyTimeout = 90 * time.Second
+	pollInterval       = 250 * time.Millisecond
+	startupTimeout     = 30 * time.Second
+	runReadyTimeout    = 180 * time.Second
+	distinctSitesHold  = 60 * time.Second
+	engineReadyTimeout = 300 * time.Second
 )
 
 const skipUsage = `
@@ -42,12 +81,23 @@ To run against a live engine:
   HATCHET_CLIENT_TOKEN="$TOKEN" \
     HATCHET_CLIENT_HOST_PORT=127.0.0.1:7077 \
     HATCHET_CLIENT_TLS_STRATEGY=none \
-    go test -tags=integration -count=1 -timeout=10m ./internal/hatchet/...
+    go test -tags=integration -count=1 -timeout=20m ./internal/hatchet/...
 `
 
 type harness struct {
 	pub      worker.Publisher
 	observed *observer
+	suffix   string
+	startErr <-chan error
+}
+
+func (h *harness) workerDied() error {
+	select {
+	case err := <-h.startErr:
+		return err
+	default:
+		return nil
+	}
 }
 
 type observer struct {
@@ -127,11 +177,12 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 	t.Helper()
 	requireEngine(t)
 
+	suffix := shortID()
 	adapter := hatchetadapter.New(hatchetadapter.Config{
-		WorkerName: "artemis-it-" + shortID(),
+		WorkerName: "artemis-it-" + suffix,
 	})
 
-	for _, def := range harnessDefs(obs, handlers) {
+	for _, def := range harnessDefs(obs, handlers, suffix) {
 		require.NoError(t, adapter.Register(def))
 	}
 
@@ -140,6 +191,7 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- adapter.Start(ctx) }()
+	h := &harness{pub: adapter, observed: obs, suffix: suffix, startErr: errCh}
 
 	waitPublishable(t, adapter)
 
@@ -151,10 +203,10 @@ func startHarness(t *testing.T, obs *observer, handlers map[string]worker.Handle
 		}
 	})
 
-	return &harness{pub: adapter, observed: obs}
+	return h
 }
 
-func harnessDefs(obs *observer, handlers map[string]worker.Handler) []worker.WorkflowDef {
+func harnessDefs(obs *observer, handlers map[string]worker.Handler, suffix string) []worker.WorkflowDef {
 	names := []string{harnessWorkflowA, harnessWorkflowB, harnessWorkflowC}
 	defs := make([]worker.WorkflowDef, 0, len(names))
 	for _, name := range names {
@@ -162,15 +214,18 @@ func harnessDefs(obs *observer, handlers map[string]worker.Handler) []worker.Wor
 		if h == nil {
 			h = instrumented(obs, 0, nil)
 		}
+		scoped := scopedTopic(name, suffix)
 		defs = append(defs, worker.WorkflowDef{
-			Name:           name,
+			Name:           scoped,
 			ConcurrencyKey: worker.ConcurrencyKeySite,
-			EventTriggers:  []string{name},
+			EventTriggers:  []string{scoped},
 			Handler:        h,
 		})
 	}
 	return defs
 }
+
+func scopedTopic(name, suffix string) string { return name + "." + suffix }
 
 func instrumented(obs *observer, hold time.Duration, fail error) worker.Handler {
 	return func(ctx context.Context, input map[string]any) error {
@@ -203,20 +258,26 @@ func waitPublishable(t *testing.T, pub worker.Publisher) {
 func (h *harness) fire(t *testing.T, topic, site string) {
 	t.Helper()
 	payload := []byte(fmt.Sprintf(`{"site":%q}`, site))
-	require.NoError(t, h.pub.Publish(context.Background(), topic, payload))
+	require.NoError(t, h.pub.Publish(context.Background(), scopedTopic(topic, h.suffix), payload))
 }
 
 func (h *harness) waitStarts(t *testing.T, site string, want int, why string) {
 	t.Helper()
-	deadline := time.Now().Add(runReadyTimeout)
+	started := time.Now()
+	deadline := started.Add(runReadyTimeout)
 	for time.Now().Before(deadline) {
 		if h.observed.startsFor(site) >= want {
 			return
 		}
 		time.Sleep(pollInterval)
 	}
-	t.Fatalf("site=%s: got %d starts, want >= %d within %s: %s",
-		site, h.observed.startsFor(site), want, runReadyTimeout, why)
+	if err := h.workerDied(); err != nil {
+		t.Fatalf("site=%s: got %d starts, want >= %d after %s; the worker exited during the wait, which is the actual cause: %v",
+			site, h.observed.startsFor(site), want, time.Since(started).Round(time.Second), err)
+	}
+	t.Fatalf("site=%s: got %d starts, want >= %d after %s; peak concurrency seen for this site was %d: %s",
+		site, h.observed.startsFor(site), want, time.Since(started).Round(time.Second),
+		h.observed.peakConcurrency(site), why)
 }
 
 func shortID() string {

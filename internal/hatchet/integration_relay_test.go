@@ -5,6 +5,7 @@ package hatchet_test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
@@ -79,7 +80,7 @@ func TestR5OutboxRelayAtLeastOnceAcrossRestart(t *testing.T) {
 		sites[i] = fmt.Sprintf("r5-relay-%02d", i)
 		events[i] = pg.OutboxEvent{
 			ID:      int64(i + 1),
-			Topic:   harnessWorkflowA,
+			Topic:   scopedTopic(harnessWorkflowA, h.suffix),
 			Payload: []byte(fmt.Sprintf(`{"site":%q}`, sites[i])),
 		}
 	}
@@ -118,5 +119,35 @@ func restartEngine(t *testing.T) {
 	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composeFile, "restart", "hatchet-lite")
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "restart hatchet-lite: %s", string(out))
-	time.Sleep(3 * time.Second)
+	waitEngineReady(t)
+}
+
+func waitEngineReady(t *testing.T) {
+	t.Helper()
+	port := os.Getenv("HATCHET_DASHBOARD_HOST_PORT")
+	if port == "" {
+		port = "8888"
+	}
+	url := "http://127.0.0.1:" + port + "/api/ready"
+	client := &http.Client{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(engineReadyTimeout)
+	var last string
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			code := resp.StatusCode
+			resp.Body.Close()
+			if code == http.StatusOK {
+				time.Sleep(2 * time.Second)
+				return
+			}
+			last = fmt.Sprintf("status %d", code)
+		} else {
+			last = err.Error()
+		}
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("hatchet-lite did not answer %s within %s (last: %s); the engine restarts behind a healthcheck "+
+		"that allows up to 120s, so a fixed sleep here races it and the worker resubscribes against a "+
+		"half-initialised server, which surfaces as an invalid auth token", url, engineReadyTimeout, last)
 }
