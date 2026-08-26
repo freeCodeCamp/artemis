@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 
 	v0Client "github.com/hatchet-dev/hatchet/pkg/client"
 	"github.com/hatchet-dev/hatchet/pkg/client/types"
@@ -28,8 +29,20 @@ type Config struct {
 type Adapter struct {
 	cfg    Config
 	defs   []worker.WorkflowDef
+	mu     sync.RWMutex
 	client *hsdk.Client
-	worker *hsdk.Worker
+}
+
+func (a *Adapter) setClient(c *hsdk.Client) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = c
+}
+
+func (a *Adapter) loadClient() *hsdk.Client {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.client
 }
 
 func New(cfg Config) *Adapter {
@@ -43,11 +56,15 @@ func (a *Adapter) Register(def worker.WorkflowDef) error {
 	if def.Handler == nil {
 		return fmt.Errorf("hatchet: workflow %s has nil handler", def.Name)
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.defs = append(a.defs, def)
 	return nil
 }
 
 func (a *Adapter) Registered() []worker.WorkflowDef {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	out := make([]worker.WorkflowDef, len(a.defs))
 	copy(out, a.defs)
 	return out
@@ -58,10 +75,11 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hatchet: connect: %w", err)
 	}
-	a.client = client
+	a.setClient(client)
 
-	workflows := make([]hsdk.WorkflowBase, 0, len(a.defs))
-	for _, def := range a.defs {
+	defs := a.Registered()
+	workflows := make([]hsdk.WorkflowBase, 0, len(defs))
+	for _, def := range defs {
 		workflows = append(workflows, a.buildWorkflow(client, def))
 	}
 
@@ -74,7 +92,6 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hatchet: new worker: %w", err)
 	}
-	a.worker = w
 	return w.StartBlocking(ctx)
 }
 
@@ -83,7 +100,8 @@ func (a *Adapter) Stop(context.Context) error {
 }
 
 func (a *Adapter) Publish(ctx context.Context, topic string, payload []byte) error {
-	if a.client == nil {
+	client := a.loadClient()
+	if client == nil {
 		return fmt.Errorf("hatchet: publish %s before start", topic)
 	}
 	var data any
@@ -92,7 +110,7 @@ func (a *Adapter) Publish(ctx context.Context, topic string, payload []byte) err
 			return fmt.Errorf("hatchet: publish %s: decode payload: %w", topic, err)
 		}
 	}
-	if err := a.client.Events().Push(ctx, topic, data); err != nil {
+	if err := client.Events().Push(ctx, topic, data); err != nil {
 		return fmt.Errorf("hatchet: publish %s: %w", topic, err)
 	}
 	return nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -171,7 +173,7 @@ func TestAdapterPublishDecodeErrorPath(t *testing.T) {
 	a := New(Config{Token: tok, Addr: "localhost:7077"})
 	c, err := a.connect()
 	require.NoError(t, err)
-	a.client = c
+	a.setClient(c)
 
 	err = a.Publish(context.Background(), "site.changed", []byte(`{bad json`))
 	require.Error(t, err, "malformed payload must surface a decode error, not push garbage to the event bus")
@@ -202,4 +204,43 @@ func TestAdapterBuildWorkflow_CarriesTheExecutionTimeout(t *testing.T) {
 	require.Len(t, bareReq.GetTasks(), 1)
 	require.Empty(t, bareReq.GetTasks()[0].GetTimeout(),
 		"an unset timeout must stay unset, so short workflows keep the engine default")
+}
+
+func TestAdapterPublishIsSafeWhileStartInstallsTheClient(t *testing.T) {
+	isolateClientEnv(t)
+
+	a := New(Config{Token: craftJWT(t), Addr: "localhost:7077"})
+	c, err := a.connect()
+	require.NoError(t, err)
+
+	const publishers = 8
+	const rounds = 300
+	var pushed atomic.Int64
+	var wg sync.WaitGroup
+	gate := make(chan struct{})
+
+	wg.Add(publishers + 1)
+	go func() {
+		defer wg.Done()
+		<-gate
+		for range rounds {
+			a.setClient(c)
+		}
+	}()
+	for range publishers {
+		go func() {
+			defer wg.Done()
+			<-gate
+			for range rounds {
+				if a.Publish(context.Background(), "site.changed", []byte(`{bad json`)) == nil {
+					pushed.Add(1)
+				}
+			}
+		}()
+	}
+	close(gate)
+	wg.Wait()
+
+	require.Zero(t, pushed.Load(),
+		"every call must fail at the decode step; a nil count would mean the loop reached the network and the run proves nothing")
 }
