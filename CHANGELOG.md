@@ -2,6 +2,14 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.10.2](https://github.com/freeCodeCamp/artemis/compare/v1.10.1...v1.10.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **gc:** never collect a site inside its grace ([11320ab](https://github.com/freeCodeCamp/artemis/commit/11320ab0795721a626055270627d85eddedee5b5))
+* **site:** refuse the retired purge flag ([a4773a5](https://github.com/freeCodeCamp/artemis/commit/a4773a5382ea787cbaeca6b8b6f70645bc1c2667))
+
 ## [1.10.1](https://github.com/freeCodeCamp/artemis/compare/v1.10.0...v1.10.1) (2026-08-26)
 
 
