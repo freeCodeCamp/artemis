@@ -244,3 +244,31 @@ func TestAdapterPublishIsSafeWhileStartInstallsTheClient(t *testing.T) {
 	require.Zero(t, pushed.Load(),
 		"every call must fail at the decode step; a nil count would mean the loop reached the network and the run proves nothing")
 }
+
+func TestAdapterWorkerNameFallsBackToTheDefault(t *testing.T) {
+	require.Equal(t, defaultWorkerName, New(Config{}).workerName(),
+		"an unset WorkerName must still name the worker; the engine rejects an empty name")
+	require.Equal(t, "artemis-canary", New(Config{WorkerName: "artemis-canary"}).workerName())
+}
+
+func TestAdapterStopIsANoOpBecauseShutdownIsContextCancellation(t *testing.T) {
+	require.NoError(t, New(Config{}).Stop(context.Background()),
+		"StartBlocking unwinds on rootCtx cancellation; a Stop that cleared state would only add a nil window")
+}
+
+func TestAdapterPublishSurfacesAFailedPush(t *testing.T) {
+	isolateClientEnv(t)
+
+	a := New(Config{Token: craftJWT(t), Addr: "localhost:7077"})
+	c, err := a.connect()
+	require.NoError(t, err)
+	a.setClient(c)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = a.Publish(ctx, "site.changed", []byte(`{"site":"www"}`))
+	require.Error(t, err,
+		"a swallowed push marks the outbox row published while the engine never saw the event")
+	require.ErrorContains(t, err, "publish site.changed")
+}
