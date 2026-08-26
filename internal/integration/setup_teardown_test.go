@@ -57,6 +57,13 @@ func TestMain(m *testing.M) {
 	}
 	log.Printf("[setup] healthz green at %s", artemisURL)
 
+	if os.Getenv("ARTEMIS_LIFECYCLE_OK") == "1" {
+		log.Printf("[setup] ARTEMIS_LIFECYCLE_OK=1 — skipping baseline capture and restore; " +
+			"the lifecycle suite touches only its own throwaway slug, and restoreProd would " +
+			"issue a production rollback against SITE that no selected test asked for")
+		os.Exit(m.Run())
+	}
+
 	id, err := captureBaselineProd(suiteCfg)
 	switch {
 	case err != nil:
