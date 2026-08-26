@@ -412,13 +412,17 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		h.auditFromScope(r.Context(), "site.delete", "failure", map[string]any{"stage": stage})
 	}
 
-	var wrote, servedOrphan bool
+	var wrote, servedOrphan, orphanObserved, probeUnreadable bool
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		var served bool
+		var headErr error
 		for _, mode := range []string{"production", "preview"} {
 			aliasKey := h.aliasKey(slug, mode)
 			has, err := h.R2.HasObject(opCtx, aliasKey)
-			if err != nil || has {
+			switch {
+			case err != nil:
+				headErr = err
+			case has:
 				served = true
 			}
 			if err := h.R2.DeleteAlias(opCtx, aliasKey); err != nil {
@@ -430,8 +434,10 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		}
 		until := h.Now().UTC().Add(h.ReservationGrace)
 		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context())); err != nil {
-			if errors.Is(err, registry.ErrNotFound) && served {
+			if errors.Is(err, registry.ErrNotFound) && (served || headErr != nil) {
 				servedOrphan = true
+				orphanObserved = served
+				probeUnreadable = headErr != nil
 				return nil
 			}
 			auditDeleteFailure("reserve")
@@ -450,12 +456,16 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 	if servedOrphan {
-		h.logAction(r.Context(), "site.delete", "success", slog.Bool("orphan", true))
-		h.auditFromScope(r.Context(), "site.delete", "success",
-			map[string]any{"orphan": true, "reserved": false})
-		writeJSON(w, http.StatusOK, map[string]any{
-			"slug": string(slug), "status": "unpublished", "reserved": false,
-		})
+		detail := map[string]any{"orphan": orphanObserved, "reserved": false}
+		body := map[string]any{"slug": string(slug), "status": "unpublished", "reserved": false}
+		if probeUnreadable {
+			detail["aliasProbe"] = "unreadable"
+			body["aliasProbe"] = "unreadable"
+		}
+		h.logAction(r.Context(), "site.delete", "success",
+			slog.Bool("orphan", orphanObserved), slog.Bool("aliasProbeUnreadable", probeUnreadable))
+		h.auditFromScope(r.Context(), "site.delete", "success", detail)
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	h.logAction(r.Context(), "site.delete", "success")
@@ -488,8 +498,21 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancel()
 	var undeleteErr error
+	var undeleteStage string
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(slug), func(opCtx context.Context) error {
-		res, undeleteErr = reverser.Undelete(opCtx, slug)
+		held, err := reverser.Reservation(opCtx, slug)
+		if err != nil {
+			undeleteErr, undeleteStage = err, "read"
+			return nil
+		}
+		if stage, err := h.restoreAliasPins(opCtx, slug, held); err != nil {
+			undeleteErr, undeleteStage = err, stage
+			return nil
+		}
+		res, err = reverser.Undelete(opCtx, slug)
+		if err != nil {
+			undeleteErr, undeleteStage = err, "undelete"
+		}
 		return nil
 	})
 	if lockErr != nil {
@@ -498,7 +521,11 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if undeleteErr != nil {
 		telemetry.FromContext(r.Context()).SetResource(string(slug), "")
-		h.auditFromScope(r.Context(), "site.undelete", "failure", nil)
+		h.auditFromScope(r.Context(), "site.undelete", "failure", map[string]any{"stage": undeleteStage})
+		if undeleteStage == "restore_alias" {
+			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias-undelete", undeleteErr)
+			return
+		}
 		writeRegistryDeleteError(w, r, undeleteErr)
 		return
 	}
@@ -510,4 +537,30 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		"prevProduction": res.PrevProduction,
 		"prevPreview":    res.PrevPreview,
 	})
+}
+
+func (h *Handlers) restoreAliasPins(ctx context.Context, slug sitekey.Slug, held registry.Reservation) (string, error) {
+	pins := []struct {
+		mode     string
+		deployID string
+	}{
+		{"production", held.PrevProduction},
+		{"preview", held.PrevPreview},
+	}
+	dirname := h.DeployPrefix.SiteDirname(slug)
+	for _, pin := range pins {
+		if pin.deployID == "" {
+			continue
+		}
+		if err := h.R2.PutAlias(ctx, h.aliasKey(slug, pin.mode), pin.deployID); err != nil {
+			return "restore_alias", fmt.Errorf("undelete restore %s alias %s: %w", pin.mode, slug, err)
+		}
+		if h.Index == nil {
+			continue
+		}
+		if err := h.Index.AliasAtomic(ctx, dirname, pin.mode, pin.deployID, h.Now().UTC()); err != nil {
+			return "restore_index", fmt.Errorf("undelete restore %s alias row %s: %w", pin.mode, slug, err)
+		}
+	}
+	return "", nil
 }

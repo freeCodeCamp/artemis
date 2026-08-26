@@ -61,6 +61,17 @@ func (s *RegistryStore) Reserve(ctx context.Context, slug sitekey.Slug, site sit
 	return res, nil
 }
 
+func (s *RegistryStore) Reservation(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error) {
+	var res registry.Reservation
+	if err := scanReservation(s.pool.QueryRow(ctx,
+		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
+		 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until > now()`,
+		slug, registry.StateReserved), &res); err != nil {
+		return registry.Reservation{}, err
+	}
+	return res, nil
+}
+
 func (s *RegistryStore) Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error) {
 	now := s.now().UTC()
 	var res registry.Reservation

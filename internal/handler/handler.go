@@ -102,6 +102,7 @@ type ReservationStore interface {
 // ReservationReverser restores a reserved name to its owner. The grace
 // period promises a way back; without this it promises nothing.
 type ReservationReverser interface {
+	Reservation(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
 	Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
 }
 

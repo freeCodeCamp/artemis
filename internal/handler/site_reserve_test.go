@@ -200,4 +200,8 @@ func TestSiteDelete_AnUnreadableAliasProbeIsUnknownNotAbsent(t *testing.T) {
 	require.Len(t, fa.events, 1)
 	assert.Equal(t, "success", fa.events[0].Outcome,
 		"a probe that could not read is unknown, not zero; 404 would assert nothing was served")
+	assert.Equal(t, false, fa.events[0].Detail["orphan"],
+		"an unreadable HEAD cannot witness an orphan, so the audit row must not claim one was cleaned up")
+	assert.Equal(t, "unreadable", fa.events[0].Detail["aliasProbe"],
+		"the operator needs the uncertainty on the record, not folded into a success that reads as observed")
 }

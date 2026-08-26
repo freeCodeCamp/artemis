@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,6 +21,8 @@ type reservedRegistry struct {
 	reserved    sitekey.Slug
 	undeleted   []sitekey.Slug
 	undeleteErr error
+	readErr     error
+	reservation registry.Reservation
 }
 
 func (rr *reservedRegistry) Register(ctx context.Context, slug sitekey.Slug, teams []string, by string) (registry.Site, error) {
@@ -29,12 +32,112 @@ func (rr *reservedRegistry) Register(ctx context.Context, slug sitekey.Slug, tea
 	return rr.RegistryWriter.Register(ctx, slug, teams, by)
 }
 
+func (rr *reservedRegistry) Reservation(_ context.Context, slug sitekey.Slug) (registry.Reservation, error) {
+	if rr.readErr != nil {
+		return registry.Reservation{}, rr.readErr
+	}
+	res := rr.reservation
+	res.Slug = slug
+	return res, nil
+}
+
 func (rr *reservedRegistry) Undelete(_ context.Context, slug sitekey.Slug) (registry.Reservation, error) {
 	rr.undeleted = append(rr.undeleted, slug)
 	if rr.undeleteErr != nil {
 		return registry.Reservation{}, rr.undeleteErr
 	}
-	return registry.Reservation{Slug: slug}, nil
+	res := rr.reservation
+	res.Slug = slug
+	return res, nil
+}
+
+func TestSiteUndelete_RestoresTheAliasObjectsThatPinTheDeploys(t *testing.T) {
+	store := newFakeR2()
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
+	rr := &reservedRegistry{RegistryWriter: h.Registry, reservation: registry.Reservation{
+		PrevProduction: "20260420-141522-abc1234",
+		PrevPreview:    "20260421-090000-def5678",
+	}}
+	h.Registry = rr
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	h.Audit = &fakeAudit{}
+	idx := &fakeIndex{}
+	h.Index = idx
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "20260420-141522-abc1234", store.aliases["www/production"],
+		"gc-site pins a deploy only when an R2 alias names it, so an undelete that restores no alias hands the rescued deploy to the collector")
+	assert.Equal(t, "20260421-090000-def5678", store.aliases["www/preview"],
+		"the preview pointer was captured at reserve time for the same reason production was")
+	assert.Equal(t, []string{
+		"www/production/20260420-141522-abc1234",
+		"www/preview/20260421-090000-def5678",
+	}, idx.aliased,
+		"the aliases rows feed Store.AliasTargets and gc.PlanSite; restoring only the R2 half leaves the pg view still empty")
+}
+
+func TestSiteUndelete_ReportsTheStageWhenTheIndexHalfFails(t *testing.T) {
+	store := newFakeR2()
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
+	rr := &reservedRegistry{RegistryWriter: h.Registry, reservation: registry.Reservation{
+		PrevProduction: "20260420-141522-abc1234",
+	}}
+	h.Registry = rr
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	fa := &fakeAudit{}
+	h.Audit = fa
+	h.Index = &fakeIndex{fail: true}
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Empty(t, rr.undeleted, "the row must stay reserved so the caller can retry inside the grace")
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "restore_index", fa.events[0].Detail["stage"],
+		"the three failure stages leave different residues; without the stage the operator cannot tell which one happened")
+}
+
+func TestSiteUndelete_KeepsTheNameReservedWhenTheAliasRestoreFails(t *testing.T) {
+	store := newFakeR2()
+	store.putErr = errors.New("r2 down")
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
+	rr := &reservedRegistry{RegistryWriter: h.Registry, reservation: registry.Reservation{
+		PrevProduction: "20260420-141522-abc1234",
+	}}
+	h.Registry = rr
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	fa := &fakeAudit{}
+	h.Audit = fa
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "r2_put_failed",
+		"an R2 write failure reported as registry_write_failed sends the operator to the wrong subsystem")
+	assert.Empty(t, rr.undeleted,
+		"Undelete clears prev_production in the same statement that returns it, so flipping the row before the pins are back loses the pointers for good")
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "restore_alias", fa.events[0].Detail["stage"])
 }
 
 func TestSiteRegister_RefusesAReservedNameForAStaffCaller(t *testing.T) {
