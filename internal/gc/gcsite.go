@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +11,8 @@ import (
 )
 
 const destructiveMoveTimeout = 10 * time.Minute
+
+var errHeldUnderLock = errors.New("gc: site reserved under the lock")
 
 type Store interface {
 	DeploysForSite(ctx context.Context, site sitekey.Dirname) ([]Deploy, error)
@@ -139,6 +142,16 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 		var tombstoned bool
 		opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), destructiveMoveTimeout)
 		err := sess.WithSiteLock(opCtx, site, func(opCtx context.Context) error {
+			if g.Held != nil {
+				held, err := g.Held(opCtx, site)
+				if err != nil {
+					return fmt.Errorf("re-read reservation state: %w", err)
+				}
+				if held {
+					res.Held = true
+					return errHeldUnderLock
+				}
+			}
 			live, err := g.LiveAliases(opCtx, site)
 			if err != nil {
 				return fmt.Errorf("re-read live aliases: %w", err)
@@ -165,6 +178,11 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 			return nil
 		})
 		cancel()
+		if errors.Is(err, errHeldUnderLock) {
+			slog.InfoContext(ctx, "gc.site.held", "site", site,
+				"detail", "the name was reserved between the pre-lock check and the site lock; nothing further is collected")
+			return res, nil
+		}
 		if err != nil {
 			return res, fmt.Errorf("gc %s: %w", site, err)
 		}

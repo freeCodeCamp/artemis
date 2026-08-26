@@ -66,3 +66,24 @@ func TestSiteGC_DryRunStillReportsAHeldName(t *testing.T) {
 	assert.True(t, res.Held)
 	assert.Empty(t, res.Planned, "a dry run that plans deletes for a held site invites an operator to run them")
 }
+
+func TestSiteGC_RechecksTheReservationInsideTheSiteLock(t *testing.T) {
+	store := &fakeStore{deploys: map[string][]Deploy{"www": sixOld()}, targetsSeq: []map[string]struct{}{{}}}
+	mover := &fakeMover{}
+	g := newSiteGC(store, mover)
+
+	calls := 0
+	g.Held = func(context.Context, sitekey.Dirname) (bool, error) {
+		calls++
+		return calls > 1, nil
+	}
+
+	res, err := g.Run(context.Background(), "www", false)
+
+	require.NoError(t, err)
+	assert.True(t, res.Held,
+		"a DELETE landing between the first check and the site lock must still stop the collection")
+	assert.Empty(t, mover.moves, "not one byte may move once the re-check says the name is held")
+	assert.Empty(t, store.tombstoned)
+	assert.GreaterOrEqual(t, calls, 2, "the guard must be consulted again under the lock, not only before it")
+}
