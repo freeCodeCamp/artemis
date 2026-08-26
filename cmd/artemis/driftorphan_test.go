@@ -115,12 +115,12 @@ func TestDriftSweep_OrphanAliasIgnoresARegisteredSite(t *testing.T) {
 	assert.Empty(t, res.OrphanAliases, "every live site would page nightly")
 }
 
-func TestDriftSweep_OrphanAliasIgnoresAReservedName(t *testing.T) {
+func TestDriftSweep_OrphanAliasIgnoresAReservedNameThatServesNothing(t *testing.T) {
 	t.Parallel()
 
 	bucket := orphanBucket{
 		dirnames: []string{"taken-down.freecode.camp"},
-		objects:  map[string]bool{"taken-down.freecode.camp/preview": true},
+		objects:  map[string]bool{},
 	}
 	repo := orphanRepo{dirnames: []sitekey.Dirname{"taken-down.freecode.camp"}}
 	reg := statefulRegistryReader{sites: []registry.Site{{Slug: "taken-down", State: registry.StateReserved}}}
@@ -129,7 +129,24 @@ func TestDriftSweep_OrphanAliasIgnoresAReservedName(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Empty(t, res.OrphanAliases,
-		"a reserved name is still owned; its grace window is not an orphan")
+		"the reserving delete removes both alias objects before it flips the state, so every held name would page nightly")
+}
+
+func TestDriftSweep_OrphanAliasReportsAReservedNameThatIsStillServing(t *testing.T) {
+	t.Parallel()
+
+	bucket := orphanBucket{
+		dirnames: []string{"taken-down.freecode.camp"},
+		objects:  map[string]bool{"taken-down.freecode.camp/production": true},
+	}
+	repo := orphanRepo{dirnames: []sitekey.Dirname{"taken-down.freecode.camp"}}
+	reg := statefulRegistryReader{sites: []registry.Site{{Slug: "taken-down", State: registry.StateReserved}}}
+
+	res, err := newOrphanSweeper(t, bucket, repo, reg).Run(context.Background())
+	require.NoError(t, err)
+
+	assert.Equal(t, []orphanAlias{{Dirname: "taken-down.freecode.camp", Modes: []string{"production"}}}, res.OrphanAliases,
+		"a reserved name serving content is a site the sweep will trash within its grace; counting the held row as registered hides it until the bytes are already gone")
 }
 
 func TestDriftSweep_OrphanAliasSkipsTheTrashPrefix(t *testing.T) {

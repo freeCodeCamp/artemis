@@ -208,6 +208,9 @@ func (s *driftSweep) orphanAliases(ctx context.Context) ([]orphanAlias, error) {
 	}
 	registered := make(map[string]struct{}, len(sites))
 	for _, site := range sites {
+		if site.IsReserved() {
+			continue
+		}
 		registered[string(s.tmpl.SiteDirname(site.Slug))] = struct{}{}
 	}
 	dirnames, err := s.bucket.ListSites(ctx)
