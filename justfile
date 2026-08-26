@@ -2,6 +2,10 @@
 
 go := env_var_or_default("GO", "go")
 gotestcoverage := "v2.19.0"
+# CI resolves the toolchain from go.mod (setup-go go-version-file). A newer
+# local Go reports different statement counts, which silently miscalibrates
+# every coverage threshold. Pin local runs to the same toolchain.
+export GOTOOLCHAIN := env_var_or_default("GOTOOLCHAIN", `awk '/^go /{n=split($2,p,"."); print "go" $2 (n<3 ? ".0" : ""); exit}' go.mod 2>/dev/null || echo auto`)
 goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
 staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
