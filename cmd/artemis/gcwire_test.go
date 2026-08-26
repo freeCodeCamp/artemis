@@ -379,3 +379,81 @@ func TestNewGCWiring_GivesEveryAuditorTheSlugConverter(t *testing.T) {
 		assert.Equal(t, sitekey.Slug("test"), slug, "%s", name)
 	}
 }
+
+type stubHeldSource struct {
+	held map[sitekey.Slug]bool
+	err  error
+	seen []sitekey.Slug
+}
+
+func (s *stubHeldSource) IsHeld(_ context.Context, slug sitekey.Slug) (bool, error) {
+	s.seen = append(s.seen, slug)
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.held[slug], nil
+}
+
+func TestNewGCWiring_WiresTheReservationGuardIntoSiteGC(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>.freecode.camp/deploys/<ts>-<sha>/",
+		Aliases: config.AliasConfig{
+			ProductionKeyFormat: "<site>.freecode.camp/production",
+			PreviewKeyFormat:    "<site>.freecode.camp/preview",
+		},
+		Cleanup: config.CleanupConfig{BlastCap: 5, RetentionDays: 7, RecoveryDays: 3, TrashPrefix: "_trash/"},
+	}
+
+	w, err := newGCWiring(cfg, &pg.Repo{}, &r2.Client{}, &pg.RegistryStore{})
+	require.NoError(t, err)
+
+	require.NotNil(t, w.SiteGC.Held,
+		"an unwired guard fails open in silence: gc-site would keep trashing the deploys undelete restores, and no test would notice")
+}
+
+func TestHeldChecker_MapsTheDirnameBackToItsSlug(t *testing.T) {
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+	src := &stubHeldSource{held: map[sitekey.Slug]bool{"taken-down": true}}
+
+	check := heldChecker(src, tmpl.SiteSlug)
+	require.NotNil(t, check)
+
+	held, err := check(context.Background(), "taken-down.freecode.camp")
+	require.NoError(t, err)
+	assert.True(t, held)
+	assert.Equal(t, []sitekey.Slug{"taken-down"}, src.seen,
+		"the registry is keyed by slug and gc by dirname; querying the wrong key silently answers 'not held' for every site")
+
+	held, err = check(context.Background(), "still-live.freecode.camp")
+	require.NoError(t, err)
+	assert.False(t, held)
+}
+
+func TestHeldChecker_SurfacesAReadFailureRatherThanAnsweringNotHeld(t *testing.T) {
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	check := heldChecker(&stubHeldSource{err: errors.New("pg down")}, tmpl.SiteSlug)
+
+	_, err = check(context.Background(), "any.freecode.camp")
+	require.Error(t, err, "SiteGC fails closed on this error; swallowing it here would re-open the hole one layer down")
+}
+
+func TestHeldChecker_IsNilWithoutASource(t *testing.T) {
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	assert.Nil(t, heldChecker(nil, tmpl.SiteSlug))
+}
+
+func TestHeldChecker_AForeignDirnameIsNotHeld(t *testing.T) {
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+	src := &stubHeldSource{}
+
+	held, err := heldChecker(src, tmpl.SiteSlug)(context.Background(), "_trash")
+	require.NoError(t, err)
+	assert.False(t, held)
+	assert.Empty(t, src.seen, "an artemis-owned prefix is not a site and must not reach the registry")
+}

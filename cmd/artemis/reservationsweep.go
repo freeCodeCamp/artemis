@@ -27,9 +27,14 @@ type reservationReleaser interface {
 	ReleaseReservation(ctx context.Context, slug sitekey.Slug) error
 }
 
+type heldNameSource interface {
+	IsHeld(ctx context.Context, slug sitekey.Slug) (bool, error)
+}
+
 type reservationWiring interface {
 	expiredReservationSource
 	reservationReleaser
+	heldNameSource
 }
 
 type siteReclaimer interface {

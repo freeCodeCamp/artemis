@@ -204,6 +204,19 @@ type gcWiring struct {
 	OutboxRetention time.Duration
 }
 
+func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug, bool)) func(context.Context, sitekey.Dirname) (bool, error) {
+	if src == nil {
+		return nil
+	}
+	return func(ctx context.Context, site sitekey.Dirname) (bool, error) {
+		slug, ok := toSlug(site)
+		if !ok {
+			return false, nil
+		}
+		return src.IsHeld(ctx, slug)
+	}
+}
+
 func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer registry.Writer) (*gcWiring, error) {
 	layout, err := newGCLayout(cfg.DeployPrefixFormat, cfg.Cleanup.TrashPrefix)
 	if err != nil {
@@ -249,6 +262,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
+			Held:         heldChecker(resv, tmpl.SiteSlug),
 			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone", toSlug: toSlug},
 		},
 		Reconciler: &gc.Reconciler{

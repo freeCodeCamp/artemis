@@ -104,6 +104,8 @@ func (reservingWriter) ExpiredReservations(context.Context, time.Time, int) ([]r
 
 func (reservingWriter) ReleaseReservation(context.Context, sitekey.Slug) error { return nil }
 
+func (reservingWriter) IsHeld(context.Context, sitekey.Slug) (bool, error) { return false, nil }
+
 func gcWiringTestConfig() *config.Config {
 	return &config.Config{
 		DeployPrefixFormat: "<site>/deploys/<ts>-<sha>/",

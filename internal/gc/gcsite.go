@@ -50,6 +50,7 @@ type SiteGC struct {
 	Now          func() time.Time
 	Audit        GCAuditor
 	Pending      PendingSource
+	Held         func(ctx context.Context, site sitekey.Dirname) (bool, error)
 }
 
 type GCResult struct {
@@ -61,6 +62,7 @@ type GCResult struct {
 	Aborted        bool
 	AbortReason    string
 	DryRun         bool
+	Held           bool
 }
 
 func (g *SiteGC) expiredPending(ctx context.Context, site sitekey.Dirname) ([]Deploy, error) {
@@ -72,6 +74,19 @@ func (g *SiteGC) expiredPending(ctx context.Context, site sitekey.Dirname) ([]De
 
 func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GCResult, error) {
 	res := GCResult{Site: site, DryRun: dryRun}
+
+	if g.Held != nil {
+		held, err := g.Held(ctx, site)
+		if err != nil {
+			return res, fmt.Errorf("gc %s: reservation state unreadable: %w", site, err)
+		}
+		if held {
+			res.Held = true
+			slog.InfoContext(ctx, "gc.site.held", "site", site,
+				"detail", "the name is inside its reservation grace; collecting now would trash the bytes undelete restores")
+			return res, nil
+		}
+	}
 
 	deploys, err := g.Store.DeploysForSite(ctx, site)
 	if err != nil {

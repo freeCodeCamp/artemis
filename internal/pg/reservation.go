@@ -61,6 +61,16 @@ func (s *RegistryStore) Reserve(ctx context.Context, slug sitekey.Slug, site sit
 	return res, nil
 }
 
+func (s *RegistryStore) IsHeld(ctx context.Context, slug sitekey.Slug) (bool, error) {
+	var held bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until > now())`,
+		slug, registry.StateReserved).Scan(&held); err != nil {
+		return false, fmt.Errorf("pg site held %s: %w", slug, err)
+	}
+	return held, nil
+}
+
 func (s *RegistryStore) Reservation(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error) {
 	var res registry.Reservation
 	if err := scanReservation(s.pool.QueryRow(ctx,
