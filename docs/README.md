@@ -203,7 +203,7 @@ Three widgets, dataset **Logs** for each:
 | Actor leaderboard (7d) | Bar   | `count(message)` grouped by `actor`                     | `message:[<privileged set>]`              |
 | Unattributed actions   | Table | `actor`, `message`                                      | `message:[<privileged set>]` `!has:actor` |
 
-The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.purge`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression alarm. It stays empty in normal operation; a row in it means an action reached Sentry with no actor. GC tombstone actions are system-driven. They land in `audit_log` (`actor=system:gc`) and in Issues, not in this human-activity view. A reconcile repair is an operator action, started by hand, and it writes under `actor=system:reconcile`.
+The `<privileged set>` of terminal-success slog messages: `deploy.finalize`, `site.register`, `site.update`, `site.delete`, `site.release`, `site.promote`, `site.rollback`, `repo.create.queued`, `repo.approve.created`, `repo.reject.recorded`, `repo.delete.removed`. The "Unattributed actions" widget is a regression alarm. It stays empty in normal operation; a row in it means an action reached Sentry with no actor. GC tombstone actions are system-driven. They land in `audit_log` (`actor=system:gc`) and in Issues, not in this human-activity view. A reconcile repair is an operator action, started by hand, and it writes under `actor=system:reconcile`.
 
 When enabled, Sentry captures:
 

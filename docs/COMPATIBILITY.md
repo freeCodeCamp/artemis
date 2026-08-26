@@ -233,7 +233,7 @@ An orphaned site has no registry row by definition, so this was the normal path 
 
 **New:** `ErrNotFound` from `Registry.Delete` satisfies the purge. The handler answers `200 {"slug","status":"purged","moved"}` and writes the audit row (`internal/handler/site_register.go`).
 
-**Superseded by entries 19, 20 and 22.** On 1.10.0 no boot configuration reaches this purge branch: it needs `Tombstones` without `Reservations`, and both arrive from the same `DATABASE_URL` (`TestWiring_NoBootConfigurationReachesTheLegacyPurge`). Entry 9 is kept as the record of what `v1.9.1` did. For current `DELETE` behaviour read entry 19, and entry 22 for the absent-row case.
+**Superseded by entries 19, 20 and 22.** The purge branch this entry describes is deleted; `DELETE` now refuses `?purge` outright. Entry 9 is kept as the record of what `v1.9.1` did. For current `DELETE` behaviour read entry 19, and entry 22 for the absent-row case.
 
 **Action:** stop treating `404` from a purge as "nothing happened". On `v1.9.1` and earlier it meant the opposite.
 
@@ -434,7 +434,7 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **This fails closed.** The destructive reading of the flag is the one that stops working, so a caller that sent it gets *less* destruction than it asked for, never more. `universe-cli` never sent it (`src/lib/proxy-client.ts:667-674`), so no shipped caller is affected.
 
-The pre-ADR-0006 purge code still stands in `internal/handler/site_register.go`, unreachable rather than removed. It needs `Handlers.Tombstones` set while `Handlers.Reservations` is nil, and both are wired from the same `DATABASE_URL`, so no boot configuration produces that pair — `TestWiring_NoBootConfigurationReachesTheLegacyPurge` pins it. Its 23 tests carry invariant-I3 audit coverage that deleting the branch at freeze would take with it.
+The pre-ADR-0006 purge code is **deleted**, not merely unreachable. It had been left standing on the argument that no boot configuration produced the `Tombstones`-without-`Reservations` pair it needed — true, but it ran under `REGISTRY_AUTHZ_TEAM` while its replacement requires `REPO_APPROVE_AUTHZ_TEAM`, so any later change decoupling those two fields would have silently re-armed irreversible whole-site deletion for the weaker team. Removing it took its tests with it; `TestSiteDelete_LeavesEveryDeployByteInPlace` replaces the one that guarded surviving behaviour.
 
 **Registering a reserved name is `409 site_reserved`, not `502`.** `internal/pg/registry.go:56` already returned `registry.ErrReserved`; the handler's error switch did not name it and fell through to a generic upstream failure. A caller can act on the difference between "someone holds this name for another two days" and "the registry is broken". This closes lifecycle gap E, where re-registering a deleted slug inherited the previous owner's live production bytes.
 

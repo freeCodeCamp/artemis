@@ -167,7 +167,10 @@ remove. Authorization also differs: `REGISTRY_AUTHZ_TEAM` (`staff`) may delete; 
 `REPO_APPROVE_AUTHZ_TEAM` (`gh-artemis-approvers`) may release early. Two authorization levels on
 one endpoint, selected by a query string, cannot be read from a route table.
 
-The flag is a documented breaking change: callers passing `?purge=true` get the new reversible
-delete, not a purge. That is safe by construction — the destructive reading fails closed — and
+The flag is a documented breaking change: callers passing `?purge=true` are **refused** with
+`400 purge_retired` and no delete happens at all. Ignoring the flag was tried first and was worse:
+a `204` satisfies a caller who meant "make it dark" while lying to the caller who meant "reclaim
+the bytes", and only the second runs storage accounting and takedown compliance. Refusing lies to
+neither. The destructive reading fails closed either way, and
 `universe-cli` omits the flag entirely today (`src/lib/proxy-client.ts:667-674`), so no shipped
 caller relies on it.
