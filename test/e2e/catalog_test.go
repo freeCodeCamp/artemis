@@ -114,9 +114,14 @@ func TestRegistryCRUD(t *testing.T) {
 
 	mustStatus(t, e.call(t, http.MethodDelete, "/api/site/"+slug, e.GHToken, nil, nil), http.StatusNoContent, "delete")
 
-	t.Run("delete_missing", func(t *testing.T) {
+	t.Run("delete_is_idempotent_on_a_held_name", func(t *testing.T) {
 		mustStatus(t, e.call(t, http.MethodDelete, "/api/site/"+slug, e.GHToken, nil, nil),
-			http.StatusNotFound, "delete missing")
+			http.StatusNoContent, "repeat delete of a reserved name")
+	})
+
+	t.Run("delete_absent", func(t *testing.T) {
+		mustStatus(t, e.call(t, http.MethodDelete, "/api/site/"+uniqueSlug("gho"), e.GHToken, nil, nil),
+			http.StatusNotFound, "delete never-registered slug")
 	})
 }
 
@@ -337,30 +342,41 @@ func TestManualDelete_Tombstone(t *testing.T) {
 	}
 }
 
-func TestSitePurge_Tombstone(t *testing.T) {
+func TestSiteRelease_FreesTheNameAndTrashesTheBytes(t *testing.T) {
 	e := requireStack(t)
 	r2c := e.r2Client(t)
 	pool := e.pgPool(t)
 	ctx := context.Background()
 
-	slug := uniqueSlug("pur")
+	slug := uniqueSlug("rel")
 	registerSite(t, e, slug)
 	mintDeploy(t, e, slug, "preview")
 
-	var purgeResp struct {
-		Status string `json:"status"`
+	mustStatus(t, e.call(t, http.MethodDelete, "/api/site/"+slug, e.GHToken, nil, nil),
+		http.StatusNoContent, "delete")
+
+	if !hasPrefix(t, r2c, siteDir(slug)+"/") {
+		t.Fatalf("delete removed the site prefix; ADR-0006 unpublishes and holds the bytes for the grace")
 	}
-	mustStatus(t, e.call(t, http.MethodDelete, "/api/site/"+slug+"?purge=true", e.GHToken, nil, &purgeResp),
-		http.StatusOK, "purge")
-	if purgeResp.Status != "purged" {
-		t.Fatalf("purge status=%q want purged", purgeResp.Status)
+
+	var releaseResp struct {
+		Status string `json:"status"`
+		Moved  int    `json:"moved"`
+	}
+	mustStatus(t, e.call(t, http.MethodPost, "/api/site/"+slug+"/release", e.GHToken, nil, &releaseResp),
+		http.StatusOK, "release")
+	if releaseResp.Status != "released" {
+		t.Fatalf("release status=%q want released", releaseResp.Status)
+	}
+	if releaseResp.Moved == 0 {
+		t.Fatalf("release moved=0; the origin prefix carried a deploy")
 	}
 
 	if hasPrefix(t, r2c, siteDir(slug)+"/") {
-		t.Fatalf("R2 site prefix %q/ still present after purge", slug)
+		t.Fatalf("R2 site prefix %q/ still present after release", slug)
 	}
 	if !hasPrefix(t, r2c, "_trash/"+siteDir(slug)+"/") {
-		t.Fatalf("R2 trash prefix absent after purge")
+		t.Fatalf("R2 trash prefix absent after release")
 	}
 
 	var n int
@@ -369,8 +385,10 @@ func TestSitePurge_Tombstone(t *testing.T) {
 		t.Fatalf("pg tombstone query: %v", err)
 	}
 	if n == 0 {
-		t.Fatalf("pg tombstone rows=0 after purge; want >=1")
+		t.Fatalf("pg tombstone rows=0 after release; want >=1")
 	}
+
+	registerSite(t, e, slug)
 }
 
 func TestRepoQueue(t *testing.T) {
