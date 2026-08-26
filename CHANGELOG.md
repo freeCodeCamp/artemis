@@ -2,6 +2,67 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.10.0](https://github.com/freeCodeCamp/artemis/compare/v1.9.1...v1.10.0) (2026-08-26)
+
+
+### Features
+
+* **boot:** warn when postgres has no relay ([ac2f235](https://github.com/freeCodeCamp/artemis/commit/ac2f235ebcd557da21b12d9f56f1e1f4561f3bea))
+* **config:** add SITE_RESERVATION_GRACE ([d47f8dc](https://github.com/freeCodeCamp/artemis/commit/d47f8dcfc551ee795c63f9e3914f86ba185cd4fd))
+* **drift:** report aliases with no registry row ([cbed6bd](https://github.com/freeCodeCamp/artemis/commit/cbed6bdb7a85ec979ceefaf89b3f1a21b85b2d63))
+* **gc:** reclaim origin bytes before freeing the name ([d86484c](https://github.com/freeCodeCamp/artemis/commit/d86484c0055035648243c7bf03594342d78a0e0b))
+* **gc:** release a reserved name once its grace expires ([2f8d9ff](https://github.com/freeCodeCamp/artemis/commit/2f8d9ff482a28d63586e069837dad104b84900c9))
+* **handler:** add undelete and retire the purge flag ([4804e9e](https://github.com/freeCodeCamp/artemis/commit/4804e9e445b7afd99a503845ae3f840d777abf0c))
+* **handler:** delete takes the site dark and reserves it ([bd2bcd0](https://github.com/freeCodeCamp/artemis/commit/bd2bcd0b2fbecec2333b18aa27d47facd9a4d514))
+* **pg:** detect a lock session that stops answering ([ba46fb5](https://github.com/freeCodeCamp/artemis/commit/ba46fb596729715a4318679ee49c6ba29cb121cf))
+* **pg:** read the unpublished outbox backlog ([def4bde](https://github.com/freeCodeCamp/artemis/commit/def4bde72c070f824eca321f9f75b9ecd0942248))
+* **pg:** store the per-site reservation clock ([e8f3291](https://github.com/freeCodeCamp/artemis/commit/e8f329129874068e4f5bb08ef257256bb7677b73))
+* **r2:** add a one-attempt bounded Ping ([e291526](https://github.com/freeCodeCamp/artemis/commit/e2915266e27b0c622c565a2f4704f300ea32ad8a))
+* **r2:** add DeleteAlias to take a site dark ([1c92d84](https://github.com/freeCodeCamp/artemis/commit/1c92d84f62c92ac679f89802589ba9b9d262d44f))
+* **registry:** add the reserved site state ([0066eac](https://github.com/freeCodeCamp/artemis/commit/0066eaccebe6903005f183927b580b0461ed25f6))
+* **relay:** page when the outbox stops draining ([b468f74](https://github.com/freeCodeCamp/artemis/commit/b468f74ed14a37b96a46027381276348a5440bef))
+* **site:** let an approver release a reserved name early ([65db0fd](https://github.com/freeCodeCamp/artemis/commit/65db0fdae35a7ecfe3bb327fb8db43deade44ae8))
+* **sites:** expose reserved state on the list ([435d954](https://github.com/freeCodeCamp/artemis/commit/435d9543cf7dd23b5e71a57bd651f7b730eca80b))
+
+
+### Bug Fixes
+
+* **boot:** construct the reservation sweep wiring ([15ea03e](https://github.com/freeCodeCamp/artemis/commit/15ea03e12a325b1ec945f4f8f65a5c85c7b13807))
+* **boot:** wire the reservation store into the handlers ([e5cb256](https://github.com/freeCodeCamp/artemis/commit/e5cb25608b70b95836f9672c2460815851db90a1))
+* **config:** order the PUBLIC_URL checks ([4a1306c](https://github.com/freeCodeCamp/artemis/commit/4a1306c0e59bc1a4a435e1b535418595d715dee6))
+* **config:** own the alias key tail rules ([613fe8f](https://github.com/freeCodeCamp/artemis/commit/613fe8f819ada1343ab738fb7155035386bafa3d))
+* **config:** validate alias and deploy key formats ([46344c0](https://github.com/freeCodeCamp/artemis/commit/46344c0d9a32af275940ee11f9a102254a2c3b9f))
+* **drift:** keep an orphan verdict a partial scan already proved ([8c6d0af](https://github.com/freeCodeCamp/artemis/commit/8c6d0af49b7f1a18c43dff49c037f0c13dc77703))
+* **drift:** report a reserved name still serving ([d5862da](https://github.com/freeCodeCamp/artemis/commit/d5862dae6b2de42be38487e92a2d7fe934eb93ba))
+* **drift:** stop the reclaimable alert claiming a trend ([b22ce44](https://github.com/freeCodeCamp/artemis/commit/b22ce446201d72d76773dc8d52464ccc8198a120))
+* **gc:** stop the reclaim sweep racing an undelete ([cabc693](https://github.com/freeCodeCamp/artemis/commit/cabc6934792971f54cddbbea8eab51b31c2bae7b))
+* **handler:** audit a promote or rollback that half-commits ([8df9c81](https://github.com/freeCodeCamp/artemis/commit/8df9c81b562223de9b7144acad784d2bcf8084f9))
+* **handler:** closure verdict beats the locker ([9202659](https://github.com/freeCodeCamp/artemis/commit/920265991e65e55f492e0ae6b0ccd415bc5b52aa))
+* **handler:** fence a reserved site at every entry ([e42a2c5](https://github.com/freeCodeCamp/artemis/commit/e42a2c58a120c2dd5ef252a63ba6674a6e7688f5))
+* **handler:** fence every alias write on the site row ([a381ca0](https://github.com/freeCodeCamp/artemis/commit/a381ca0c1ee79c0783f8512a7bc06e9b22c7872a))
+* **handler:** retry and audit the commit leg ([9e81645](https://github.com/freeCodeCamp/artemis/commit/9e8164551bb7eb2112b88c3a5a726446afdc0a0f))
+* **handler:** unpublish first, audit every purge ([b201e6a](https://github.com/freeCodeCamp/artemis/commit/b201e6a5c0142b3c2086081e169cd925ed8d7582))
+* **handler:** unpublish first, audit every purge ([#46](https://github.com/freeCodeCamp/artemis/issues/46)) ([d75f92e](https://github.com/freeCodeCamp/artemis/commit/d75f92e163d5a2ed5d4d50fb79c13d17360f85c4))
+* **observability:** classify errors by cause ([5c4f5d1](https://github.com/freeCodeCamp/artemis/commit/5c4f5d1cad112a5baded9b9238267424453fbf30))
+* **observability:** escalate transients per cause ([7fb7d77](https://github.com/freeCodeCamp/artemis/commit/7fb7d771d0d023721302d49341d2ea953e159217))
+* **observability:** fingerprint background issues by cause ([f6e9c2e](https://github.com/freeCodeCamp/artemis/commit/f6e9c2e87c13d0354e6deae1d679d26ae3d99094))
+* **observability:** split DNS faults on NXDOMAIN ([98f03b5](https://github.com/freeCodeCamp/artemis/commit/98f03b5640cfd1a1761a936cad39eeb2de3bf98b))
+* **pg:** budget each connect attempt separately ([0df7226](https://github.com/freeCodeCamp/artemis/commit/0df72261d46ec450ef7829cc4c36da70206cd502))
+* **pg:** cancel the locked closure when the session dies ([0b3ddea](https://github.com/freeCodeCamp/artemis/commit/0b3ddea80215ea948632ef6b460a51e1f87a9e1d))
+* **pg:** stop promoting a failed unlock ([469ce44](https://github.com/freeCodeCamp/artemis/commit/469ce44846ce87ab0fc0c62a5c697bbd611bc954))
+* **r2:** let a page finish when one object fails ([c761436](https://github.com/freeCodeCamp/artemis/commit/c761436b4910ba074118177717368d0796aee7b3))
+* **readyz:** degrade on an R2 fault, keep the pod ([4c8c37b](https://github.com/freeCodeCamp/artemis/commit/4c8c37bd19bf0729c2081d62970109590d58eee7))
+* **relay:** bound the outbox backlog probe ([9de0cd2](https://github.com/freeCodeCamp/artemis/commit/9de0cd204552564f843d3ffe664cd317d36d3766))
+* **site:** free a released name only after its bytes are trashed ([837f9f5](https://github.com/freeCodeCamp/artemis/commit/837f9f5100e513e6129e2c1afca6959f073ad933))
+* **site:** restore alias pins on undelete ([d84bcc4](https://github.com/freeCodeCamp/artemis/commit/d84bcc449c4f5b0abc02c827a0b3407575e18fdc))
+* **sweep:** lock each reclaim and isolate failures ([f472f2b](https://github.com/freeCodeCamp/artemis/commit/f472f2bae90672471066619da9636cf62f57dd7a))
+* **valkey:** budget each connect attempt ([97379ec](https://github.com/freeCodeCamp/artemis/commit/97379ec840a2a2e31c59b8bbea516b83a60bfc94))
+
+
+### Performance Improvements
+
+* **r2:** move a prefix concurrently, bounded at 16 ([d24258b](https://github.com/freeCodeCamp/artemis/commit/d24258bb90f97e6ca3eeab4b4964d0b2f0c71a6a))
+
 ## [1.9.1](https://github.com/freeCodeCamp/artemis/compare/v1.9.0...v1.9.1) (2026-08-20)
 
 
