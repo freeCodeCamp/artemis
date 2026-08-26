@@ -53,24 +53,48 @@ jobs:
       - name: go test (race + cover)
         run: go test -race -coverprofile=coverage.out ./...
 
-      - name: coverage gate (>=80% on every package the release range changes)
+      - name: coverage gate (statement coverage, every package)
         run: |
           set -euo pipefail
-          go tool cover -func=coverage.out > coverage.txt
-          go run ./tools/covgate \
-            -threshold 80 \
-            -pkg github.com/freeCodeCamp/artemis/internal/auth \
-            -pkg github.com/freeCodeCamp/artemis/internal/handler \
-            -pkg github.com/freeCodeCamp/artemis/internal/gc \
-            -pkg github.com/freeCodeCamp/artemis/internal/worker \
-            -pkg github.com/freeCodeCamp/artemis/internal/pg \
-            -pkg github.com/freeCodeCamp/artemis/internal/observability \
-            -pkg github.com/freeCodeCamp/artemis/internal/telemetry \
-            -pkg github.com/freeCodeCamp/artemis/internal/config \
-            -pkg github.com/freeCodeCamp/artemis/internal/server \
-            -pkg github.com/freeCodeCamp/artemis/cmd/artemis \
-            -pkg github.com/freeCodeCamp/artemis/internal/r2 \
-            -pkg github.com/freeCodeCamp/artemis/internal/registry \
-            -pkg github.com/freeCodeCamp/artemis/internal/registry/valkey \
-            -pkg github.com/freeCodeCamp/artemis/internal/retryconnect \
-            coverage.txt
+          go run github.com/vladopajic/go-test-coverage/v2@v2.19.0 \
+            --config=.testcoverage.yml \
+            --threshold-file=70 --threshold-package=80 --threshold-total=80
+
+  tagged-suites:
+    name: Tagged suites (docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Hatchet integration suite (durable execution, R3-R5)
+        run: |
+          set -euo pipefail
+          cd test/integration/hatchet
+          compose="docker compose -f compose.hatchet.yaml"
+          tenant="707d0855-80ab-4e1f-a156-f1c4546cbf52"
+          trap "$compose down -v" EXIT
+          $compose up -d --wait
+          token=$($compose exec -T hatchet-lite /hatchet-admin token create \
+            --config /config --tenant-id "$tenant" | tr -d '\r\n')
+          if [ -z "$token" ]; then
+            echo "hatchet-admin returned an empty tenant token"
+            exit 1
+          fi
+          env -u ARTEMIS_LIFECYCLE_OK HATCHET_CLIENT_TOKEN="$token" \
+            HATCHET_CLIENT_HOST_PORT=127.0.0.1:7077 \
+            HATCHET_CLIENT_TLS_STRATEGY=none \
+            HATCHET_COMPOSE_FILE="$PWD/compose.hatchet.yaml" \
+            go test -v -race -tags=integration -count=1 -timeout=20m ../../../internal/hatchet/...
+
+      - name: End-to-end stack suite
+        run: ./scripts/e2e-local.sh

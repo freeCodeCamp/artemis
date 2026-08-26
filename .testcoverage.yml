@@ -1,0 +1,16 @@
+profile: coverage.out
+local-prefix: github.com/freeCodeCamp/artemis
+
+threshold:
+  file: 70
+  package: 80
+  total: 80
+
+override:
+  - path: ^internal/hatchet$
+    threshold: 78
+
+exclude:
+  paths:
+    - ^cmd/preflight
+    - ^cmd/fakegithub

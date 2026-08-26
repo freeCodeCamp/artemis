@@ -1,6 +1,7 @@
 # Artemis — static-apps deploy proxy. Common dev tasks.
 
 go := env_var_or_default("GO", "go")
+gotestcoverage := "v2.19.0"
 goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
 staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
@@ -24,26 +25,11 @@ build:
 test:
     {{go}} test -race -cover {{pkg}}
 
-# CI's coverage gate: >=80% on every package the release range changes
+# CI's coverage gate: statement coverage, every package, per .testcoverage.yml
 covgate:
     {{go}} test -race -coverprofile=coverage.out {{pkg}}
-    {{go}} tool cover -func=coverage.out > coverage.txt
-    {{go}} run ./tools/covgate -threshold 80 \
-        -pkg github.com/freeCodeCamp/artemis/internal/auth \
-        -pkg github.com/freeCodeCamp/artemis/internal/handler \
-        -pkg github.com/freeCodeCamp/artemis/internal/gc \
-        -pkg github.com/freeCodeCamp/artemis/internal/worker \
-        -pkg github.com/freeCodeCamp/artemis/internal/pg \
-        -pkg github.com/freeCodeCamp/artemis/internal/observability \
-        -pkg github.com/freeCodeCamp/artemis/internal/telemetry \
-        -pkg github.com/freeCodeCamp/artemis/internal/config \
-        -pkg github.com/freeCodeCamp/artemis/internal/server \
-        -pkg github.com/freeCodeCamp/artemis/cmd/artemis \
-        -pkg github.com/freeCodeCamp/artemis/internal/r2 \
-        -pkg github.com/freeCodeCamp/artemis/internal/registry \
-        -pkg github.com/freeCodeCamp/artemis/internal/registry/valkey \
-        -pkg github.com/freeCodeCamp/artemis/internal/retryconnect \
-        coverage.txt
+    {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml \
+        --threshold-file=70 --threshold-package=80 --threshold-total=80
 
 # go test with coverage profile + html report (unit only)
 cover:
@@ -118,9 +104,13 @@ hatchet-integration:
     cd test/integration/hatchet
     compose="docker compose -f compose.hatchet.yaml"
     tenant="707d0855-80ab-4e1f-a156-f1c4546cbf52"
-    $compose up -d --wait
     trap "$compose down -v" EXIT
+    $compose up -d --wait
     token=$($compose exec -T hatchet-lite /hatchet-admin token create --config /config --tenant-id "$tenant" | tr -d '\r\n')
+    if [ -z "$token" ]; then
+        echo "hatchet-admin returned an empty tenant token"
+        exit 1
+    fi
     env -u ARTEMIS_LIFECYCLE_OK HATCHET_CLIENT_TOKEN="$token" \
         HATCHET_CLIENT_HOST_PORT="${HATCHET_CLIENT_HOST_PORT:-127.0.0.1:7077}" \
         HATCHET_CLIENT_TLS_STRATEGY=none \
