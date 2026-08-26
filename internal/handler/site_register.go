@@ -257,6 +257,11 @@ func (h *Handlers) SiteDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.Reservations != nil {
+		if r.URL.Query().Get("purge") == "true" {
+			writeError(w, http.StatusBadRequest, "purge_retired",
+				"?purge=true is retired: DELETE unpublishes and holds the name for its grace. To reclaim the bytes and free the name now, call POST /api/site/{slug}/release")
+			return
+		}
 		h.siteDeleteReserving(w, r, slug)
 		return
 	}

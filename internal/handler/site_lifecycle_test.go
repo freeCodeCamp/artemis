@@ -176,7 +176,7 @@ func TestSiteUndelete_RestoresAReservedName(t *testing.T) {
 	assert.Equal(t, "success", fa.events[0].Outcome)
 }
 
-func TestSiteDelete_PurgeFlagNoLongerReclaims(t *testing.T) {
+func TestSiteDelete_PurgeFlagIsRefusedNotSilentlyIgnored(t *testing.T) {
 	store := newFakeR2()
 	store.aliases["www/production"] = "20260420-141522-abc1234"
 	store.objects["www.freecode.camp/deploys/d/index.html"] = []byte("hi")
@@ -184,11 +184,13 @@ func TestSiteDelete_PurgeFlagNoLongerReclaims(t *testing.T) {
 
 	w := callDelete(h, "www?purge=true", "alice", "tok")
 
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
-	require.Len(t, res.calls, 1,
-		"?purge=true is retired: it must reserve like any delete, never skip the grace period")
-	assert.Contains(t, store.objects, "www.freecode.camp/deploys/d/index.html",
-		"the destructive reading of the flag fails closed; bytes survive until the reclaim")
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String(),
+		"answering 204 tells a takedown script the bytes are gone while they sit at the origin prefix")
+	assert.Empty(t, res.calls,
+		"an ambiguous destructive request takes no action at all; the site stays live and the caller is told why")
+	assert.Contains(t, store.objects, "www.freecode.camp/deploys/d/index.html")
+	assert.Contains(t, store.aliases, "www/production",
+		"a refused delete must not take the site dark either")
 }
 
 func TestSiteUndelete_AuditsTheFailureWhenTheDeadlineHasPassed(t *testing.T) {
