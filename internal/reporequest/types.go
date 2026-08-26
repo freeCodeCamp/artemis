@@ -61,15 +61,6 @@ func (s Status) CanResolve() bool {
 	return s == StatusPending
 }
 
-func (s Status) HoldsName() bool {
-	switch s {
-	case StatusPending, StatusApproved, StatusActive:
-		return true
-	default:
-		return false
-	}
-}
-
 // Visibility is the GitHub repo visibility.
 type Visibility string
 
