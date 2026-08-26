@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -204,6 +205,13 @@ type gcWiring struct {
 	OutboxRetention time.Duration
 }
 
+func heldSlugChecker(src heldNameSource) func(context.Context, sitekey.Slug) (bool, error) {
+	if src == nil {
+		return nil
+	}
+	return src.IsHeld
+}
+
 func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug, bool)) func(context.Context, sitekey.Dirname) (bool, error) {
 	if src == nil {
 		return nil
@@ -211,6 +219,9 @@ func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug,
 	return func(ctx context.Context, site sitekey.Dirname) (bool, error) {
 		slug, ok := toSlug(site)
 		if !ok {
+			slog.WarnContext(ctx, "gc.held.dirname_unmappable",
+				"site", site,
+				"detail", "the reservation guard cannot answer for a dirname the deploy-prefix template does not invert; this site collects unguarded")
 			return false, nil
 		}
 		return src.IsHeld(ctx, slug)
@@ -246,6 +257,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			Mover:     r2c,
 			Tombstone: repo,
 			Locker:    repo,
+			Held:      heldSlugChecker(resv),
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 		},

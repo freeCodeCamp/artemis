@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
@@ -337,6 +339,7 @@ func TestSweepExpiredReservations_SkipsARowTheDatabaseStillConsidersHeld(t *test
 	deps := lockOnlyDeps(&recordingLocker{})
 	deps.Mover = mover
 	deps.Tombstone = &recordingTombstones{}
+	deps.Held = rel.IsHeld
 
 	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
 
@@ -347,4 +350,12 @@ func TestSweepExpiredReservations_SkipsARowTheDatabaseStillConsidersHeld(t *test
 	require.Len(t, mover.moved, 1)
 	assert.Equal(t, "genuinely-old.freecode.camp/", mover.moved[0][0],
 		"the skipped row's bytes must not move either")
+}
+
+func TestNewGCWiring_WiresTheHeldGuardIntoTheReservationSweep(t *testing.T) {
+	w, err := newGCWiring(gcWiringTestConfig(), &pg.Repo{}, &r2.Client{}, reservingWriter{})
+	require.NoError(t, err)
+
+	require.NotNil(t, w.Reclaim.Held,
+		"an unwired guard lets the sweep trash a site the database still holds whenever the app clock runs ahead")
 }

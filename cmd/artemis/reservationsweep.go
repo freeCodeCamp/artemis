@@ -49,6 +49,7 @@ type reclaimDeps struct {
 	Mover     siteReclaimer
 	Tombstone sitePurgeRecorder
 	Locker    gc.Locker
+	Held      func(ctx context.Context, slug sitekey.Slug) (bool, error)
 	Dirname   func(sitekey.Slug) sitekey.Dirname
 	TrashBase string
 }
@@ -121,8 +122,8 @@ func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reserva
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reservationReclaimTimeout)
 	defer cancel()
 	lockErr := sess.WithSiteLock(opCtx, deps.Dirname(res.Slug), func(opCtx context.Context) error {
-		if guard, ok := rel.(heldNameSource); ok {
-			held, err := guard.IsHeld(opCtx, res.Slug)
+		if deps.Held != nil {
+			held, err := deps.Held(opCtx, res.Slug)
 			if err != nil {
 				return fmt.Errorf("reservation sweep held check %s: %w", res.Slug, err)
 			}
