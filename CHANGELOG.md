@@ -2,6 +2,14 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.10.1](https://github.com/freeCodeCamp/artemis/compare/v1.10.0...v1.10.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **config:** parse boolean env with ParseBool ([a814241](https://github.com/freeCodeCamp/artemis/commit/a814241ced547793931765bc8454571c4eee0c34))
+* **hatchet:** guard the client behind a mutex ([288472a](https://github.com/freeCodeCamp/artemis/commit/288472a5f2d85c6bcf9a58753ad7a3fe78da7319))
+
 ## [1.10.0](https://github.com/freeCodeCamp/artemis/compare/v1.9.1...v1.10.0) (2026-08-26)
 
 
