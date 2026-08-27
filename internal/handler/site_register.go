@@ -292,7 +292,7 @@ func writeRegistryDeleteError(w http.ResponseWriter, r *http.Request, err error)
 //
 // Status matrix:
 //
-//	200 OK             — body = []SiteRow
+//	200 OK             — body = []SiteRow (active sites; ?state=reserved lists held names)
 //	502 Bad Gateway    — registry read failed
 func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
 	sites, err := h.Registry.Sites(r.Context())
@@ -301,12 +301,17 @@ func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seesActors := h.callerSeesActors(r)
-	rows := make([]SiteRow, len(sites))
-	for i, s := range sites {
-		rows[i] = toSiteRow(s)
-		if !seesActors {
-			rows[i].CreatedBy = ""
+	wantReserved := r.URL.Query().Get("state") == registry.StateReserved
+	rows := make([]SiteRow, 0, len(sites))
+	for _, s := range sites {
+		if s.IsReserved() != wantReserved {
+			continue
 		}
+		row := toSiteRow(s)
+		if !seesActors {
+			row.CreatedBy = ""
+		}
+		rows = append(rows, row)
 	}
 	writeJSON(w, http.StatusOK, rows)
 }

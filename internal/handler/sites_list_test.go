@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"time"
+
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,4 +137,48 @@ func TestSitesList_ActorGateIndependentOfRepoFeature(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	require.Len(t, got, 1)
 	assert.Equal(t, "alice", got[0].CreatedBy, "staff sees actor identity even when the repo-create feature is disabled")
+}
+
+func callSitesListQuery(h *Handlers, query, login, token string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodGet, "/api/sites"+query, nil).
+		WithContext(contextWithLogin(context.Background(), login, token))
+	w := httptest.NewRecorder()
+	h.SitesList(w, r)
+	return w
+}
+
+func listedSlugs(t *testing.T, w *httptest.ResponseRecorder) []string {
+	t.Helper()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var got []SiteRow
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	out := make([]string, 0, len(got))
+	for _, row := range got {
+		out = append(out, string(row.Slug))
+	}
+	return out
+}
+
+func TestSitesList_HidesAReservedSiteFromTheDefaultList(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
+	for _, slug := range []string{"alpha", "bravo"} {
+		require.Equal(t, http.StatusCreated,
+			callRegister(h, []byte(`{"slug":"`+slug+`","teams":["staff"]}`), "alice", "tok").Code)
+	}
+	h.Registry.(*fakeRegistry).reserve("bravo", time.Now().Add(72*time.Hour))
+
+	assert.Equal(t, []string{"alpha"}, listedSlugs(t, callSitesList(h, "alice", "tok")),
+		"universe-cli 0.19.0 prints no state column, so a held name in the default list is indistinguishable from a live site and invites a second delete")
+}
+
+func TestSitesList_ShowsReservedSitesOnlyWhenAsked(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), &fakeSites{bySite: map[sitekey.Slug][]string{}}, newFakeR2())
+	for _, slug := range []string{"alpha", "bravo"} {
+		require.Equal(t, http.StatusCreated,
+			callRegister(h, []byte(`{"slug":"`+slug+`","teams":["staff"]}`), "alice", "tok").Code)
+	}
+	h.Registry.(*fakeRegistry).reserve("bravo", time.Now().Add(72*time.Hour))
+
+	assert.Equal(t, []string{"bravo"}, listedSlugs(t, callSitesListQuery(h, "?state=reserved", "alice", "tok")),
+		"an operator needs a way to see what is held, or the only route to that answer is psql")
 }
