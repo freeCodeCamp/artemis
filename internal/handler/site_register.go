@@ -148,6 +148,8 @@ type SiteUpdateRequest struct {
 //	400 Bad Request    — invalid teams / json
 //	403 Forbidden      — caller not in authz team
 //	404 Not Found      — slug not registered
+//	409 Conflict       — slug is reserved (site_reserved)
+//	410 Gone           — slug went away under the lock (site_gone)
 //	502 Bad Gateway    — registry write failed
 //	503 Service Unavail — github membership probe upstream error
 func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {

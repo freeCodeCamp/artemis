@@ -14,9 +14,9 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 20, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 27, which are committed and **not yet released**.
 
-The audit that produced this file found no accidental breaks. Every entry below is intentional. Twenty entries; the summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
+The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
 ## Summary
 
@@ -46,6 +46,9 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 22 | `DELETE` on an orphaned alias answers `200`, not `404` | unreleased | API callers |
 | 23 | An orphaned alias is a new `drift-detect` verdict | unreleased | Sentry and alert-rule readers |
 | 24 | `POST /api/site/{slug}/release` is new — approver-gated early reclaim | unreleased | API callers and operators |
+| 25 | A reserved site answers `409 site_reserved` on every authenticated site endpoint, not `403` | unreleased | API callers and CI pipelines |
+| 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | unreleased | API callers |
+| 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | unreleased | API callers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -532,7 +535,76 @@ bytes. `502` on a tombstone or R2 failure — and on that path the name stays re
 to retry. `503 unavailable` on a deployment with no reservation store.
 
 **`audit_log`:** one `site.release` row, `outcome=success` with `detail.moved`, or `outcome=failure`
-with `detail.stage` of `state`, `tombstone`, `reclaim` or `release` naming how far it got.
+with `detail.stage` of `state`, `disarm`, `tombstone`, `reclaim` or `release` naming how far it got.
 
 **Action:** none for existing callers — the endpoint is purely additive and no shipped client calls
 it. Operators handling a takedown should use it instead of a manual database write.
+
+## 25 — a reserved site answers `409 site_reserved` on every authenticated site endpoint
+
+**Release:** unreleased.
+
+**Old:** at v1.9.1 a name had no reserved state. A slug that was not in the registry failed
+authorization and every authenticated site endpoint answered `403 site_unauthorized`.
+
+**New:** entry 19 makes `DELETE` reserve the name instead of freeing it, so a slug can now exist and
+be unwritable. Entry 20 records the `409 site_reserved` that `POST /api/site/register` returns.
+**That same fence applies to every other authenticated site endpoint, and entry 20 did not say so.**
+
+`denyUnregisteredSite` and `writeFenceError` (`internal/handler/handler.go:217-239`) write
+`409 site_reserved` — with `error.reservedUntil` in the body — or `410 site_gone`. They are reached
+from deploy init (`internal/handler/deploy.go:65`), the deploy-session JWT middleware that fronts
+upload and finalize (`internal/handler/middleware.go:147`), and `requireSiteAuthz`
+(`internal/handler/site.go:366`), which fronts promote, rollback, deploys, deploy delete, deploy
+restore, trash and alias. The in-lock fences in finalize, promote, rollback, restore and PATCH
+repeat it against the authoritative row rather than the cached snapshot.
+
+`410 site_gone` on promote and rollback is likewise newly reachable; at v1.9.1 those paths could not
+return it.
+
+**Why a caller feels this.** `universe-cli` maps HTTP status to an exit code
+(`src/lib/proxy-client.ts:302-306`): `403` becomes `EXIT_CREDENTIALS` (12), `409` becomes
+`EXIT_USAGE` (10). A CI job deploying to a site staff deleted an hour earlier used to exit 12, the
+code a pipeline branches on to mean "rotate the token". It now exits 10. A pipeline that retries or
+pages on 12 changes behaviour silently.
+
+**Action:** treat `409 site_reserved` as "the name is held; ask the owner to `undelete`, or wait for
+the grace to expire". Do not treat it as a credentials failure. Read `error.reservedUntil` for the
+deadline.
+
+## 26 — `GET /api/sites` omits reserved names unless `?state=reserved`
+
+**Release:** unreleased.
+
+**Old:** at v1.9.1 a `DELETE` removed the `sites` row, so a deleted site left the list immediately.
+With entry 19 the row survives as `state='reserved'`, and the list returned it like any other site.
+
+**New:** `GET /api/sites` returns active sites only. `GET /api/sites?state=reserved` returns the
+held names instead, so an operator can still see what a delete is holding.
+
+**Why this is not merely cosmetic.** The list carries `state` and `reservedUntil`, but
+`universe-cli` 0.19.0's `sites ls` prints only SLUG, TEAMS, CREATED BY and CREATED AT and runs no
+response validator, so the new fields are dropped. A deleted site was therefore
+byte-for-byte indistinguishable from a live one — while `sites ls --mine` and `whoami` *did* drop
+it, because those read the cached snapshot, which already filtered reserved rows. An operator
+reading the unqualified list as authoritative would conclude the delete had not taken and issue it
+again.
+
+**Action:** to see held names, pass `?state=reserved`. A client that wants both must make two calls.
+
+## 27 — restoring a deploy whose bytes are gone answers `410`, not `200`
+
+**Release:** unreleased.
+
+**Old:** `POST /api/site/{slug}/deploys/{deployId}/restore` answered
+`200 {"status":"restored","moved":0,"bytes":0}` whenever the tombstone row existed but the objects
+under `_trash/` did not, and it inserted an active `deploys` row for a deploy with no bytes.
+Promoting that deploy served an empty site.
+
+**New:** when the move relocates nothing and the live prefix holds nothing, the handler answers
+`410 already_purged` and writes no registry row. This is the same verdict the endpoint already
+returned when the tombstone row itself was gone; it now also covers the case where the row outlived
+its objects.
+
+**Action:** treat `410 already_purged` as final — the bytes are unrecoverable. It was previously
+reported as a successful restore.
