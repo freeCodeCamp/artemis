@@ -110,6 +110,7 @@ type ReservationReverser interface {
 // ReleaseReservation, which is why its caller is approver-gated.
 type NameReleaser interface {
 	ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error
+	ExpireReservation(ctx context.Context, slug sitekey.Slug) error
 }
 
 type SiteLocker interface {

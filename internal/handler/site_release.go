@@ -56,6 +56,12 @@ func (h *Handlers) SiteRelease(w http.ResponseWriter, r *http.Request) {
 			wrote = true
 			return nil
 		}
+		if err := h.NameReleaser.ExpireReservation(opCtx, slug); err != nil {
+			auditReleaseFailure("disarm")
+			writeUpstreamError(w, r, http.StatusBadGateway, "registry_write_failed", "pg.expire.reservation", err)
+			wrote = true
+			return nil
+		}
 		if h.Tombstones != nil {
 			if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
 				auditReleaseFailure("tombstone")

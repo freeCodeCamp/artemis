@@ -16,13 +16,27 @@ import (
 )
 
 type fakeReleaser struct {
-	released []sitekey.Slug
-	err      error
+	released  []sitekey.Slug
+	expired   []sitekey.Slug
+	err       error
+	expireErr error
+	log       *eventLog
 }
 
 func (f *fakeReleaser) ReleaseReservationNow(_ context.Context, slug sitekey.Slug) error {
 	f.released = append(f.released, slug)
 	return f.err
+}
+
+func (f *fakeReleaser) ExpireReservation(_ context.Context, slug sitekey.Slug) error {
+	if f.log != nil {
+		f.log.add("expire:" + string(slug))
+	}
+	if f.expireErr != nil {
+		return f.expireErr
+	}
+	f.expired = append(f.expired, slug)
+	return nil
 }
 
 func releaseHandlers(t *testing.T, repoGH *fakeGH, store R2Store) (*Handlers, *fakeReleaser, *fakeTombstones, *fakeAudit) {
@@ -164,4 +178,53 @@ func TestSiteUndelete_TakesTheSameLockSiteReleaseHolds(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, []string{"lock:www", "unlock:www"}, log.events,
 		"undelete must share SiteRelease's key, or it can return an emptied site mid-reclaim")
+}
+
+func TestSiteRelease_DisarmsUndeleteBeforeItMovesAnyBytes(t *testing.T) {
+	store := newFakeR2()
+	store.objects["www/deploys/d1/index.html"] = []byte("hi")
+	h, rel, _, _ := releaseHandlers(t, adminRepoGH(), store)
+	reserveSite(h, h.Registry.(*fakeRegistry), "www", time.Now().Add(72*time.Hour))
+	log := &eventLog{}
+	rel.log = log
+	h.Locker = &fakeLocker{log: log}
+	h.R2 = &loggingR2{fakeR2: store, log: log}
+
+	require.Equal(t, http.StatusOK, callRelease(h, "www", "boss", "atok").Code)
+
+	assert.Equal(t, []string{"lock:www", "expire:www", "move:www/", "unlock:www"}, log.events,
+		"every post-move failure path returns 502 leaving the row reserved with a future deadline, "+
+			"and undelete needs only that deadline to restore alias pins onto bytes already in _trash")
+	assert.Equal(t, []sitekey.Slug{"www"}, rel.expired)
+}
+
+func TestSiteRelease_KeepsTheNameReservedButUndeletableWhenTheMoveFails(t *testing.T) {
+	store := newFakeR2()
+	store.objects["www/deploys/d1/index.html"] = []byte("hi")
+	h, rel, _, _ := releaseHandlers(t, adminRepoGH(), movePrefixFailR2{store})
+	reserveSite(h, h.Registry.(*fakeRegistry), "www", time.Now().Add(72*time.Hour))
+
+	w := callRelease(h, "www", "boss", "atok")
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Empty(t, rel.released, "the row stays state=reserved, which blocks re-registration and makes the call safe to retry")
+	assert.Equal(t, []sitekey.Slug{"www"}, rel.expired,
+		"a partially moved site must not stay undeletable-armed; the expired row degrades to the sweep's already-safe shape")
+}
+
+func TestSiteRelease_RefusesToTouchBytesWhenItCannotDisarmUndelete(t *testing.T) {
+	store := newFakeR2()
+	store.objects["www/deploys/d1/index.html"] = []byte("hi")
+	h, rel, tomb, _ := releaseHandlers(t, adminRepoGH(), store)
+	reserveSite(h, h.Registry.(*fakeRegistry), "www", time.Now().Add(72*time.Hour))
+	rel.expireErr = errors.New("pg down")
+
+	w := callRelease(h, "www", "boss", "atok")
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Empty(t, tomb.purged, "no tombstone may be written for a site whose bytes were never moved")
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Contains(t, store.objects, "www/deploys/d1/index.html",
+		"failing to disarm undelete must abort before the first destructive step, not after it")
 }
