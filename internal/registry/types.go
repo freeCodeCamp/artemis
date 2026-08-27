@@ -90,3 +90,8 @@ type Writer interface {
 	// slug is re-registered (which resumes normal retention).
 	Delete(ctx context.Context, slug sitekey.Slug) error
 }
+
+type ObservedAliases struct {
+	Production *string
+	Preview    *string
+}

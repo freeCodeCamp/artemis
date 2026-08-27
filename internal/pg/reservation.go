@@ -13,7 +13,7 @@ import (
 )
 
 func (s *RegistryStore) Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname,
-	until time.Time, by string) (registry.Reservation, error) {
+	until time.Time, by string, observed registry.ObservedAliases) (registry.Reservation, error) {
 	now := s.now().UTC()
 	var res registry.Reservation
 	var flipped bool
@@ -36,6 +36,12 @@ func (s *RegistryStore) Reserve(ctx context.Context, slug sitekey.Slug, site sit
 		prevProduction, prevPreview, err := aliasPointers(ctx, tx, site)
 		if err != nil {
 			return err
+		}
+		if observed.Production != nil {
+			prevProduction = *observed.Production
+		}
+		if observed.Preview != nil {
+			prevPreview = *observed.Preview
 		}
 		if err := scanReservation(tx.QueryRow(ctx,
 			`UPDATE sites SET state = $2, reserved_at = $3, reserved_until = $4, reserved_by = $5,

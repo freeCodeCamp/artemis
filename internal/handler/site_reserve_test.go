@@ -16,17 +16,18 @@ import (
 )
 
 type fakeReservations struct {
-	calls []sitekey.Slug
-	until []time.Time
-	by    []string
-	err   error
+	calls    []sitekey.Slug
+	until    []time.Time
+	by       []string
+	observed []registry.ObservedAliases
+	err      error
 	// reg mirrors internal/pg/reservation.go:24 — Reserve locks the sites
 	// row first and answers ErrNotFound when there is none.
 	reg *fakeRegistry
 }
 
 func (f *fakeReservations) Reserve(ctx context.Context, slug sitekey.Slug, _ sitekey.Dirname,
-	until time.Time, by string) (registry.Reservation, error) {
+	until time.Time, by string, observed registry.ObservedAliases) (registry.Reservation, error) {
 	if f.reg != nil {
 		if _, err := f.reg.GetSite(ctx, slug); err != nil {
 			return registry.Reservation{}, err
@@ -35,6 +36,7 @@ func (f *fakeReservations) Reserve(ctx context.Context, slug sitekey.Slug, _ sit
 	f.calls = append(f.calls, slug)
 	f.until = append(f.until, until)
 	f.by = append(f.by, by)
+	f.observed = append(f.observed, observed)
 	if f.err != nil {
 		return registry.Reservation{}, f.err
 	}
@@ -175,22 +177,22 @@ func TestSiteDelete_OrphanedAliasDeleteIsIdempotent(t *testing.T) {
 		"once the orphan is gone the name is absent, and absent is the 404 the matrix documents")
 }
 
-type headFailR2 struct {
+type aliasReadFailR2 struct {
 	*fakeR2
 	failKey string
 }
 
-func (d *headFailR2) HasObject(ctx context.Context, key string) (bool, error) {
+func (d *aliasReadFailR2) GetAlias(ctx context.Context, key string) (string, error) {
 	if key == d.failKey {
-		return false, errors.New("r2 head timeout")
+		return "", errors.New("r2 alias read timeout")
 	}
-	return d.fakeR2.HasObject(ctx, key)
+	return d.fakeR2.GetAlias(ctx, key)
 }
 
 func TestSiteDelete_AnUnreadableAliasProbeIsUnknownNotAbsent(t *testing.T) {
 	inner := newFakeR2()
 	inner.aliases["ghost/production"] = "20260420-141522-abc1234"
-	store := &headFailR2{fakeR2: inner, failKey: "ghost/production"}
+	store := &aliasReadFailR2{fakeR2: inner, failKey: "ghost/production"}
 	h, _, fa := reserveHandlers(t, store)
 
 	w := callDelete(h, "ghost", "alice", "tok")
@@ -201,7 +203,42 @@ func TestSiteDelete_AnUnreadableAliasProbeIsUnknownNotAbsent(t *testing.T) {
 	assert.Equal(t, "success", fa.events[0].Outcome,
 		"a probe that could not read is unknown, not zero; 404 would assert nothing was served")
 	assert.Equal(t, false, fa.events[0].Detail["orphan"],
-		"an unreadable HEAD cannot witness an orphan, so the audit row must not claim one was cleaned up")
+		"an unreadable alias read cannot witness an orphan, so the audit row must not claim one was cleaned up")
 	assert.Equal(t, "unreadable", fa.events[0].Detail["aliasProbe"],
 		"the operator needs the uncertainty on the record, not folded into a success that reads as observed")
+}
+
+func TestSiteDelete_ReadsTheLiveAliasPointerBeforeDeletingIt(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["www/production"] = "20260827-140000-newsha"
+	store.aliases["www/preview"] = "20260801-090000-oldsha"
+	h, res, _ := reserveHandlers(t, store)
+	log := &eventLog{}
+	h.R2 = &loggingR2{fakeR2: store, log: log}
+
+	require.Equal(t, http.StatusNoContent, callDeleteSite(t, h).Code)
+
+	assert.Equal(t, []string{
+		"getAlias:www/production", "deleteAlias:www/production",
+		"getAlias:www/preview", "deleteAlias:www/preview",
+	}, log.events,
+		"the serve plane reads the R2 alias object, so it is the live pointer; a HEAD discards the one value undelete needs and the delete then destroys the only copy")
+	require.Len(t, res.observed, 1)
+	require.NotNil(t, res.observed[0].Production)
+	assert.Equal(t, "20260827-140000-newsha", *res.observed[0].Production,
+		"prev_production must record what R2 served, not what the aliases table remembered")
+	require.NotNil(t, res.observed[0].Preview)
+	assert.Equal(t, "20260801-090000-oldsha", *res.observed[0].Preview)
+}
+
+func TestSiteDelete_LeavesThePointerUnknownWhenR2CannotBeRead(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["www/production"] = "20260827-140000-newsha"
+	h, res, _ := reserveHandlers(t, &aliasReadFailR2{fakeR2: store, failKey: "www/production"})
+
+	require.Equal(t, http.StatusNoContent, callDeleteSite(t, h).Code)
+
+	require.Len(t, res.observed, 1)
+	assert.Nil(t, res.observed[0].Production,
+		"an unreadable alias must fall back to the aliases table, not overwrite prev_production with an empty string")
 }

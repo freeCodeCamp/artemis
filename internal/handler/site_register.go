@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/freeCodeCamp/artemis/internal/r2"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/telemetry"
 
@@ -358,14 +360,23 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		var served bool
 		var headErr error
+		var observed registry.ObservedAliases
+		into := map[string]**string{"production": &observed.Production, "preview": &observed.Preview}
 		for _, mode := range []string{"production", "preview"} {
 			aliasKey := h.aliasKey(slug, mode)
-			has, err := h.R2.HasObject(opCtx, aliasKey)
+			cur, err := h.R2.GetAlias(opCtx, aliasKey)
 			switch {
-			case err != nil:
+			case err != nil && !r2.IsNotFound(err):
 				headErr = err
-			case has:
-				served = true
+			default:
+				if r2.IsNotFound(err) {
+					cur = ""
+				}
+				cur = strings.TrimSpace(cur)
+				*into[mode] = &cur
+				if cur != "" {
+					served = true
+				}
 			}
 			if err := h.R2.DeleteAlias(opCtx, aliasKey); err != nil {
 				auditDeleteFailure("unpublish")
@@ -375,7 +386,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 			}
 		}
 		until := h.Now().UTC().Add(h.ReservationGrace)
-		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context())); err != nil {
+		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context()), observed); err != nil {
 			if errors.Is(err, registry.ErrNotFound) && (served || headErr != nil) {
 				servedOrphan = true
 				orphanObserved = served

@@ -96,7 +96,7 @@ type PendingDeployWriter interface {
 // ReservationStore holds a deleted site's name for a grace period so
 // the next claimant cannot inherit the previous owner's live bytes.
 type ReservationStore interface {
-	Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname, until time.Time, by string) (registry.Reservation, error)
+	Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname, until time.Time, by string, observed registry.ObservedAliases) (registry.Reservation, error)
 }
 
 // ReservationReverser restores a reserved name to its owner. The grace

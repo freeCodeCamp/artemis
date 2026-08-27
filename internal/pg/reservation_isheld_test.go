@@ -16,7 +16,7 @@ func TestRegistryStore_IsHeldOnlyWhileTheGraceIsUnexpired(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, held, "an active site is not held; a guard that says otherwise stops all collection fleet-wide")
 
-	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob")
+	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	held, err = store.IsHeld(ctx, reservationSlug)
@@ -28,7 +28,7 @@ func TestRegistryStore_IsHeldOnlyWhileTheGraceIsUnexpired(t *testing.T) {
 func TestRegistryStore_IsHeldGoesFalseOnceTheGraceHasPassed(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	held, err := store.IsHeld(ctx, reservationSlug)
@@ -47,7 +47,7 @@ func TestRegistryStore_IsHeldIsFalseForASlugThatDoesNotExist(t *testing.T) {
 
 func TestRegistryStore_IsHeldGoesFalseAfterUndelete(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	_, err = store.Undelete(ctx, reservationSlug)
@@ -62,7 +62,7 @@ func TestRegistryStore_IsHeldGoesFalseAfterUndelete(t *testing.T) {
 func TestRegistryStore_IsExpiredReservationIsFalseInsideTheGrace(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	expired, err := store.IsExpiredReservation(ctx, reservationSlug)
@@ -73,7 +73,7 @@ func TestRegistryStore_IsExpiredReservationIsFalseInsideTheGrace(t *testing.T) {
 func TestRegistryStore_IsExpiredReservationIsTruePastTheGrace(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	expired, err := store.IsExpiredReservation(ctx, reservationSlug)
@@ -93,7 +93,7 @@ func TestRegistryStore_IsExpiredReservationIsFalseForASlugThatDoesNotExist(t *te
 
 func TestRegistryStore_IsExpiredReservationIsFalseAfterUndelete(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	_, err = store.Undelete(ctx, reservationSlug)
@@ -107,7 +107,7 @@ func TestRegistryStore_IsExpiredReservationIsFalseAfterUndelete(t *testing.T) {
 
 func TestRegistryStore_ExpireReservationMakesUndeleteRefuseButKeepsTheName(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	require.NoError(t, store.ExpireReservation(ctx, reservationSlug))

@@ -32,7 +32,7 @@ type legacyOnlyRegistry struct{ handler.RegistryWriter }
 // qualifies; this one lets the test hold a non-nil value.
 type reservingRegistry struct{ handler.RegistryWriter }
 
-func (reservingRegistry) Reserve(context.Context, sitekey.Slug, sitekey.Dirname, time.Time, string) (registry.Reservation, error) {
+func (reservingRegistry) Reserve(context.Context, sitekey.Slug, sitekey.Dirname, time.Time, string, registry.ObservedAliases) (registry.Reservation, error) {
 	return registry.Reservation{}, nil
 }
 

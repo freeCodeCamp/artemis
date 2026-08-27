@@ -33,7 +33,7 @@ func TestRegistryStore_ReserveFlipsStateCapturesPrevAliasesAndClearsTheIndex(t *
 	store, repo, ctx := newReservationFixture(t)
 	until := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Second)
 
-	res, err := store.Reserve(ctx, reservationSlug, reservationDirname, until, "bob")
+	res, err := store.Reserve(ctx, reservationSlug, reservationDirname, until, "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "20260101-000000-aaaaaaa", res.PrevProduction)
@@ -55,10 +55,10 @@ func TestRegistryStore_ReserveOnAReservedRowKeepsTheFirstDeadline(t *testing.T) 
 	store, _, ctx := newReservationFixture(t)
 	first := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Second)
 
-	firstRes, err := store.Reserve(ctx, reservationSlug, reservationDirname, first, "bob")
+	firstRes, err := store.Reserve(ctx, reservationSlug, reservationDirname, first, "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
-	second, err := store.Reserve(ctx, reservationSlug, reservationDirname, first.Add(48*time.Hour), "carol")
+	second, err := store.Reserve(ctx, reservationSlug, reservationDirname, first.Add(48*time.Hour), "carol", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	assert.WithinDuration(t, firstRes.ReservedUntil, second.ReservedUntil, time.Second,
@@ -71,13 +71,13 @@ func TestRegistryStore_ReserveOnAReservedRowKeepsTheFirstDeadline(t *testing.T) 
 func TestRegistryStore_ReserveOnAnAbsentSlugIsNotFound(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 
-	_, err := store.Reserve(ctx, "absent", "absent.freecode.camp", time.Now().UTC().Add(time.Hour), "bob")
+	_, err := store.Reserve(ctx, "absent", "absent.freecode.camp", time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
 	assert.ErrorIs(t, err, registry.ErrNotFound)
 }
 
 func TestRegistryStore_RegisterOnAReservedSlugReturnsErrReserved(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	_, err = store.Register(ctx, reservationSlug, []string{"staff"}, "mallory")
@@ -96,7 +96,7 @@ func TestRegistryStore_RegisterOnALiveSlugStillReturnsErrAlreadyExists(t *testin
 
 func TestRegistryStore_UndeleteRestoresTheRowAndHandsBackThePreviousAliases(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	res, err := store.Undelete(ctx, reservationSlug)
@@ -124,9 +124,9 @@ func TestRegistryStore_ExpiredReservationsSelectsOnlyPastDeadlines(t *testing.T)
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
-	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Minute), "bob")
+	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Minute), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
-	_, err = store.Reserve(ctx, "livehold", "livehold.freecode.camp", now.Add(time.Hour), "bob")
+	_, err = store.Reserve(ctx, "livehold", "livehold.freecode.camp", now.Add(time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	expired, err := store.ExpiredReservations(ctx, now, 10)
@@ -142,10 +142,10 @@ func TestRegistryStore_ExpiredReservationsHonoursItsLimit(t *testing.T) {
 	for _, slug := range []sitekey.Slug{"alpha", "bravo"} {
 		_, err := store.Register(ctx, slug, []string{"staff"}, "alice")
 		require.NoError(t, err)
-		_, err = store.Reserve(ctx, slug, sitekey.Dirname(string(slug)+".freecode.camp"), now.Add(-time.Hour), "bob")
+		_, err = store.Reserve(ctx, slug, sitekey.Dirname(string(slug)+".freecode.camp"), now.Add(-time.Hour), "bob", registry.ObservedAliases{})
 		require.NoError(t, err)
 	}
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	expired, err := store.ExpiredReservations(ctx, now, 2)
@@ -156,7 +156,7 @@ func TestRegistryStore_ExpiredReservationsHonoursItsLimit(t *testing.T) {
 func TestRegistryStore_ReserveDoesNotEnqueueSiteChanged(t *testing.T) {
 	store, repo, ctx := newReservationFixture(t)
 
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	var n int
@@ -170,7 +170,7 @@ func TestRegistryStore_ReserveDoesNotEnqueueSiteChanged(t *testing.T) {
 func TestRegistryStore_SitesListsAReservedNameWithItsDeadline(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 	until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, until, "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, until, "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	sites, err := store.Sites(ctx)
@@ -205,7 +205,7 @@ func TestMigrate_SitesRejectsAnUnknownState(t *testing.T) {
 
 func TestRegistryStore_UndeleteRefusesAReservationPastItsDeadline(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	_, err = store.Undelete(ctx, reservationSlug)
@@ -219,7 +219,7 @@ func TestRegistryStore_UndeleteRefusesAReservationPastItsDeadline(t *testing.T) 
 
 func TestRegistryStore_ReleaseReservationDeletesAnExpiredReservedRow(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	require.NoError(t, store.ReleaseReservation(ctx, reservationSlug))
@@ -230,7 +230,7 @@ func TestRegistryStore_ReleaseReservationDeletesAnExpiredReservedRow(t *testing.
 
 func TestRegistryStore_ReleaseReservationRefusesARowInsideItsGraceWindow(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob")
+	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	assert.ErrorIs(t, store.ReleaseReservation(ctx, reservationSlug), registry.ErrNotFound)
@@ -254,7 +254,7 @@ func TestRegistryStore_ReleaseReservationRefusesARowThatIsNoLongerReserved(t *te
 func TestRegistryStore_ReleaseReservationNowFreesAReservationBeforeItsDeadline(t *testing.T) {
 	store, _, ctx := newReservationFixture(t)
 	_, err := store.Reserve(ctx, reservationSlug, reservationDirname,
-		time.Now().UTC().Add(72*time.Hour), "bob")
+		time.Now().UTC().Add(72*time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
 	require.NoError(t, store.ReleaseReservationNow(ctx, reservationSlug),
@@ -280,4 +280,19 @@ func TestRegistryStore_ReleaseReservationNowIsNotFoundForAnAbsentSlug(t *testing
 	store, _, ctx := newReservationFixture(t)
 
 	assert.ErrorIs(t, store.ReleaseReservationNow(ctx, "absent"), registry.ErrNotFound)
+}
+
+func TestRegistryStore_ReservePrefersTheObservedAliasOverTheTable(t *testing.T) {
+	store, _, ctx := newReservationFixture(t)
+	live := "20260827-140000-newsha"
+
+	res, err := store.Reserve(ctx, reservationSlug, reservationDirname,
+		time.Now().UTC().Add(72*time.Hour), "bob",
+		registry.ObservedAliases{Production: &live})
+	require.NoError(t, err)
+
+	assert.Equal(t, live, res.PrevProduction,
+		"a promote that wrote R2 and then failed its aliases-table write leaves the table stale; undelete must republish what the edge actually served")
+	assert.Equal(t, "20260102-000000-bbbbbbb", res.PrevPreview,
+		"a mode the delete could not read must fall back to the table, not be blanked")
 }
