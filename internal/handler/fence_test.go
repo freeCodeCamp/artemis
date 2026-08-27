@@ -271,3 +271,29 @@ func TestSiteDeployRestore_FencedAbsentSiteIsStillGone(t *testing.T) {
 	require.Equal(t, http.StatusGone, w.Code, w.Body.String())
 	assert.Equal(t, "site_gone", fenceErrorBody(t, w)["code"])
 }
+
+// The delete already removed both alias objects from R2, so the
+// deploy_aliased guard cannot substitute for the in-lock fence here.
+func TestSiteDeployDelete_FencedStaleSnapshotStillRefuses(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, _, reg := fencedHandlers(t, store)
+	h.Tombstones = &fakeTombstones{}
+	reg.reserve("www", fenceDeadline)
+
+	require.NotEmpty(t, h.Sites.Snapshot().TeamsForSite("www"),
+		"the snapshot is deliberately left stale: its TTL fallback is 60s and it is read before the lock")
+
+	w := withSiteRoute(http.MethodDelete, "/api/site/{site}/deploys/{deployId}",
+		"/api/site/www/deploys/"+deployID, nil,
+		contextWithLogin(context.Background(), "alice", "tok"), h.SiteDeployDelete)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "site_reserved", fenceErrorBody(t, w)["code"])
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	_, inTrash := store.objects["_trash/www/"+deployID+"/index.html"]
+	assert.False(t, inTrash,
+		"undelete restores the alias pointing at this deploy; trashing it makes the restored site serve 404 and tombstone-purge hard-deletes the bytes")
+}

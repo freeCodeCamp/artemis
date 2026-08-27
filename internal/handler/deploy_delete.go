@@ -41,6 +41,12 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 		success bool
 	)
 	lockErr := h.withSiteLock(opCtx, h.DeployPrefix.SiteDirname(site), func(opCtx context.Context) error {
+		if row, err := h.requireWritableSite(opCtx, site); err != nil {
+			h.writeFenceError(w, r, "registry.get.deploy-delete",
+				"site was deleted; its deploys cannot be tombstoned", row, err)
+			return nil
+		}
+
 		for _, mode := range []string{"production", "preview"} {
 			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(site, mode))
 			if err != nil && !r2.IsNotFound(err) {
