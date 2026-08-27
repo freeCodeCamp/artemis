@@ -205,11 +205,11 @@ type gcWiring struct {
 	OutboxRetention time.Duration
 }
 
-func heldSlugChecker(src heldNameSource) func(context.Context, sitekey.Slug) (bool, error) {
+func expiredClaimChecker(src expiredClaimSource) func(context.Context, sitekey.Slug) (bool, error) {
 	if src == nil {
 		return nil
 	}
-	return src.IsHeld
+	return src.IsExpiredReservation
 }
 
 func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug, bool)) func(context.Context, sitekey.Dirname) (bool, error) {
@@ -257,7 +257,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			Mover:     r2c,
 			Tombstone: repo,
 			Locker:    repo,
-			Held:      heldSlugChecker(resv),
+			Claim:     expiredClaimChecker(resv),
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 		},

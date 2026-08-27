@@ -38,6 +38,8 @@ func (reservingRegistry) Reserve(context.Context, sitekey.Slug, sitekey.Dirname,
 
 func (reservingRegistry) ReleaseReservationNow(context.Context, sitekey.Slug) error { return nil }
 
+func (reservingRegistry) ExpireReservation(context.Context, sitekey.Slug) error { return nil }
+
 func TestBuildHandlers_WiresTheReservationStoreWhenTheWriterSupportsIt(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Registry.ReservationGrace = 72 * time.Hour
@@ -105,6 +107,10 @@ func (reservingWriter) ExpiredReservations(context.Context, time.Time, int) ([]r
 func (reservingWriter) ReleaseReservation(context.Context, sitekey.Slug) error { return nil }
 
 func (reservingWriter) IsHeld(context.Context, sitekey.Slug) (bool, error) { return false, nil }
+
+func (reservingWriter) IsExpiredReservation(context.Context, sitekey.Slug) (bool, error) {
+	return true, nil
+}
 
 func gcWiringTestConfig() *config.Config {
 	return &config.Config{

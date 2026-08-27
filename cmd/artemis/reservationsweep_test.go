@@ -96,8 +96,10 @@ func testDirname(s sitekey.Slug) sitekey.Dirname {
 	return sitekey.Dirname(string(s) + ".freecode.camp")
 }
 
+func claimExpired(context.Context, sitekey.Slug) (bool, error) { return true, nil }
+
 func lockOnlyDeps(l *recordingLocker) reclaimDeps {
-	return reclaimDeps{Locker: l, Dirname: testDirname, TrashBase: "_trash/"}
+	return reclaimDeps{Locker: l, Dirname: testDirname, TrashBase: "_trash/", Claim: claimExpired}
 }
 
 func fixedNow() time.Time { return time.Date(2026, 8, 25, 3, 0, 0, 0, time.UTC) }
@@ -252,6 +254,7 @@ func testReclaimDeps(m *recordingMover, tb *recordingTombstones) reclaimDeps {
 		Locker:    &recordingLocker{},
 		Dirname:   testDirname,
 		TrashBase: "_trash/",
+		Claim:     claimExpired,
 	}
 }
 
@@ -320,8 +323,8 @@ type heldGuardReleaser struct {
 	released []sitekey.Slug
 }
 
-func (r *heldGuardReleaser) IsHeld(_ context.Context, slug sitekey.Slug) (bool, error) {
-	return r.held[slug], nil
+func (r *heldGuardReleaser) IsExpiredReservation(_ context.Context, slug sitekey.Slug) (bool, error) {
+	return !r.held[slug], nil
 }
 
 func (r *heldGuardReleaser) ReleaseReservation(_ context.Context, slug sitekey.Slug) error {
@@ -339,7 +342,7 @@ func TestSweepExpiredReservations_SkipsARowTheDatabaseStillConsidersHeld(t *test
 	deps := lockOnlyDeps(&recordingLocker{})
 	deps.Mover = mover
 	deps.Tombstone = &recordingTombstones{}
-	deps.Held = rel.IsHeld
+	deps.Claim = rel.IsExpiredReservation
 
 	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
 
@@ -356,6 +359,56 @@ func TestNewGCWiring_WiresTheHeldGuardIntoTheReservationSweep(t *testing.T) {
 	w, err := newGCWiring(gcWiringTestConfig(), &pg.Repo{}, &r2.Client{}, reservingWriter{})
 	require.NoError(t, err)
 
-	require.NotNil(t, w.Reclaim.Held,
-		"an unwired guard lets the sweep trash a site the database still holds whenever the app clock runs ahead")
+	require.NotNil(t, w.Reclaim.Claim,
+		"an unwired guard lets the sweep trash a site the database no longer holds for it, whether the row is still inside its grace or was released and the name re-registered")
+}
+
+type reRegisteredReleaser struct{}
+
+func (reRegisteredReleaser) IsExpiredReservation(context.Context, sitekey.Slug) (bool, error) {
+	return false, nil
+}
+
+func (reRegisteredReleaser) ReleaseReservation(context.Context, sitekey.Slug) error {
+	return registry.ErrNotFound
+}
+
+func TestSweepExpiredReservations_RefusesARowThatStoppedBeingAnExpiredReservation(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{
+		{Slug: "reborn", ReservedUntil: fixedNow().Add(-time.Hour)},
+	}}
+	rel := reRegisteredReleaser{}
+	mover := &recordingMover{}
+	tb := &recordingTombstones{}
+	deps := lockOnlyDeps(&recordingLocker{})
+	deps.Mover = mover
+	deps.Tombstone = tb
+	deps.Claim = rel.IsExpiredReservation
+
+	n, err := sweepExpiredReservations(context.Background(), src, rel, deps, fixedNow, false)
+
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	assert.Empty(t, mover.moved,
+		"the row was released and the name re-registered between selection and the lock; a new owner's whole object tree must not move to _trash")
+	assert.Empty(t, tb.sites,
+		"a site purge tombstone for a live site makes tombstone-purge hard-delete a new owner's bytes seven days later")
+}
+
+func TestSweepExpiredReservations_LiveRunWithoutAClaimCheckIsAWiringError(t *testing.T) {
+	src := &scriptedReservations{expired: []registry.Reservation{
+		{Slug: "gone", ReservedUntil: fixedNow().Add(-time.Hour)},
+	}}
+	mover := &recordingMover{}
+	deps := lockOnlyDeps(&recordingLocker{})
+	deps.Mover = mover
+	deps.Tombstone = &recordingTombstones{}
+	deps.Claim = nil
+
+	n, err := sweepExpiredReservations(context.Background(), src, &recordingReleaser{}, deps, fixedNow, false)
+
+	require.Error(t, err,
+		"an unwired claim check must fail the run closed; failing open destroys whatever holds the name now")
+	assert.Zero(t, n)
+	assert.Empty(t, mover.moved)
 }

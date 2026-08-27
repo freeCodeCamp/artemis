@@ -71,6 +71,16 @@ func (s *RegistryStore) IsHeld(ctx context.Context, slug sitekey.Slug) (bool, er
 	return held, nil
 }
 
+func (s *RegistryStore) IsExpiredReservation(ctx context.Context, slug sitekey.Slug) (bool, error) {
+	var expired bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until < now())`,
+		slug, registry.StateReserved).Scan(&expired); err != nil {
+		return false, fmt.Errorf("pg site expired reservation %s: %w", slug, err)
+	}
+	return expired, nil
+}
+
 func (s *RegistryStore) Reservation(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error) {
 	var res registry.Reservation
 	if err := scanReservation(s.pool.QueryRow(ctx,
@@ -106,6 +116,19 @@ func (s *RegistryStore) Undelete(ctx context.Context, slug sitekey.Slug) (regist
 	}
 	s.changed(slug)
 	return res, nil
+}
+
+func (s *RegistryStore) ExpireReservation(ctx context.Context, slug sitekey.Slug) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE sites SET reserved_until = now(), updated_at = now() WHERE slug = $1 AND state = $2`,
+		slug, registry.StateReserved)
+	if err != nil {
+		return fmt.Errorf("pg expire reservation %s: %w", slug, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return registry.ErrNotFound
+	}
+	return nil
 }
 
 func (s *RegistryStore) ReleaseReservation(ctx context.Context, slug sitekey.Slug) error {

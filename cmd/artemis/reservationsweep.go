@@ -31,10 +31,15 @@ type heldNameSource interface {
 	IsHeld(ctx context.Context, slug sitekey.Slug) (bool, error)
 }
 
+type expiredClaimSource interface {
+	IsExpiredReservation(ctx context.Context, slug sitekey.Slug) (bool, error)
+}
+
 type reservationWiring interface {
 	expiredReservationSource
 	reservationReleaser
 	heldNameSource
+	expiredClaimSource
 }
 
 type siteReclaimer interface {
@@ -49,7 +54,7 @@ type reclaimDeps struct {
 	Mover     siteReclaimer
 	Tombstone sitePurgeRecorder
 	Locker    gc.Locker
-	Held      func(ctx context.Context, slug sitekey.Slug) (bool, error)
+	Claim     func(ctx context.Context, slug sitekey.Slug) (bool, error)
 	Dirname   func(sitekey.Slug) sitekey.Dirname
 	TrashBase string
 }
@@ -76,8 +81,8 @@ func sweepExpiredReservations(ctx context.Context, src expiredReservationSource,
 	if len(expired) == 0 {
 		return 0, nil
 	}
-	if deps.Locker == nil || deps.Dirname == nil {
-		return 0, errors.New("reservation sweep: live run without site Locker (wiring bug)")
+	if deps.Locker == nil || deps.Dirname == nil || deps.Claim == nil {
+		return 0, errors.New("reservation sweep: live run without site Locker or claim check (wiring bug)")
 	}
 	sess, err := deps.Locker.NewLockSession(ctx)
 	if err != nil {
@@ -122,17 +127,15 @@ func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reserva
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reservationReclaimTimeout)
 	defer cancel()
 	lockErr := sess.WithSiteLock(opCtx, deps.Dirname(res.Slug), func(opCtx context.Context) error {
-		if deps.Held != nil {
-			held, err := deps.Held(opCtx, res.Slug)
-			if err != nil {
-				return fmt.Errorf("reservation sweep held check %s: %w", res.Slug, err)
-			}
-			if held {
-				slog.WarnContext(opCtx, "reservation.sweep.still_held",
-					"slug", res.Slug, "reservedUntil", res.ReservedUntil,
-					"detail", "the row was selected on the app clock but the database still holds it; the bytes stay until the next run")
-				return nil
-			}
+		expired, err := deps.Claim(opCtx, res.Slug)
+		if err != nil {
+			return fmt.Errorf("reservation sweep claim check %s: %w", res.Slug, err)
+		}
+		if !expired {
+			slog.WarnContext(opCtx, "reservation.sweep.claim_not_held",
+				"slug", res.Slug, "reservedUntil", res.ReservedUntil,
+				"detail", "under the lock the row is not an expired reservation; it is still inside its grace, or it was released and the name re-registered, and either way its bytes belong to someone else")
+			return nil
 		}
 		if err := reclaimSiteBytes(opCtx, deps, res.Slug); err != nil {
 			return err
