@@ -219,10 +219,10 @@ func TestSiteDelete_ReadsTheLiveAliasPointerBeforeDeletingIt(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, callDeleteSite(t, h).Code)
 
 	assert.Equal(t, []string{
-		"getAlias:www/production", "deleteAlias:www/production",
-		"getAlias:www/preview", "deleteAlias:www/preview",
+		"getAlias:www/production", "getAlias:www/preview",
+		"deleteAlias:www/production", "deleteAlias:www/preview",
 	}, log.events,
-		"the serve plane reads the R2 alias object, so it is the live pointer; a HEAD discards the one value undelete needs and the delete then destroys the only copy")
+		"the serve plane reads the R2 alias object, so it is the live pointer; every pointer must be captured before any of them is destroyed")
 	require.Len(t, res.observed, 1)
 	require.NotNil(t, res.observed[0].Production)
 	assert.Equal(t, "20260827-140000-newsha", *res.observed[0].Production,
@@ -231,14 +231,20 @@ func TestSiteDelete_ReadsTheLiveAliasPointerBeforeDeletingIt(t *testing.T) {
 	assert.Equal(t, "20260801-090000-oldsha", *res.observed[0].Preview)
 }
 
-func TestSiteDelete_LeavesThePointerUnknownWhenR2CannotBeRead(t *testing.T) {
+func TestSiteDelete_RefusesARegisteredSiteWhoseAliasCannotBeRead(t *testing.T) {
 	store := newFakeR2()
 	store.aliases["www/production"] = "20260827-140000-newsha"
-	h, res, _ := reserveHandlers(t, &aliasReadFailR2{fakeR2: store, failKey: "www/production"})
+	h, res, fa := reserveHandlers(t, &aliasReadFailR2{fakeR2: store, failKey: "www/production"})
 
-	require.Equal(t, http.StatusNoContent, callDeleteSite(t, h).Code)
+	w := callDeleteSite(t, h)
 
-	require.Len(t, res.observed, 1)
-	assert.Nil(t, res.observed[0].Production,
-		"an unreadable alias must fall back to the aliases table, not overwrite prev_production with an empty string")
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Empty(t, res.calls, "no reservation may record a pointer the delete could not read")
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.Contains(t, store.aliases, "www/production",
+		"deleting an alias whose body we could not read destroys the only copy of the pointer undelete needs")
+	require.Len(t, fa.events, 1)
+	assert.Equal(t, "failure", fa.events[0].Outcome)
+	assert.Equal(t, "unpublish", fa.events[0].Detail["stage"])
 }

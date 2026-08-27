@@ -149,7 +149,6 @@ type SiteUpdateRequest struct {
 //	403 Forbidden      — caller not in authz team
 //	404 Not Found      — slug not registered
 //	409 Conflict       — slug is reserved (site_reserved)
-//	410 Gone           — slug went away under the lock (site_gone)
 //	502 Bad Gateway    — registry write failed
 //	503 Service Unavail — github membership probe upstream error
 func (h *Handlers) SiteUpdate(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +302,12 @@ func (h *Handlers) SitesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seesActors := h.callerSeesActors(r)
-	wantReserved := r.URL.Query().Get("state") == registry.StateReserved
+	state := r.URL.Query().Get("state")
+	if state != "" && state != registry.StateActive && state != registry.StateReserved {
+		writeError(w, http.StatusBadRequest, "invalid_state", "state must be active or reserved")
+		return
+	}
+	wantReserved := state == registry.StateReserved
 	rows := make([]SiteRow, 0, len(sites))
 	for _, s := range sites {
 		if s.IsReserved() != wantReserved {
@@ -368,24 +372,37 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		var served bool
 		var headErr error
 		var observed registry.ObservedAliases
-		into := map[string]**string{"production": &observed.Production, "preview": &observed.Preview}
-		for _, mode := range []string{"production", "preview"} {
-			aliasKey := h.aliasKey(slug, mode)
-			cur, err := h.R2.GetAlias(opCtx, aliasKey)
-			switch {
-			case err != nil && !r2.IsNotFound(err):
+		modes := []string{"production", "preview"}
+		for _, mode := range modes {
+			cur, err := h.R2.GetAlias(opCtx, h.aliasKey(slug, mode))
+			if err != nil && !r2.IsNotFound(err) {
 				headErr = err
-			default:
-				if r2.IsNotFound(err) {
-					cur = ""
-				}
-				cur = strings.TrimSpace(cur)
-				*into[mode] = &cur
-				if cur != "" {
-					served = true
-				}
+				continue
 			}
-			if err := h.R2.DeleteAlias(opCtx, aliasKey); err != nil {
+			if r2.IsNotFound(err) {
+				cur = ""
+			}
+			cur = strings.TrimSpace(cur)
+			switch mode {
+			case "production":
+				observed.Production = &cur
+			case "preview":
+				observed.Preview = &cur
+			}
+			if cur != "" {
+				served = true
+			}
+		}
+		if headErr != nil {
+			if _, err := h.Registry.GetSite(opCtx, slug); err == nil {
+				auditDeleteFailure("unpublish")
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_get_failed", "r2.get.alias.delete", headErr)
+				wrote = true
+				return nil
+			}
+		}
+		for _, mode := range modes {
+			if err := h.R2.DeleteAlias(opCtx, h.aliasKey(slug, mode)); err != nil {
 				auditDeleteFailure("unpublish")
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_delete_failed", "r2.delete.alias", err)
 				wrote = true
