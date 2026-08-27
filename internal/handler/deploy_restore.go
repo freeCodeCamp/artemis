@@ -54,14 +54,17 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
+		live := true
 		if moved == 0 {
-			live, hasErr := h.R2.HasPrefix(opCtx, dst)
+			var hasErr error
+			live, hasErr = h.R2.HasPrefix(opCtx, dst)
 			if hasErr != nil {
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_has_prefix_failed", "r2.has.restore", hasErr)
 				return nil
 			}
 			if !live {
-				writeError(w, http.StatusGone, "already_purged", "tombstone is gone; deploy was already hard-purged")
+				writeError(w, http.StatusGone, "already_purged",
+					"no bytes to restore; the deploy was already hard-purged")
 				return nil
 			}
 		}
@@ -79,11 +82,6 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 		if restoreErr != nil {
 			if !errors.Is(restoreErr, registry.ErrNotFound) {
 				writeUpstreamError(w, r, http.StatusBadGateway, "restore_failed", "pg.restore.deploy", restoreErr)
-				return nil
-			}
-			live, hasErr := h.R2.HasPrefix(opCtx, dst)
-			if hasErr != nil {
-				writeUpstreamError(w, r, http.StatusBadGateway, "r2_has_prefix_failed", "r2.has.restore", hasErr)
 				return nil
 			}
 			if !live {

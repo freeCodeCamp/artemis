@@ -26,6 +26,16 @@ func (f *fakeReaper) ExpiredTombstones(_ context.Context, before time.Time) ([]T
 	return out, nil
 }
 
+func (f *fakeReaper) TombstonesForSite(_ context.Context, site sitekey.Dirname) ([]Tombstone, error) {
+	var out []Tombstone
+	for _, t := range f.tombstones {
+		if t.Site == site {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeReaper) ClearTombstone(_ context.Context, site sitekey.Dirname, id string) (bool, error) {
 	f.cleared = append(f.cleared, string(site)+"/"+id)
 	for i, t := range f.tombstones {
@@ -219,4 +229,35 @@ func TestTombstonePurge_DryRunDoesNotLock(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Zero(t, locker.calls, "dry-run computes the delete set but takes no lock")
+}
+
+func TestTombstonePurge_SitePurgeAccountsForTheDeploysItAlsoDeletes(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "gone", ID: "", TrashedAt: ago(10 * 24 * time.Hour), Bytes: 0},
+		{Site: "gone", ID: "d1", TrashedAt: ago(9 * 24 * time.Hour), Bytes: 111},
+		{Site: "gone", ID: "d2", TrashedAt: ago(1 * time.Hour), Bytes: 222},
+	}}
+	del := &fakeDeleter{}
+	audit := &fakePurgeAuditor{}
+	p := newPurge(reaper, del)
+	p.Audit = audit
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"_trash/gone/"}, del.deleted,
+		"one DeletePrefix covers the whole site tree, so it removes every per-deploy trash under it too")
+	assert.EqualValues(t, 333, res.BytesReclaimed,
+		"reporting bytes=0 for a purge that reclaimed a whole site tree makes the nightly log useless for capacity")
+	assert.ElementsMatch(t, []string{"gone/", "gone/d1", "gone/d2"}, res.Purged)
+	var recorded []string
+	for _, r := range audit.recorded {
+		recorded = append(recorded, r[0]+"/"+r[1])
+	}
+	assert.ElementsMatch(t, []string{"gone/", "gone/d1", "gone/d2"}, recorded,
+		"a hard delete with no audit row is invisible; the deploys go with the site and must be recorded")
+}
+
+func (staleReaper) TombstonesForSite(context.Context, sitekey.Dirname) ([]Tombstone, error) {
+	return nil, nil
 }

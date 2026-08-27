@@ -197,3 +197,7 @@ func TestReconcile_PruneFailurePropagates(t *testing.T) {
 	assert.Empty(t, report.PGPruned, "a failed PruneDeploy is not reported as pruned")
 	assert.Empty(t, store.pruned)
 }
+
+func (*errClearReaper) TombstonesForSite(context.Context, sitekey.Dirname) ([]Tombstone, error) {
+	return nil, nil
+}

@@ -26,6 +26,10 @@ type fakeReaper struct{}
 func (fakeReaper) ExpiredTombstones(context.Context, time.Time) ([]gc.Tombstone, error) {
 	return nil, nil
 }
+func (fakeReaper) TombstonesForSite(context.Context, sitekey.Dirname) ([]gc.Tombstone, error) {
+	return nil, nil
+}
+
 func (fakeReaper) ClearTombstone(context.Context, sitekey.Dirname, string) (bool, error) {
 	return true, nil
 }
