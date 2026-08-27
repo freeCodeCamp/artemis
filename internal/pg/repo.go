@@ -223,7 +223,7 @@ func (r *Repo) PruneDeploy(ctx context.Context, site sitekey.Dirname, id string)
 
 func (r *Repo) ClearTombstone(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM tombstones WHERE site = $1 AND id = $2`, site, id)
+		`DELETE FROM tombstones WHERE site = $1 AND ($2 = '' OR id = $2)`, site, id)
 	if err != nil {
 		return false, fmt.Errorf("pg clear tombstone %s/%s: %w", site, id, err)
 	}

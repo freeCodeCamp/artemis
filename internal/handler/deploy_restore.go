@@ -54,6 +54,18 @@ func (h *Handlers) SiteDeployRestore(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
+		if moved == 0 {
+			live, hasErr := h.R2.HasPrefix(opCtx, dst)
+			if hasErr != nil {
+				writeUpstreamError(w, r, http.StatusBadGateway, "r2_has_prefix_failed", "r2.has.restore", hasErr)
+				return nil
+			}
+			if !live {
+				writeError(w, http.StatusGone, "already_purged", "tombstone is gone; deploy was already hard-purged")
+				return nil
+			}
+		}
+
 		var bytesErr error
 		liveBytes, bytesErr = h.R2.PrefixBytes(opCtx, dst)
 		if bytesErr != nil {

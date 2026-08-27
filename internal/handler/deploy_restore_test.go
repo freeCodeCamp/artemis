@@ -212,3 +212,18 @@ func TestRestore_EndToEnd_AfterRealDelete(t *testing.T) {
 	require.True(t, ok, "bytes field present and numeric")
 	assert.Greater(t, bytes, float64(0), "restore reports real R2 bytes, not the tombstone's always-0 stored value")
 }
+
+func TestRestore_RefusesWhenTheTombstoneOutlivedItsBytes(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
+	trash := &fakeTrash{}
+	h.Trash = trash
+
+	w := callDeployRestore(h, "www", deployID)
+
+	require.Equal(t, http.StatusGone, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "already_purged")
+	assert.Empty(t, trash.restored,
+		"a 200 restored with moved=0 inserts an active deploys row for a deploy with no bytes; promoting it serves an empty site")
+}

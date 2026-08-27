@@ -133,3 +133,37 @@ func TestRepo_ReindexDeploy_RestoreClearsTheRefusal(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, reindexed, "restore drops the tombstone, so reindex is allowed again")
 }
+
+func TestRepo_ClearTombstone_SitePurgeClearsEveryTombstoneItsDeleteRemoved(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.RecordTombstone(ctx, "www", "d1", 10))
+	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+
+	cleared, err := repo.ClearTombstone(ctx, "www", "")
+	require.NoError(t, err)
+	require.True(t, cleared)
+
+	left, err := repo.TombstonesForSite(ctx, "www")
+	require.NoError(t, err)
+	assert.Empty(t, left,
+		"the site purge hard-deletes all of _trash/<site>/, so a surviving per-deploy row points at objects that no longer exist and makes restore answer 200 for a deploy with no bytes")
+}
+
+func TestRepo_ClearTombstone_ADeployPurgeLeavesItsSiblingsAlone(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	require.NoError(t, repo.RecordTombstone(ctx, "www", "d1", 10))
+	require.NoError(t, repo.RecordTombstone(ctx, "www", "d2", 20))
+
+	cleared, err := repo.ClearTombstone(ctx, "www", "d1")
+	require.NoError(t, err)
+	require.True(t, cleared)
+
+	left, err := repo.TombstonesForSite(ctx, "www")
+	require.NoError(t, err)
+	require.Len(t, left, 1, "a per-deploy purge deletes one prefix, so it may clear only that one row")
+	assert.Equal(t, "d2", left[0].ID)
+}
