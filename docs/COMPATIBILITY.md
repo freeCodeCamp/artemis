@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 27, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 28, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -49,6 +49,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 25 | A reserved site answers `409 site_reserved` on every authenticated site endpoint, not `403` | unreleased | API callers and CI pipelines |
 | 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | unreleased | API callers |
 | 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | unreleased | API callers |
+| 28 | `DELETE` refuses a registered site whose alias it cannot read | unreleased | API callers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -590,6 +591,9 @@ it, because those read the cached snapshot, which already filtered reserved rows
 reading the unqualified list as authoritative would conclude the delete had not taken and issue it
 again.
 
+`?state=active` is accepted and is the default. Any other value answers `400 invalid_state` rather
+than silently returning the active list.
+
 **Action:** to see held names, pass `?state=reserved`. A client that wants both must make two calls.
 
 ## 27 — restoring a deploy whose bytes are gone answers `410`, not `200`
@@ -608,3 +612,27 @@ its objects.
 
 **Action:** treat `410 already_purged` as final — the bytes are unrecoverable. It was previously
 reported as a successful restore.
+
+## 28 — `DELETE` refuses a registered site whose alias it cannot read
+
+**Release:** unreleased.
+
+**Old:** the delete probed each alias with a HEAD, ignored a probe failure, and deleted the object
+anyway. Entry 19's reservation then recorded `prev_production` from the `aliases` table.
+
+**New:** the delete reads the alias **body**, because the serve plane reads the R2 alias object and
+never consults Postgres — the object is the live pointer and the table is a shadow copy that
+`SitePromote` and `SiteRollback` can leave stale when their R2 write succeeds and their Postgres
+write then fails. The observed value is what the reservation stores, so `undelete` republishes what
+the edge actually served.
+
+If that read fails for a **registered** site, the handler now answers `502 r2_get_failed` with an
+`audit_log` row `outcome=failure detail.stage=unpublish`, and deletes nothing. Destroying a pointer
+it could not read would leave `undelete` to republish the stale table value with no copy of the
+right one anywhere.
+
+An **orphaned** alias — one with no registry row — is unchanged: entry 22 still applies, the
+unreadable probe still reports `aliasProbe: "unreadable"` with `orphan: false`, and the exposure is
+still closed.
+
+**Action:** retry the delete. The site stays live and served until it succeeds.

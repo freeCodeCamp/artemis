@@ -12,7 +12,7 @@ GET    /readyz                                                → readiness (pro
 
 GET    /api/whoami                                             → { login, authorizedSites }
 POST   /api/deploy/init                   { site, sha, files? } → { deployId, jwt, expiresAt }
-GET    /api/sites                         [?slug=…]             → { count, sites: [SiteRow] }
+GET    /api/sites                         [?state=reserved]     → [SiteRow]
 POST   /api/site/register                 { slug, teams? }      → 201 SiteRow
 PATCH  /api/site/{slug}                   { teams }             → 200 SiteRow
 DELETE /api/site/{slug}                   [?purge → 400] → 204 · or 200 { slug, status: "unpublished", reserved: false }
@@ -243,7 +243,7 @@ Authoritative store: Postgres when `DATABASE_URL` is set, else Valkey (`VALKEY_A
 
 ```
 POST   /api/site/register      { slug, teams? }      → 201 SiteRow
-GET    /api/sites              [?slug=…]             → { count, sites: [SiteRow] }
+GET    /api/sites              [?state=reserved]     → [SiteRow]
 PATCH  /api/site/{slug}        { teams }             → 200 SiteRow
 DELETE /api/site/{slug}                              → 204 · 200 when the name was an orphan
 POST   /api/site/{slug}/undelete                     → 200 · 404 past the grace deadline
