@@ -2,6 +2,28 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.10.2](https://github.com/freeCodeCamp/artemis/compare/v1.10.1...v1.10.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **ci:** tag the image with the commit it contains ([50eb299](https://github.com/freeCodeCamp/artemis/commit/50eb299046477ac20858aca80a8858eb6b28b9c5))
+* **deploy:** fence deploy delete inside the site lock ([31b4ea3](https://github.com/freeCodeCamp/artemis/commit/31b4ea373b7145a52cfde624a4403e5e3fdd056f))
+* **gc:** account for the deploys a site purge deletes ([187dd66](https://github.com/freeCodeCamp/artemis/commit/187dd660d93815970cef24569fb5d4797c56703d))
+* **gc:** clear every tombstone a site purge deletes ([49c6826](https://github.com/freeCodeCamp/artemis/commit/49c6826cb87474cf608b27b71e70fb1b9f5a9217))
+* **gc:** never collect a site inside its grace ([11320ab](https://github.com/freeCodeCamp/artemis/commit/11320ab0795721a626055270627d85eddedee5b5))
+* **gc:** recheck the reservation under the site lock ([0061bf6](https://github.com/freeCodeCamp/artemis/commit/0061bf60dbe92c3546a958b7bb0f7ed4b97d676c))
+* **release:** disarm undelete before trashing bytes ([0506da3](https://github.com/freeCodeCamp/artemis/commit/0506da3edd38df9403b9d7a756e5b5816fb4f714))
+* **site:** record the alias R2 served, not the table ([336e550](https://github.com/freeCodeCamp/artemis/commit/336e5504eb5102f109bed85342f451204b8014fe))
+* **site:** refuse a delete that cannot read its alias ([70d0ef4](https://github.com/freeCodeCamp/artemis/commit/70d0ef4b5ea21bef372c5d756d3624bc6eeaeac0))
+* **site:** refuse a repeated true purge value ([8fd7b1e](https://github.com/freeCodeCamp/artemis/commit/8fd7b1e781831dfc5901825ea1a1fcfb5259a24f))
+* **site:** refuse every spelling of retired purge ([c911839](https://github.com/freeCodeCamp/artemis/commit/c91183946dc00a2a89f4dca54fc75e190a14f7f8))
+* **site:** refuse the retired purge flag ([a4773a5](https://github.com/freeCodeCamp/artemis/commit/a4773a5382ea787cbaeca6b8b6f70645bc1c2667))
+* **sites:** hide held names from the default list ([237656d](https://github.com/freeCodeCamp/artemis/commit/237656dd90978dcb0962fe97c2f7cced9f9ef14e))
+* **sweep:** destroy only on a positive claim ([8c5d702](https://github.com/freeCodeCamp/artemis/commit/8c5d7023bbd7ceb30c06d8a0d7a098d041368f07))
+* **sweep:** skip a row the database still holds ([d1667a9](https://github.com/freeCodeCamp/artemis/commit/d1667a9188b4dc58b5ef82c653cdd22871206039))
+* **sweep:** wire the held guard explicitly ([56ad2cb](https://github.com/freeCodeCamp/artemis/commit/56ad2cb186d8ba2c6f2c673bf2bdca360646ec8e))
+
 ## [1.10.1](https://github.com/freeCodeCamp/artemis/compare/v1.10.0...v1.10.1) (2026-08-26)
 
 
