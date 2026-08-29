@@ -63,7 +63,7 @@ func (h *Handlers) SiteRelease(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		if h.Tombstones != nil {
-			if err := h.Tombstones.RecordSitePurge(opCtx, dirname); err != nil {
+			if err := h.Tombstones.RecordSiteTombstone(opCtx, dirname); err != nil {
 				auditReleaseFailure("tombstone")
 				writeUpstreamError(w, r, http.StatusBadGateway, "tombstone_record_failed", "pg.tombstone.site-release", err)
 				wrote = true

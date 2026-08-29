@@ -46,13 +46,13 @@ type siteReclaimer interface {
 	MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (int, error)
 }
 
-type sitePurgeRecorder interface {
-	RecordSitePurge(ctx context.Context, site sitekey.Dirname) error
+type siteTombstoneRecorder interface {
+	RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error
 }
 
 type reclaimDeps struct {
 	Mover     siteReclaimer
-	Tombstone sitePurgeRecorder
+	Tombstone siteTombstoneRecorder
 	Locker    gc.Locker
 	Claim     func(ctx context.Context, slug sitekey.Slug) (bool, error)
 	Dirname   func(sitekey.Slug) sitekey.Dirname
@@ -183,7 +183,7 @@ func reclaimSiteBytes(ctx context.Context, deps reclaimDeps, slug sitekey.Slug) 
 		base = "_trash/"
 	}
 	if deps.Tombstone != nil {
-		if err := deps.Tombstone.RecordSitePurge(ctx, dirname); err != nil {
+		if err := deps.Tombstone.RecordSiteTombstone(ctx, dirname); err != nil {
 			return fmt.Errorf("reservation sweep tombstone %s: %w", dirname, err)
 		}
 	}

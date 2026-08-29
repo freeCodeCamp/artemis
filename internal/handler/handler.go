@@ -70,7 +70,7 @@ type R2Store interface {
 
 type TombstoneStore interface {
 	RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error
-	RecordSitePurge(ctx context.Context, site sitekey.Dirname) error
+	RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error
 }
 
 type AuditStore interface {

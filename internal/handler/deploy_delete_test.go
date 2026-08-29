@@ -19,7 +19,7 @@ type fakeTombstones struct {
 	err      error
 }
 
-func (f *fakeTombstones) RecordSitePurge(_ context.Context, site sitekey.Dirname) error {
+func (f *fakeTombstones) RecordSiteTombstone(_ context.Context, site sitekey.Dirname) error {
 	if f.err != nil {
 		return f.err
 	}

@@ -178,18 +178,18 @@ func (r *Repo) RecordTombstone(ctx context.Context, site sitekey.Dirname, id str
 	})
 }
 
-func (r *Repo) RecordSitePurge(ctx context.Context, site sitekey.Dirname) error {
+func (r *Repo) RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error {
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO tombstones (site, id, bytes) VALUES ($1, '', 0)
 			 ON CONFLICT (site, id) DO UPDATE SET trashed_at = now()`, site); err != nil {
-			return fmt.Errorf("pg site purge tombstone %s: %w", site, err)
+			return fmt.Errorf("pg site tombstone %s: %w", site, err)
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM aliases WHERE site = $1`, site); err != nil {
-			return fmt.Errorf("pg site purge aliases %s: %w", site, err)
+			return fmt.Errorf("pg site tombstone aliases %s: %w", site, err)
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM deploys WHERE site = $1`, site); err != nil {
-			return fmt.Errorf("pg site purge deploys %s: %w", site, err)
+			return fmt.Errorf("pg site tombstone deploys %s: %w", site, err)
 		}
 		return nil
 	})

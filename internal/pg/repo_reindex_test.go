@@ -47,31 +47,31 @@ func TestRepo_ReindexDeploy_RefusesToResurrectATombstonedDeploy(t *testing.T) {
 	assert.Empty(t, deploys, "the tombstoned deploy stays out of the active set")
 }
 
-func TestRepo_ReindexDeploy_RefusesToResurrectAPurgedSite(t *testing.T) {
+func TestRepo_ReindexDeploy_RefusesToResurrectATombstonedSite(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
 	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", t0, 100, true, "active"))
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 
 	reindexed, err := repo.ReindexDeploy(ctx, "www", "d1", t0, true)
 	require.NoError(t, err)
 	assert.False(t, reindexed,
-		"a purge records its tombstone as (site, '') and deletes every deploy row, so a per-deploy guard "+
-			"matches nothing; bytes that outlive MovePrefix would flip the purged site back to active")
+		"a site tombstone records itself as (site, '') and deletes every deploy row, so a per-deploy guard "+
+			"matches nothing; bytes that outlive MovePrefix would flip the tombstoned site back to active")
 
 	deploys, err := repo.DeploysForSite(ctx, "www")
 	require.NoError(t, err)
-	assert.Empty(t, deploys, "the purged site stays out of the active set")
+	assert.Empty(t, deploys, "the tombstoned site stays out of the active set")
 }
 
-func TestRepo_ReindexDeploy_ResumesAfterThePurgeTombstoneClears(t *testing.T) {
+func TestRepo_ReindexDeploy_ResumesAfterTheSiteTombstoneClears(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 	cleared, err := repo.ClearTombstone(ctx, "www", "")
 	require.NoError(t, err)
 	require.True(t, cleared)
@@ -139,7 +139,7 @@ func TestRepo_ClearTombstone_SitePurgeClearsEveryTombstoneItsDeleteRemoved(t *te
 	ctx := context.Background()
 
 	require.NoError(t, repo.RecordTombstone(ctx, "www", "d1", 10))
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 
 	cleared, err := repo.ClearTombstone(ctx, "www", "")
 	require.NoError(t, err)

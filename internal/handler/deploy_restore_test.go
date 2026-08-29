@@ -159,7 +159,7 @@ func newFakeTombstoneTrash(now func() time.Time) *fakeTombstoneTrash {
 	return &fakeTombstoneTrash{now: now, rows: map[string]gc.Tombstone{}}
 }
 
-func (f *fakeTombstoneTrash) RecordSitePurge(context.Context, sitekey.Dirname) error { return nil }
+func (f *fakeTombstoneTrash) RecordSiteTombstone(context.Context, sitekey.Dirname) error { return nil }
 
 func (f *fakeTombstoneTrash) RecordTombstone(_ context.Context, site sitekey.Dirname, id string, bytes int64) error {
 	f.rows[string(site)+"/"+id] = gc.Tombstone{Site: site, ID: id, TrashedAt: f.now(), Bytes: bytes}

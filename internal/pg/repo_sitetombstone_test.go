@@ -11,7 +11,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-func TestRepo_RecordSitePurge_ClearsTheWholeSiteIndex(t *testing.T) {
+func TestRepo_RecordSiteTombstone_ClearsTheWholeSiteIndex(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
@@ -22,7 +22,7 @@ func TestRepo_RecordSitePurge_ClearsTheWholeSiteIndex(t *testing.T) {
 	require.NoError(t, repo.UpsertDeploy(ctx, "learn", "d1", t0, 50, true, "active"))
 	require.NoError(t, repo.UpsertAlias(ctx, "learn", "production", "d1", t0))
 
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 
 	deploys, err := repo.DeploysForSite(ctx, "www")
 	require.NoError(t, err)
@@ -47,12 +47,12 @@ func TestRepo_RecordSitePurge_ClearsTheWholeSiteIndex(t *testing.T) {
 	assert.Len(t, otherTargets, 1)
 }
 
-func TestRepo_RecordSitePurge_IsIdempotent(t *testing.T) {
+func TestRepo_RecordSiteTombstone_IsIdempotent(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"),
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"),
 		"a retried purge must not fail on its own tombstone row")
 
 	stones, err := repo.TombstonesForSite(ctx, "www")
@@ -60,17 +60,17 @@ func TestRepo_RecordSitePurge_IsIdempotent(t *testing.T) {
 	assert.Len(t, stones, 1)
 }
 
-func TestRepo_RecordSitePurge_RestartsTheRecoveryWindow(t *testing.T) {
+func TestRepo_RecordSiteTombstone_RestartsTheRecoveryWindow(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 	first, err := repo.TombstonesForSite(ctx, "www")
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 
 	require.NoError(t, repo.UpsertDeploy(ctx, "www", "d1", time.Now().UTC(), 100, true, "active"))
-	require.NoError(t, repo.RecordSitePurge(ctx, "www"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "www"))
 
 	second, err := repo.TombstonesForSite(ctx, "www")
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestRepo_KnownSiteDirnames_UnionsEveryTableThatNamesASite(t *testing.T) {
 	require.NoError(t, repo.UpsertDeploy(ctx, "www.freecode.camp", "d1", t0, 1, true, "active"))
 	require.NoError(t, repo.UpsertDeploy(ctx, "www.freecode.camp", "d2", t0, 1, true, "active"))
 	require.NoError(t, repo.UpsertAlias(ctx, "learn.freecode.camp", "production", "d9", t0))
-	require.NoError(t, repo.RecordSitePurge(ctx, "gone.freecode.camp"))
+	require.NoError(t, repo.RecordSiteTombstone(ctx, "gone.freecode.camp"))
 
 	names, err = repo.KnownSiteDirnames(ctx)
 	require.NoError(t, err)

@@ -242,7 +242,7 @@ func (r *lockAssertingReleaser) ReleaseReservation(context.Context, sitekey.Slug
 
 type recordingTombstones struct{ sites []sitekey.Dirname }
 
-func (r *recordingTombstones) RecordSitePurge(_ context.Context, site sitekey.Dirname) error {
+func (r *recordingTombstones) RecordSiteTombstone(_ context.Context, site sitekey.Dirname) error {
 	r.sites = append(r.sites, site)
 	return nil
 }
@@ -392,7 +392,7 @@ func TestSweepExpiredReservations_RefusesARowThatStoppedBeingAnExpiredReservatio
 	assert.Empty(t, mover.moved,
 		"the row was released and the name re-registered between selection and the lock; a new owner's whole object tree must not move to _trash")
 	assert.Empty(t, tb.sites,
-		"a site purge tombstone for a live site makes tombstone-purge hard-delete a new owner's bytes seven days later")
+		"a site tombstone for a live site makes tombstone-purge hard-delete a new owner's bytes seven days later")
 }
 
 func TestSweepExpiredReservations_LiveRunWithoutAClaimCheckIsAWiringError(t *testing.T) {

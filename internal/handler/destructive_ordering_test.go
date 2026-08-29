@@ -30,9 +30,9 @@ type orderTombstones struct {
 	log *orderLog
 }
 
-func (o *orderTombstones) RecordSitePurge(ctx context.Context, site sitekey.Dirname) error {
+func (o *orderTombstones) RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error {
 	o.log.ops = append(o.log.ops, "row")
-	return o.fakeTombstones.RecordSitePurge(ctx, site)
+	return o.fakeTombstones.RecordSiteTombstone(ctx, site)
 }
 
 func (o *orderTombstones) RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error {
