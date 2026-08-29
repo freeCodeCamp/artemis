@@ -150,7 +150,7 @@ Both open choices are now decided. Neither changes the model above.
 
 **The grace clock is stored per-site, not derived from tombstone rows.** Deriving it looked cheaper
 — no new state — and it is wrong on three counts. A reserved name may carry no tombstone at all,
-because a purge that fails before `RecordSitePurge` still deregisters nothing and a purge that is
+because a purge that fails before `RecordSiteTombstone` still deregisters nothing and a purge that is
 never requested reserves the name anyway; the reservation and the byte-reclamation are different
 lifecycles with different clocks. `trashed_at` is also already contested: it is rewritten by every
 retry of an idempotent upsert (`internal/pg/repo.go:183-184`), so reading a reservation deadline

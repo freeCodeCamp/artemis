@@ -229,7 +229,7 @@ The validation message tracks the flip. `v1.6.0` reads `must be non-negative int
 
 **Release:** unreleased. Commit `ff32268`.
 
-**Old:** `DELETE /api/site/{slug}?purge=true` ran `RecordSitePurge`, then `MovePrefix`, then `Registry.Delete`. An absent registry row made the last call return `ErrNotFound`, and the handler answered `404` — *after* the destructive work had already landed. It also skipped the audit write, so the destruction left no `audit_log` row at all.
+**Old:** `DELETE /api/site/{slug}?purge=true` ran `RecordSiteTombstone` (then named `RecordSitePurge`), then `MovePrefix`, then `Registry.Delete`. An absent registry row made the last call return `ErrNotFound`, and the handler answered `404` — *after* the destructive work had already landed. It also skipped the audit write, so the destruction left no `audit_log` row at all.
 
 Proven on production 2026-08-21. A purge of `e2e-probe-20260513b` answered `404` while the alias rows went 2 to 0, the public URL went `200` to `404`, a tombstone landed, the deploy rows vanished, and `audit_log` recorded nothing.
 
@@ -253,7 +253,7 @@ The two alias objects move first, so the site stops serving within the 15-second
 
 After the bulk move the handler probes `HasPrefix(<dirname>/)`. A probe error answers `502 r2_verify_failed`; a prefix that still lists objects answers `502 r2_move_incomplete`. Neither reaches the `200` or the `Registry.Delete`.
 
-**Consequence:** a large site may now need several `DELETE ?purge=true` calls. The operation is idempotent — `RecordSitePurge` is `ON CONFLICT DO UPDATE` (`internal/pg/repo.go:183-184`) and `MovePrefix` re-lists the source each time — so repeating the request resumes it. Each retry resets `trashed_at`, restarting the recovery clock.
+**Consequence:** a large site may now need several `DELETE ?purge=true` calls. The operation is idempotent — `RecordSiteTombstone` is `ON CONFLICT DO UPDATE` (`internal/pg/repo.go:184-185`) and `MovePrefix` re-lists the source each time — so repeating the request resumes it. Each retry resets `trashed_at`, restarting the recovery clock.
 
 **Action:** treat `502 r2_move_incomplete` as "call again", not as an error to escalate. Do not infer completion from a single `200` on a large site; the `moved` count in the body is authoritative for that call only.
 
