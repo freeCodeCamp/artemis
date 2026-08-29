@@ -298,7 +298,7 @@ func TestSiteDeployDelete_FencedStaleSnapshotStillRefuses(t *testing.T) {
 		"undelete restores the alias pointing at this deploy; trashing it makes the restored site serve 404 and tombstone-purge hard-deletes the bytes")
 }
 
-func TestDeployUpload_FencedStaleSnapshotStillRefuses(t *testing.T) {
+func TestDeployUpload_ReservedSiteLeavesBytesNobodyServes(t *testing.T) {
 	store := newFakeR2()
 	h, jwt, reg := fencedHandlers(t, store)
 	deployID := "20260420-141522-abc1234"
@@ -317,10 +317,13 @@ func TestDeployUpload_FencedStaleSnapshotStillRefuses(t *testing.T) {
 		context.Background(),
 	)
 
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	assert.Equal(t, "site_reserved", fenceErrorBody(t, w)["code"])
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	assert.NotContains(t, store.objects, "www/deploys/"+deployID+"/index.html",
-		"bytes written into a reserved prefix are what release and reclaim then move mid-MovePrefix")
+	assert.Contains(t, store.objects, "www/deploys/"+deployID+"/index.html",
+		"tenet 8: an upload is not fenced per file. The bytes land and reconcile is what finds them")
+	assert.NotContains(t, store.objects, "www/deploys/"+deployID+"/"+gc.MarkerObjectName,
+		"no marker means reconcile reads this prefix as an orphan past grace, not as a finished deploy")
+	assert.Empty(t, store.aliases,
+		"tenet 8: nothing is served. Only finalize writes an alias, and finalize is fenced under the site lock")
 }

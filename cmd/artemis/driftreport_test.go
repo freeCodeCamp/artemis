@@ -268,3 +268,28 @@ func TestFinishReport_AReadFailureDoesNotGetBlamedOnTheSiteList(t *testing.T) {
 	assert.Contains(t, err.Error(), "could not be read")
 	assert.Contains(t, buf.String(), "read-failures=1")
 }
+
+type fakeStatefulRegistryReader struct{ sites []registry.Site }
+
+func (r fakeStatefulRegistryReader) Sites(context.Context) ([]registry.Site, error) {
+	return r.sites, nil
+}
+
+func TestDriftReportSites_ScansAReservedName(t *testing.T) {
+	t.Parallel()
+
+	tmpl, err := handler.NewDeployPrefixTemplate("<site>.freecode.camp/deploys/<ts>-<sha>/")
+	require.NoError(t, err)
+
+	sites, err := driftReportSites(context.Background(),
+		fakeDirnameReader{},
+		fakeStatefulRegistryReader{sites: []registry.Site{
+			{Slug: "www"},
+			{Slug: "held", State: registry.StateReserved},
+		}},
+		tmpl)
+	require.NoError(t, err)
+
+	assert.Contains(t, sites, sitekey.Dirname("held.freecode.camp"),
+		"an upload accepted while the name was reserved leaves bytes only this sweep finds; filtering reserved names here strands them for good")
+}
