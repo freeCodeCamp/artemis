@@ -297,3 +297,30 @@ func TestSiteDeployDelete_FencedStaleSnapshotStillRefuses(t *testing.T) {
 	assert.False(t, inTrash,
 		"undelete restores the alias pointing at this deploy; trashing it makes the restored site serve 404 and tombstone-purge hard-deletes the bytes")
 }
+
+func TestDeployUpload_FencedStaleSnapshotStillRefuses(t *testing.T) {
+	store := newFakeR2()
+	h, jwt, reg := fencedHandlers(t, store)
+	deployID := "20260420-141522-abc1234"
+	tok, _, err := jwt.Sign("alice", "www", deployID)
+	require.NoError(t, err)
+	reg.reserve("www", fenceDeadline)
+
+	require.NotEmpty(t, h.Sites.Snapshot().TeamsForSite("www"),
+		"the snapshot is deliberately left stale: its TTL fallback is 60s and it is read before the lock")
+
+	w := withChiRoute(http.MethodPut, "/api/deploy/{deployId}/upload",
+		"/api/deploy/"+deployID+"/upload?path=index.html",
+		[]byte("<h1>hi</h1>"),
+		map[string]string{"Authorization": "Bearer " + tok, "Content-Type": "text/html"},
+		RequestID(h.RequireDeployJWT(http.HandlerFunc(h.DeployUpload))).ServeHTTP,
+		context.Background(),
+	)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Equal(t, "site_reserved", fenceErrorBody(t, w)["code"])
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	assert.NotContains(t, store.objects, "www/deploys/"+deployID+"/index.html",
+		"bytes written into a reserved prefix are what release and reclaim then move mid-MovePrefix")
+}

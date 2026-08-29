@@ -125,6 +125,13 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	site, err := h.requireWritableSite(r.Context(), claims.Site)
+	if err != nil {
+		h.writeFenceError(w, r, "registry.get.upload",
+			"site was deleted; deploy cannot continue", site, err)
+		return
+	}
+
 	prefix := h.deployPrefix(claims.Site, deployID)
 	key := prefix + relPath
 
