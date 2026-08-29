@@ -5,7 +5,7 @@
 //	GET    /healthz                                       — no auth (liveness)
 //	GET    /readyz                                        — no auth (readiness; probes Valkey + R2)
 //	GET    /api/whoami                                    — GitHub bearer
-//	POST   /api/deploy/init                               — GitHub bearer
+//	POST   /api/deploy/init                               — GitHub bearer + site team
 //	PUT    /api/deploy/{deployId}/upload                  — Deploy-session JWT
 //	POST   /api/deploy/{deployId}/finalize                — Deploy-session JWT
 //	GET    /api/sites                                     — GitHub bearer
@@ -14,13 +14,13 @@
 //	DELETE /api/site/{slug}                               — GitHub bearer + registry-authz team
 //	POST   /api/site/{slug}/undelete                      — GitHub bearer + registry-authz team
 //	POST   /api/site/{slug}/release                       — GitHub bearer + repo-approve team
-//	GET    /api/site/{site}/deploys                       — GitHub bearer
-//	DELETE /api/site/{site}/deploys/{deployId}            — GitHub bearer
-//	POST   /api/site/{site}/deploys/{deployId}/restore    — GitHub bearer
-//	GET    /api/site/{site}/trash                         — GitHub bearer
-//	GET    /api/site/{site}/alias/{mode}                  — GitHub bearer
-//	POST   /api/site/{site}/promote                       — GitHub bearer
-//	POST   /api/site/{site}/rollback                      — GitHub bearer
+//	GET    /api/site/{site}/deploys                       — GitHub bearer + site team
+//	DELETE /api/site/{site}/deploys/{deployId}            — GitHub bearer + site team
+//	POST   /api/site/{site}/deploys/{deployId}/restore    — GitHub bearer + site team
+//	GET    /api/site/{site}/trash                         — GitHub bearer + site team
+//	GET    /api/site/{site}/alias/{mode}                  — GitHub bearer + site team
+//	POST   /api/site/{site}/promote                       — GitHub bearer + site team
+//	POST   /api/site/{site}/rollback                      — GitHub bearer + site team
 //	GET    /api/audit                                     — GitHub bearer + audit-read team (staff)
 //	POST   /api/repo                                      — GitHub bearer + repo-create team   (feature-gated)
 //	GET    /api/repos                                     — GitHub bearer                       (feature-gated)
@@ -29,6 +29,10 @@
 //	POST   /api/repo/{id}/approve                         — GitHub bearer + repo-approve team   (feature-gated)
 //	POST   /api/repo/{id}/reject                          — GitHub bearer + repo-approve team   (feature-gated)
 //	DELETE /api/repo/{id}                                 — GitHub bearer + repo-approve team   (feature-gated)
+//
+// "site team" means the caller must be on one of the site's own authorized
+// teams — a per-site check, not a fixed team. Enforced by requireSiteAuthz,
+// except on /api/deploy/init, which runs the same check inline.
 package server
 
 import (
