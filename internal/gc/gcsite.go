@@ -53,19 +53,21 @@ type SiteGC struct {
 	Now          func() time.Time
 	Audit        GCAuditor
 	Pending      PendingSource
+	PendingIDs   func(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, error)
 	Held         func(ctx context.Context, site sitekey.Dirname) (bool, error)
 }
 
 type GCResult struct {
-	Site           sitekey.Dirname
-	Planned        []string
-	Tombstoned     []string
-	SkippedAliased []string
-	BytesReclaimed int64
-	Aborted        bool
-	AbortReason    string
-	DryRun         bool
-	Held           bool
+	Site              sitekey.Dirname
+	Planned           []string
+	Tombstoned        []string
+	SkippedAliased    []string
+	SkippedNotPending []string
+	BytesReclaimed    int64
+	Aborted           bool
+	AbortReason       string
+	DryRun            bool
+	Held              bool
 }
 
 func (g *SiteGC) expiredPending(ctx context.Context, site sitekey.Dirname) ([]Deploy, error) {
@@ -75,20 +77,31 @@ func (g *SiteGC) expiredPending(ctx context.Context, site sitekey.Dirname) ([]De
 	return g.Pending.ExpiredPendingDeploys(ctx, site, g.Now().Add(-g.Policy.Grace))
 }
 
+func (g *SiteGC) heldNow(ctx context.Context, site sitekey.Dirname, res *GCResult) (bool, error) {
+	if g.Held == nil {
+		return false, nil
+	}
+	held, err := g.Held(ctx, site)
+	if err != nil {
+		return false, fmt.Errorf("gc %s: reservation state unreadable: %w", site, err)
+	}
+	if held {
+		res.Held = true
+		slog.InfoContext(ctx, "gc.site.held", "site", site,
+			"detail", "the name is inside its reservation grace; collecting now would trash the bytes undelete restores")
+	}
+	return held, nil
+}
+
 func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GCResult, error) {
 	res := GCResult{Site: site, DryRun: dryRun}
 
-	if g.Held != nil {
-		held, err := g.Held(ctx, site)
-		if err != nil {
-			return res, fmt.Errorf("gc %s: reservation state unreadable: %w", site, err)
-		}
-		if held {
-			res.Held = true
-			slog.InfoContext(ctx, "gc.site.held", "site", site,
-				"detail", "the name is inside its reservation grace; collecting now would trash the bytes undelete restores")
-			return res, nil
-		}
+	held, err := g.heldNow(ctx, site, &res)
+	if err != nil {
+		return res, err
+	}
+	if held {
+		return res, nil
 	}
 
 	deploys, err := g.Store.DeploysForSite(ctx, site)
@@ -113,6 +126,62 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 		Now:             g.Now(),
 	}, g.Policy, g.BlastCap)
 
+	return g.execute(ctx, site, plan, dryRun, res, g.revalidatePending(expired))
+}
+
+func (g *SiteGC) revalidatePending(expired []Deploy) func(context.Context, sitekey.Dirname, string) (bool, error) {
+	if g.PendingIDs == nil || len(expired) == 0 {
+		return nil
+	}
+	fromPending := make(map[string]struct{}, len(expired))
+	for _, d := range expired {
+		fromPending[d.ID] = struct{}{}
+	}
+	return func(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
+		if _, ok := fromPending[id]; !ok {
+			return true, nil
+		}
+		return g.stillPending(ctx, site, id)
+	}
+}
+
+func (g *SiteGC) SweepPending(ctx context.Context, site sitekey.Dirname, dryRun bool) (GCResult, error) {
+	res := GCResult{Site: site, DryRun: dryRun}
+
+	held, err := g.heldNow(ctx, site, &res)
+	if err != nil {
+		return res, err
+	}
+	if held {
+		return res, nil
+	}
+
+	expired, err := g.expiredPending(ctx, site)
+	if err != nil {
+		return res, fmt.Errorf("gc %s: load pending deploys: %w", site, err)
+	}
+	if len(expired) == 0 {
+		return res, nil
+	}
+
+	if g.PendingIDs == nil {
+		return res, fmt.Errorf("gc %s: pending sweep without a PendingIDs reader (wiring bug)", site)
+	}
+
+	return g.execute(ctx, site, PlanSite(site, RetainInput{Expired: expired, Now: g.Now()}, g.Policy, g.BlastCap), dryRun, res, g.stillPending)
+}
+
+func (g *SiteGC) stillPending(ctx context.Context, site sitekey.Dirname, id string) (bool, error) {
+	ids, err := g.PendingIDs(ctx, site)
+	if err != nil {
+		return false, err
+	}
+	_, ok := ids[id]
+	return ok, nil
+}
+
+func (g *SiteGC) execute(ctx context.Context, site sitekey.Dirname, plan Plan, dryRun bool, res GCResult,
+	revalidate func(context.Context, sitekey.Dirname, string) (bool, error)) (GCResult, error) {
 	for _, d := range plan.Delete {
 		res.Planned = append(res.Planned, d.ID)
 	}
@@ -150,6 +219,16 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 				if held {
 					res.Held = true
 					return errHeldUnderLock
+				}
+			}
+			if revalidate != nil {
+				ok, err := revalidate(opCtx, site, d.ID)
+				if err != nil {
+					return fmt.Errorf("re-read pending state: %w", err)
+				}
+				if !ok {
+					res.SkippedNotPending = append(res.SkippedNotPending, d.ID)
+					return nil
 				}
 			}
 			live, err := g.LiveAliases(opCtx, site)
@@ -203,6 +282,7 @@ func (g *SiteGC) Run(ctx context.Context, site sitekey.Dirname, dryRun bool) (GC
 		"planned", len(res.Planned),
 		"tombstoned", len(res.Tombstoned),
 		"skippedAliased", len(res.SkippedAliased),
+		"skippedNotPending", len(res.SkippedNotPending),
 		"bytes", res.BytesReclaimed)
 	return res, nil
 }

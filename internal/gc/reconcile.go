@@ -37,6 +37,7 @@ type Reconciler struct {
 	DeployPrefix func(site sitekey.Dirname, id string) string
 	TrashPrefix  func(site sitekey.Dirname, id string) string
 	LiveAliases  func(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, error)
+	PendingIDs   func(ctx context.Context, site sitekey.Dirname) (map[string]struct{}, error)
 	Now          func() time.Time
 	Audit        GCAuditor
 	PruneAudit   GCAuditor
@@ -378,6 +379,7 @@ const (
 	tombstoneSkipAliased
 	tombstoneSkipGone
 	tombstoneSkipFinalized
+	tombstoneSkipPending
 )
 
 func (v tombstoneVerdict) reason() string {
@@ -390,6 +392,8 @@ func (v tombstoneVerdict) reason() string {
 		return "bytes are already gone from R2; nothing left to tombstone"
 	case tombstoneSkipFinalized:
 		return "marker appeared after the snapshot; the deploy finalized, skip tombstone"
+	case tombstoneSkipPending:
+		return "deploy has a pending PG row; artemis recorded its start, so it is owned, not ownerless drift"
 	}
 	return "proceed"
 }
@@ -418,6 +422,15 @@ func (rc *Reconciler) recheckOrphan(ctx context.Context, site sitekey.Dirname, i
 	for _, d := range deploys {
 		if d.ID == id {
 			return tombstoneSkipIndexed, nil
+		}
+	}
+	if rc.PendingIDs != nil {
+		pending, err := rc.PendingIDs(ctx, site)
+		if err != nil {
+			return tombstoneProceed, fmt.Errorf("re-read pending deploys before tombstone %s: %w", id, err)
+		}
+		if _, isPending := pending[id]; isPending {
+			return tombstoneSkipPending, nil
 		}
 	}
 	aliased, err := rc.aliasedNow(ctx, site, id)

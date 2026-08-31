@@ -29,6 +29,15 @@ func pendingSiteGC(t *testing.T, store Store, mover Mover, pending PendingSource
 	t.Helper()
 	g := newSiteGC(store, mover)
 	g.Pending = pending
+	if fp, ok := pending.(*fakePending); ok {
+		g.PendingIDs = func(_ context.Context, site sitekey.Dirname) (map[string]struct{}, error) {
+			ids := map[string]struct{}{}
+			for _, d := range fp.rows[string(site)] {
+				ids[d.ID] = struct{}{}
+			}
+			return ids, nil
+		}
+	}
 	return g
 }
 

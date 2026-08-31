@@ -203,6 +203,7 @@ type gcWiring struct {
 	Reclaim         reclaimDeps
 	Outbox          outboxPurger
 	OutboxRetention time.Duration
+	PendingSites    pendingSiteSource
 }
 
 func expiredClaimChecker(src expiredClaimSource) func(context.Context, sitekey.Slug) (bool, error) {
@@ -247,6 +248,26 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 	if repo != nil {
 		outbox = repo
 	}
+	var pendingSites pendingSiteSource
+	var gcStore gc.Store
+	var gcLocker gc.Locker
+	var reconcileStore gc.ReconcileStore
+	var reaper gc.TombstoneReaper
+	var siteLocker gc.SiteLocker
+	var tombstoneRecorder siteTombstoneRecorder
+	var pending gc.PendingSource
+	var pendingIDs func(context.Context, sitekey.Dirname) (map[string]struct{}, error)
+	if repo != nil {
+		pendingSites = repo
+		pending = repo
+		pendingIDs = repo.PendingDeployIDs
+		gcStore = repo
+		gcLocker = repo
+		reconcileStore = repo
+		reaper = repo
+		siteLocker = repo
+		tombstoneRecorder = repo
+	}
 	resv, _ := writer.(reservationWiring)
 
 	return &gcWiring{
@@ -255,8 +276,8 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		NameReleaser: resv,
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
-			Tombstone: repo,
-			Locker:    repo,
+			Tombstone: tombstoneRecorder,
+			Locker:    gcLocker,
 			Claim:     expiredClaimChecker(resv),
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
@@ -264,11 +285,12 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		Outbox:          outbox,
 		OutboxRetention: time.Duration(cfg.Cleanup.OutboxRetentionDays) * 24 * time.Hour,
 		SiteGC: &gc.SiteGC{
-			Store:        repo,
+			Store:        gcStore,
 			Mover:        r2c,
-			Locker:       repo,
+			Locker:       gcLocker,
 			LiveAliases:  liveAliases,
-			Pending:      repo,
+			Pending:      pending,
+			PendingIDs:   pendingIDs,
 			Policy:       gcPolicy(cfg.Cleanup),
 			BlastCap:     cfg.Cleanup.BlastCap,
 			DeployPrefix: layout.deployPrefix,
@@ -279,27 +301,29 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		},
 		Reconciler: &gc.Reconciler{
 			Lister:       r2c,
-			Store:        repo,
+			Store:        reconcileStore,
 			Mover:        r2c,
-			Locker:       repo,
+			Locker:       gcLocker,
 			Grace:        cfg.Cleanup.Grace,
 			BlastCap:     cfg.Cleanup.BlastCap,
 			SitePrefix:   layout.sitePrefix,
 			DeployPrefix: layout.deployPrefix,
 			TrashPrefix:  layout.trashPrefix,
 			LiveAliases:  liveAliases,
+			PendingIDs:   pendingIDs,
 			Now:          time.Now,
 			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile", toSlug: toSlug},
 			PruneAudit:   gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile.prune", toSlug: toSlug},
 		},
+		PendingSites: pendingSites,
 		Purge: &gc.TombstonePurge{
-			Store:     repo,
+			Store:     reaper,
 			Deleter:   r2c,
 			Recovery:  time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 			BlastCap:  cfg.Cleanup.BlastCap,
 			Now:       time.Now,
-			Locker:    repo,
+			Locker:    siteLocker,
 			Audit:     gcPurgeAuditor{repo: repo, toSlug: toSlug},
 		},
 	}, nil
