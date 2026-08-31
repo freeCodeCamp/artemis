@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 28, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 31, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -50,6 +50,9 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | unreleased | API callers |
 | 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | unreleased | API callers |
 | 28 | `DELETE` refuses a registered site whose alias it cannot read | unreleased | API callers |
+| 29 | Every alias write purges the Cloudflare edge for the host it moved | unreleased | API callers and operators |
+| 30 | An abandoned pending deploy is swept nightly, not only on the next site event | unreleased | API callers and operators |
+| 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -636,3 +639,69 @@ unreadable probe still reports `aliasProbe: "unreadable"` with `orphan: false`, 
 still closed.
 
 **Action:** retry the delete. The site stays live and served until it succeeds.
+
+## 29 — every alias write purges the Cloudflare edge for the host it moved
+
+**Release:** unreleased. Commits `4aed372` (takedown) and this wave's alias-purge seam.
+
+**Old:** artemis wrote the R2 alias object and stopped there. The serve plane read the new object
+within its 15s lookup cache, but Cloudflare kept answering from its edge. artemis sets no
+`Cache-Control` on an uploaded object (`internal/r2/r2.go`), and Cloudflare injects a default
+Browser Cache TTL of 4 hours whenever the origin sends none. So a deploy, a promote, a rollback, an
+undelete and a delete all left the previous content serving for up to 4 hours. A takedown removed
+the alias and the site kept serving.
+
+**New:** each of the five alias mutations records the mode it wrote and purges that site's public
+host from the Cloudflare edge before answering. The purge is best-effort by design: the alias write
+already committed under the site lock, so failing the request would report a rollback that did not
+happen. A failure logs `edge.purge.failed` at ERROR and raises a Sentry event; the response is
+unchanged.
+
+Two limits stated plainly rather than discovered later. First, purging is **off** unless
+`CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` are both set; with either missing artemis logs
+`edge.purge.disabled` at boot and behaves exactly as the old version did. Second, a purge clears
+Cloudflare's edge and **not** a visitor's own browser cache — Cloudflare's documentation is explicit
+that already-fetched assets keep serving until their own TTL expires. Shortening that requires a
+`Cache-Control` header from the serve plane, which artemis does not own.
+
+**Action:** operators must provision both credentials; the token needs `Zone.Cache Purge` and
+nothing else. API callers need no change, but a deploy or promote is now visible at the edge
+immediately instead of after the CDN TTL.
+
+## 30 — an abandoned pending deploy is swept nightly, not only on the next site event
+
+**Release:** unreleased. Commit `c9a4e97`.
+
+**Old:** `gc-site` swept an expired pending deploy as ordinary retention, but it ran only on a
+`site.changed` event and had no schedule. A site whose last activity WAS the abandoned deploy
+emitted no further event, so its pending row sat indefinitely until a human ran `artemis reconcile`.
+Two such rows were observed live on 2026-08-29, at 5d5h and roughly 3d. Worse, `reconcile`
+classified the deploy as ownerless drift, because it reads `DeploysForSite`, which filters
+`state = 'active'` and therefore cannot see a pending row at all.
+
+**New:** an all-sites pending sweep joins the existing 03:00 UTC `tombstone-purge` cron, ahead of
+the reservation sweep, and visits at most 50 sites per night. `reconcile` now consults a pending
+reader and reports the new `tombstoneSkipPending` verdict instead of mistaking a live pending deploy
+for drift. No new workflow and no new cron.
+
+**Action:** none for API callers. Operators should expect an abandoned deploy to disappear within a
+night of passing `CLEANUP_GRACE` rather than persisting until someone notices it.
+
+## 31 — `drift-detect` alerts on one reclaimable deploy, not 25
+
+**Release:** unreleased.
+
+**Old:** the nightly `drift-detect` cron raised `drift.reclaimable` only once `reindex + tombstone`
+reached 25 (`cmd/artemis/driftalert.go`). That number was chosen while production carried a standing
+backlog of 36 reclaimable deploys, so the alert fired every night on the steady state and could not
+detect a new orphan. Below 25 the cron logged `drift.clean` and raised nothing.
+
+**New:** the threshold is 1. The 2026-08-29 reconcile drain took the backlog to zero, and the
+nightlies of 2026-08-29, 08-30 and 08-31 each reported `reclaimable=0`, so the floor is measured
+rather than assumed. Recent deploy churn is one to two per day and the busiest day on record is
+twelve, so a single reclaimable deploy is an anomaly. The verdict still carries `Fails: false`: it
+raises a Sentry event and logs `drift.detected` at ERROR, and it does not fail the cron run.
+
+**Action:** operators tuning on `drift.reclaimable` should expect the alert to be rare and
+actionable rather than nightly. Each event names the sites; run `artemis reconcile <site> --apply`
+for each.
