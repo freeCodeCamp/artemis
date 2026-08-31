@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 31, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 32, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -53,6 +53,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 29 | Every alias write purges the Cloudflare edge for the host it moved | unreleased | API callers and operators |
 | 30 | An abandoned pending deploy is swept nightly, not only on the next site event | unreleased | API callers and operators |
 | 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
+| 32 | An upload into a finalized deploy answers `409`, not `200` | unreleased | API callers and CI pipelines |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -705,3 +706,28 @@ raises a Sentry event and logs `drift.detected` at ERROR, and it does not fail t
 **Action:** operators tuning on `drift.reclaimable` should expect the alert to be rare and
 actionable rather than nightly. Each event names the sites; run `artemis reconcile <site> --apply`
 for each.
+
+## 32 — an upload into a finalized deploy answers `409`, not `200`
+
+**Release:** unreleased. Commits `575c6bb`, `0423bc2`.
+
+**Old:** `PUT /api/deploy/{deployId}/upload` wrote unconditionally. It checked the deploy-session JWT,
+that the deploy id matched the URL, and that the site was registered — never whether the deploy was
+already finalized. Since the permit stays valid for its full TTL (15 minutes by default), the same
+token could keep writing into the prefix the production alias now pointed at, and the serve plane
+served those bytes. This contradicted tenet 5, "Deploys are immutable", and `drift-detect` could not
+see it: reconcile classifies on presence, alias and age, never content.
+
+**New:** `finalize` records the deploy as finalized in Valkey with a TTL equal to the JWT TTL, and an
+upload into a finalized deploy answers `409 deploy_finalized` and writes nothing. Start a new deploy
+instead. If artemis cannot read that record, the upload answers `503 fence_unavailable` rather than
+writing — refusing is the safe side, because answering would reinstate exactly the overwrite this
+check exists to prevent.
+
+One limit stated plainly: an upload already in flight when `finalize` commits still lands. The upload
+path takes no site lock, so a request that passed the check microseconds earlier completes normally.
+The exposure is the duration of that one upload, not the remaining permit.
+
+**Action:** a client that uploads after calling `finalize` must call `POST /api/deploy/init` for a
+new deploy id. A CI pipeline that retries a whole deploy step should re-run `init`, not reuse the
+previous permit.
