@@ -24,16 +24,19 @@ func TestClassifyDrift_SaysNothingWhenTheStoresAgree(t *testing.T) {
 	assert.False(t, v.Fails)
 }
 
-func TestClassifyDrift_StaysSilentOnReclaimableDriftAlone(t *testing.T) {
+func TestClassifyDrift_AlertsOnReclaimableDriftButDoesNotFailTheRun(t *testing.T) {
 	res := healthySweep()
 	res.Reports[0].Tombstone = []string{"a", "b", "c"}
 	res.Reports[0].Reindex = []string{"d"}
 
 	v := classifyDrift(res)
 
-	assert.Empty(t, v.Op,
-		"orphan bytes and lost index rows waste storage but break nothing, and production carries "+
-			"37 of them today: alerting on the steady state trains the operator to ignore the alert")
+	assert.Equal(t, opDriftReclaimable, v.Op,
+		"this test formerly asserted silence, on the premise that production carried 37 reclaimable "+
+			"deploys as its steady state. The 2026-08-29 drain removed that backlog and the nightlies of "+
+			"08-29, 08-30 and 08-31 each reported reclaimable=0, so the premise is dead")
+	assert.False(t, v.Fails,
+		"orphan bytes waste storage and break nothing: alert a human, do not fail the cron")
 }
 
 func TestClassifyDrift_AlertsOnAnAliasPointingAtNothing(t *testing.T) {

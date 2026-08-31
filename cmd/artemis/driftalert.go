@@ -18,7 +18,7 @@ const (
 	opDriftReclaimable    = "drift.reclaimable"
 )
 
-const reclaimableAlertThreshold = 25
+const reclaimableAlertThreshold = 1
 
 type driftVerdict struct {
 	Op    string

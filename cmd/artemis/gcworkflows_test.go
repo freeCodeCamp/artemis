@@ -165,12 +165,13 @@ func TestAlertOnDrift_LogsACleanSweepBelowErrorLevel(t *testing.T) {
 	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
 	t.Cleanup(func() { slog.SetDefault(old) })
 
-	res := healthySweep()
-	res.Reports[0].Reindex = []string{"d1"}
-	require.NoError(t, alertOnDrift(context.Background(), res))
+	require.NoError(t, alertOnDrift(context.Background(), healthySweep()))
 
 	_, ok := rec.levelOf("drift.detected")
-	assert.False(t, ok, "reclaimable drift alone is not a dangerous-drift signal")
+	assert.False(t, ok, "a sweep that finds nothing must not page anyone")
+	lvl, ok := rec.levelOf("drift.clean")
+	require.True(t, ok, "the clean night still has to be visible, or a silent cron reads as a healthy one")
+	assert.Equal(t, slog.LevelInfo, lvl)
 }
 
 func TestWorkflowScope_RunID(t *testing.T) {

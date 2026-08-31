@@ -23,14 +23,6 @@ func sweepWithReclaimable(reindex, tombstone int) sweepResult {
 	}
 }
 
-func TestClassifyDrift_StaysQuietBelowTheReclaimableThreshold(t *testing.T) {
-	t.Parallel()
-
-	v := classifyDrift(sweepWithReclaimable(reclaimableAlertThreshold-1, 0))
-
-	assert.Empty(t, v.Op, "a handful of reclaimable items is the expected residue of an interrupted deploy")
-}
-
 func TestClassifyDrift_AlertsOnceReclaimableDriftAccumulates(t *testing.T) {
 	t.Parallel()
 
@@ -67,4 +59,24 @@ func TestEveryDriftVerdictOpIsCronShaped(t *testing.T) {
 				"beside the op constants so adding a sixth verdict here fails until the map learns it — "+
 				"the observability-side test could only restate the map against itself", op)
 	}
+}
+
+func TestClassifyDrift_AlertsOnASingleReclaimableDeploy(t *testing.T) {
+	t.Parallel()
+
+	v := classifyDrift(sweepWithReclaimable(1, 0))
+
+	require.Equal(t, opDriftReclaimable, v.Op,
+		"the 2026-08-29 drain measured the floor at zero and the nightlies of 08-29, 08-30 and 08-31 all "+
+			"reported reclaimable=0, so one reclaimable deploy is an anomaly, not residue; the old threshold "+
+			"of 25 was picked to sit under a standing backlog of 36 and could never detect a new orphan")
+	assert.False(t, v.Fails, "reclaimable drift is storage cost, not an outage: alert, do not fail the run")
+}
+
+func TestClassifyDrift_StaysQuietOnACleanSweep(t *testing.T) {
+	t.Parallel()
+
+	v := classifyDrift(sweepWithReclaimable(0, 0))
+
+	assert.Empty(t, v.Op, "a sweep that finds nothing reclaimable must raise nothing")
 }
