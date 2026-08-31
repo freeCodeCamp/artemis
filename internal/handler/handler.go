@@ -142,6 +142,7 @@ type Handlers struct {
 
 	PublicProductionURLFmt string // e.g. "https://<site>.freecode.camp"
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
+	EdgePurge              EdgePurger
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
 	NameReleaser           NameReleaser

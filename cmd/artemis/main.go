@@ -507,6 +507,7 @@ func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 
 		PublicProductionURLFmt: cfg.Aliases.ProductionURLFormat,
 		PublicPreviewURLFmt:    cfg.Aliases.PreviewURLFormat,
+		EdgePurge:              edgePurger(cfg),
 		DeployPrefix:           d.deployPrefix,
 		TrashPrefixBase:        cfg.Cleanup.TrashPrefix,
 		TrashRecovery:          time.Duration(cfg.Cleanup.RecoveryDays) * 24 * time.Hour,

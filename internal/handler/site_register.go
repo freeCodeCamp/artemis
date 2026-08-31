@@ -368,6 +368,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	}
 
 	var wrote, servedOrphan, orphanObserved, probeUnreadable bool
+	var deletedModes []string
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		var served bool
 		var headErr error
@@ -408,6 +409,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 				wrote = true
 				return nil
 			}
+			deletedModes = append(deletedModes, mode)
 		}
 		until := h.Now().UTC().Add(h.ReservationGrace)
 		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context()), observed); err != nil {
@@ -425,12 +427,21 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		return nil
 	})
 	if wrote {
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			slog.WarnContext(opCtx, "site.delete.flush_failed", "site", slug, "err", err)
+		}
+		h.purgeEdge(opCtx, slug, deletedModes)
 		return
 	}
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			slog.WarnContext(opCtx, "site.delete.flush_failed", "site", slug, "err", err)
+		}
+		h.purgeEdge(opCtx, slug, deletedModes)
 		return
 	}
+	h.purgeEdge(opCtx, slug, deletedModes)
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
 	if servedOrphan {
 		detail := map[string]any{"orphan": orphanObserved, "reserved": false}
