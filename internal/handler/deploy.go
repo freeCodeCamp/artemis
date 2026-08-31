@@ -125,6 +125,20 @@ func (h *Handlers) DeployUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.DeployFence != nil {
+		finalized, err := h.DeployFence.IsDeployFinalized(r.Context(), claims.Site, deployID)
+		if err != nil {
+			writeUpstreamError(w, r, http.StatusServiceUnavailable, "fence_unavailable",
+				"valkey.get.deploy_fence", err)
+			return
+		}
+		if finalized {
+			writeError(w, http.StatusConflict, "deploy_finalized",
+				"deploy is finalized and immutable; start a new deploy")
+			return
+		}
+	}
+
 	prefix := h.deployPrefix(claims.Site, deployID)
 	key := prefix + relPath
 
@@ -309,6 +323,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		h.flushThenPurge(commitCtx, w, claims.Site, &touched)
 		return
 	}
+	h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID)
 	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
 	h.logAction(r.Context(), "deploy.finalize", "success",
 		slog.String("mode", mode), slog.Int64("bytes", deployBytes))

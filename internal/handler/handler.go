@@ -68,6 +68,11 @@ type R2Store interface {
 	PrefixBytes(ctx context.Context, prefix string) (int64, error)
 }
 
+type DeployFenceStore interface {
+	MarkDeployFinalized(ctx context.Context, site sitekey.Slug, deployID string, ttl time.Duration) error
+	IsDeployFinalized(ctx context.Context, site sitekey.Slug, deployID string) (bool, error)
+}
+
 type TombstoneStore interface {
 	RecordTombstone(ctx context.Context, site sitekey.Dirname, id string, bytes int64) error
 	RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error
@@ -143,6 +148,8 @@ type Handlers struct {
 	PublicProductionURLFmt string // e.g. "https://<site>.freecode.camp"
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
 	EdgePurge              EdgePurger
+	DeployFence            DeployFenceStore
+	DeployJWTTTL           time.Duration
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
 	NameReleaser           NameReleaser
