@@ -325,6 +325,7 @@ type fakeR2 struct {
 
 	deleteAliasKeys []string
 	deleteAliasFail map[string]error
+	putAliasFail    map[string]error
 	putObjectKeys   []string
 	movePrefixSrcs  []string
 }
@@ -368,6 +369,9 @@ func (f *fakeR2) PutAlias(_ context.Context, aliasKey, deployID string) error {
 	defer f.mu.Unlock()
 	if f.putErr != nil {
 		return f.putErr
+	}
+	if err := f.putAliasFail[aliasKey]; err != nil {
+		return err
 	}
 	f.aliases[aliasKey] = deployID
 	return nil

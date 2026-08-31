@@ -86,6 +86,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 	prodKey := h.aliasKey(site, "production")
 
 	var deployID string
+	var touched aliasTouch
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func(commitCtx context.Context) error {
@@ -152,7 +153,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 
 		telemetry.Breadcrumb(commitCtx, "promote", "production alias write")
 		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.promote", func(ctx context.Context) error {
-			return h.R2.PutAlias(ctx, prodKey, deployID)
+			return h.putAliasTouched(ctx, &touched, site, "production", deployID)
 		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 			return errAliasWriteHandled
@@ -172,6 +173,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
+		h.flushThenPurge(commitCtx, w, site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(site), deployID)
@@ -181,6 +183,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		"url":      h.publicURL(site, "production"),
 		"deployId": deployID,
 	})
+	h.flushThenPurge(commitCtx, w, site, &touched)
 }
 
 // SiteRollbackRequest is the body of /api/site/{site}/rollback.
@@ -223,6 +226,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 	prodKey := h.aliasKey(site, "production")
 
+	var touched aliasTouch
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
 	lockErr := h.withSiteLock(commitCtx, h.DeployPrefix.SiteDirname(site), func(commitCtx context.Context) error {
@@ -277,7 +281,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 
 		telemetry.Breadcrumb(commitCtx, "rollback", "production alias write")
 		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.rollback", func(ctx context.Context) error {
-			return h.R2.PutAlias(ctx, prodKey, req.To)
+			return h.putAliasTouched(ctx, &touched, site, "production", req.To)
 		}); err != nil {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 			return errAliasWriteHandled
@@ -297,6 +301,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
+		h.flushThenPurge(commitCtx, w, site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(site), req.To)
@@ -306,6 +311,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		"url":      h.publicURL(site, "production"),
 		"deployId": req.To,
 	})
+	h.flushThenPurge(commitCtx, w, site, &touched)
 }
 
 // SiteDeploys implements GET /api/site/{site}/deploys — lists past
