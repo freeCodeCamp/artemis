@@ -66,3 +66,17 @@ func TestIsDeployFinalized_ReportsTheFaultRatherThanAnswerNo(t *testing.T) {
 		"answering false on a cache fault would silently reinstate the overwrite this marker prevents; "+
 			"the caller decides what to do, and it cannot decide if the fault is hidden")
 }
+
+func TestMarkDeployFinalized_RefusesANonPositiveTTL(t *testing.T) {
+	s, _, _ := newStore(t)
+
+	err := s.MarkDeployFinalized(context.Background(), "www", "d1", 0)
+
+	require.Error(t, err,
+		"go-redis treats a zero expiration as no expiration, so a miswired ttl would write a key that "+
+			"never dies and leaks for every deploy artemis ever finalizes")
+
+	finalized, readErr := s.IsDeployFinalized(context.Background(), "www", "d1")
+	require.NoError(t, readErr)
+	assert.False(t, finalized, "the refused write must leave nothing behind")
+}

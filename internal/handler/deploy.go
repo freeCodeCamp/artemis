@@ -303,6 +303,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled
 		}
+		h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID)
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
 				return retryIdempotentCommit(ctx, func(ctx context.Context) error {
@@ -323,7 +324,6 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		h.flushThenPurge(commitCtx, w, claims.Site, &touched)
 		return
 	}
-	h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID)
 	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
 	h.logAction(r.Context(), "deploy.finalize", "success",
 		slog.String("mode", mode), slog.Int64("bytes", deployBytes))

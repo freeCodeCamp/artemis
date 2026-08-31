@@ -136,3 +136,20 @@ func TestDeployFinalize_SucceedsAndReportsWhenTheFenceWriteFails(t *testing.T) {
 			"rollback that did not happen")
 	assert.Equal(t, 1, logs.countMessage("deploy.fence.failed"))
 }
+
+func TestDeployFinalize_FencesTheDeployEvenWhenTheIndexWriteFails(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, _ := newFinalizeHandlers(t, store)
+	h.Index = &fakeIndex{fail: true}
+	fence := newFakeDeployFence()
+	h.DeployFence = fence
+	h.DeployJWTTTL = 900 * time.Second
+
+	require.Equal(t, http.StatusBadGateway, callFinalize(t, h, jwt, deployID).Code)
+
+	assert.Contains(t, fence.marked, "www/"+deployID,
+		"the alias write already succeeded, so the deploy is live and the permit can still overwrite it; "+
+			"fencing only on the fully-successful path leaves the live-but-unindexed deploy open")
+}

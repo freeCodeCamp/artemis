@@ -12,24 +12,28 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 )
 
-func TestBuildHandlers_WiresTheDeployFenceWithTheJWTTTL(t *testing.T) {
+func TestBuildHandlers_WiresTheDeployFenceInTheProductionShape(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.JWT.TTL = 12 * time.Minute
 
-	h := buildHandlers(cfg, handlerDeps{registry: &valkey.Store{}})
+	h := buildHandlers(cfg, handlerDeps{
+		registry: fencelessWriter{},
+		health:   &valkey.Store{},
+	})
 
 	require.NotNil(t, h.DeployFence,
-		"unwired, a finalized deploy stays writable for the life of its permit and nothing refuses the "+
-			"overwrite; the valkey store is the only shared state the three replicas agree on")
+		"openRegistry returns pg.RegistryStore as the writer whenever DATABASE_URL is set, and only "+
+			"*valkey.Store carries the fence, so asserting off the registry leaves production unfenced "+
+			"while a test that feeds a valkey store as the registry passes")
 	assert.Equal(t, 12*time.Minute, h.DeployJWTTTL,
 		"the fence must outlive exactly the permit that could abuse it, no longer")
 }
 
 func TestBuildHandlers_LeavesTheDeployFenceNilWithoutAValkeyStore(t *testing.T) {
-	h := buildHandlers(&config.Config{}, handlerDeps{registry: stubRegistryWriter{}})
+	h := buildHandlers(&config.Config{}, handlerDeps{registry: fencelessWriter{}})
 
 	assert.Nil(t, h.DeployFence,
-		"a registry that cannot hold the fence must leave the field untyped-nil so the unwired warn fires")
+		"a deployment with no valkey store must leave the field untyped-nil so the unwired warn fires")
 }
 
-type stubRegistryWriter struct{ handler.RegistryWriter }
+type fencelessWriter struct{ handler.RegistryWriter }

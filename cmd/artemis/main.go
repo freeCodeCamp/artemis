@@ -532,7 +532,7 @@ func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 	if nr, ok := d.registry.(handler.NameReleaser); ok {
 		h.NameReleaser = nr
 	}
-	if df, ok := d.registry.(handler.DeployFenceStore); ok {
+	if df, ok := d.health.(handler.DeployFenceStore); ok {
 		h.DeployFence = df
 		h.DeployJWTTTL = cfg.JWT.TTL
 	}
