@@ -186,7 +186,7 @@ reclaim is durable. This repo owns the mechanism, and it is now built:
 - One run reclaims one site (`cmd/artemis/reclaim.go`). It claims the row by setting
   `sites.reclaim_started_at`; a claim younger than `reclaimClaimTTL` (23 h) makes every duplicate or
   late event a no-op, and a claim older than the TTL is a crashed run that the next night retries.
-  Under the site lock it re-checks the row, records the tombstone, moves the prefix, then deletes
+  Under the site lock it re-checks the row, records the tombstone, moves the dirname's bytes, then deletes
   the row and writes the `site.reclaim` audit row in one transaction
   (`RegistryStore.ReleaseReservationAudited`).
 - Two concurrency strategies bound the run: `input.slug` at 1, `input.action` at

@@ -453,7 +453,10 @@ The pre-ADR-0006 purge code is **deleted**, not merely unreachable. It had been 
 
 **A reserved name is freed by the nightly `tombstone-purge` run.** `sweepExpiredReservations` (`cmd/artemis/reservationsweep.go`) selects names whose `reserved_until` has passed and deletes their registry row, releasing the slug. It runs inside the existing 03:00 UTC workflow, honours `CLEANUP_DRY_RUN`, is capped at 50 names per run and logs `reservation.sweep.capped` when it hits that cap. So the grace period is a ceiling as well as a floor: a name is held for `SITE_RESERVATION_GRACE` and then released, with no operator action.
 
-**The same run reclaims the bytes.** Before freeing the name, the sweep records a tombstone for the site and moves everything remaining under `<dirname>/` into `_trash/<dirname>/`, which is what makes `tombstone-purge` responsible for collecting it. The order matters and is pinned: bytes first, name second. Freeing the name while its objects are still at the origin is exactly how a new owner inherits a stranger's site, and `TestSweepExpiredReservations_KeepsTheNameWhenTheReclaimFails` fails if the two are transposed.
+**The same run reclaims the bytes.** Before freeing the name, the sweep records a tombstone for the site and moves everything remaining under `<dirname>/` into `_trash/<dirname>/`, which is what makes `tombstone-purge` responsible for collecting it. The order matters and is pinned: bytes first, name second. Freeing the name while its objects are still at the origin is exactly how a new owner inherits a stranger's site, and `TestRunSiteReclaim_KeepsTheNameWhenTheMoveFails` fails if the two are transposed.
+
+Superseded from the release after `v1.10.2`: the nightly run only emits one `site.lifecycle` event per
+expired name, and a separate workflow reclaims each site. Entry 33 has the current behaviour.
 
 An origin-prefix move is only safe because the reservation has expired and the register path answers `409` for a reserved name, so the slug cannot have been re-claimed in the window. That guard is the precondition; do not lift this sweep out of the reservation flow and point it at arbitrary prefixes.
 
@@ -738,14 +741,14 @@ previous permit.
 **Release:** unreleased.
 
 **Old:** the nightly `tombstone-purge` cron reclaimed every expired reservation itself, in one
-process, up to 50 names per night. It moved the site prefix to `_trash/`, deleted the row, and wrote
+process, up to 50 names per night. It moved the site's bytes under `_trash/`, deleted the row, and wrote
 no audit row. A reclaim that died mid-move left no record beyond a Sentry event, and the next night
 started the same batch again from the top.
 
 **New:** `tombstone-purge` only emits one `site.lifecycle` event per expired reservation, still at
 most 50 per night, oldest expiry first, in one outbox transaction. A separate Hatchet workflow named
 `site.lifecycle` reclaims one site per run: it claims the row by setting `sites.reclaim_started_at`,
-takes the site lock, records the tombstone, moves the prefix to `_trash/`, and deletes the row and
+takes the site lock, records the tombstone, moves the dirname's bytes under `_trash/`, and deletes the row and
 writes the audit row in one transaction. Runs are serialised per slug and capped at four at a time.
 
 Observable to a caller:
