@@ -143,8 +143,10 @@ func TestRegistryStore_ReleaseReservationAuditedCommitsTheDeleteAndTheAuditToget
 	store = store.WithOnChange(func(slug sitekey.Slug) { changed = append(changed, slug) })
 	expireReservation(t, store, ctx, reservationSlug, reservationDirname)
 	changed = nil
-	event := AuditEvent{Actor: "system:gc", Action: "site.reclaim", Site: string(reservationDirname), Outcome: "success",
-		Detail: map[string]any{"moved": 3, "tombstoned": true}}
+	event := AuditEvent{
+		Actor: "system:gc", Action: "site.reclaim", Site: string(reservationDirname), Outcome: "success",
+		Detail: map[string]any{"moved": 3, "tombstoned": true},
+	}
 
 	require.NoError(t, store.ReleaseReservationAudited(ctx, reservationSlug, event))
 
