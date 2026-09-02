@@ -4,7 +4,7 @@ Audience: artemis contributors and maintainers. This reference covers the API co
 
 ## API
 
-[`docs/api/openapi.yaml`](api/openapi.yaml) is the authoritative surface (ADR-016, amendment 2026-09-03). `TestOpenAPI_NamesExactlyTheMountedRoutes` in `internal/server` keeps it level with the router, so a route change that does not update the document fails CI. The table below is a reading aid:
+[`docs/api/openapi.yaml`](api/openapi.yaml) is the authoritative surface (ADR-016, amendment 2026-09-03). `TestOpenAPI_NamesExactlyTheMountedRoutes` in `internal/server` keeps its routes and methods level with the router, so a route change that does not update the document fails CI. Request and response shapes are documented from the handlers and are not machine-checked; a shape change updates the document in the same commit. The table below is a reading aid:
 
 ```
 GET    /healthz                                               → { ok: true }
