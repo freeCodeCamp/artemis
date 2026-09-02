@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/freeCodeCamp/artemis/internal/r2"
@@ -89,19 +91,17 @@ func requireStack(t *testing.T) env {
 }
 
 func waitReady(e env) error {
-	deadline := time.Now().Add(60 * time.Second)
-	var last error
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err := settle.Until(context.Background(), 60*time.Second, func(ctx context.Context) (bool, error) {
 		status, _, err := e.raw(ctx, http.MethodGet, "/readyz", "", nil)
-		cancel()
-		if err == nil && status == http.StatusOK {
-			return nil
+		if err != nil {
+			return false, err
 		}
-		last = err
-		time.Sleep(2 * time.Second)
+		return status == http.StatusOK, nil
+	}, settle.Every(2*time.Second), settle.PerAttempt(5*time.Second))
+	if err != nil {
+		return fmt.Errorf("readyz not green: %w", err)
 	}
-	return fmt.Errorf("readyz not green within 60s: %v", last)
+	return nil
 }
 
 func (e env) r2Client(t *testing.T) *r2.Client {

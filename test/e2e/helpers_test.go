@@ -4,11 +4,14 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -35,19 +38,25 @@ func registerSite(t *testing.T, e env, slug string) {
 
 func waitSiteVisible(t *testing.T, e env, slug string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	err := settle.Until(t.Context(), 10*time.Second, func(ctx context.Context) (bool, error) {
+		status, raw, err := e.raw(ctx, http.MethodGet, "/api/whoami", e.GHToken, nil)
+		if err != nil {
+			return false, err
+		}
+		if status != http.StatusOK {
+			return false, nil
+		}
 		var resp struct {
 			AuthorizedSites []string `json:"authorizedSites"`
 		}
-		if e.call(t, http.MethodGet, "/api/whoami", e.GHToken, nil, &resp) == http.StatusOK {
-			if containsString(resp.AuthorizedSites, slug) {
-				return
-			}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return false, err
 		}
-		time.Sleep(250 * time.Millisecond)
+		return containsString(resp.AuthorizedSites, slug), nil
+	}, settle.Every(250*time.Millisecond), settle.PerAttempt(30*time.Second))
+	if err != nil {
+		t.Fatalf("site %q not visible in whoami authorizedSites (registry cache propagation): %v", slug, err)
 	}
-	t.Fatalf("site %q not visible in whoami authorizedSites within 10s (registry cache propagation)", slug)
 }
 
 func deploySHA() string {
@@ -82,31 +91,35 @@ func hasPrefix(t *testing.T, c *r2.Client, prefix string) bool {
 
 func waitTrash(t *testing.T, c *r2.Client, trashPrefix, deployPrefix string) {
 	t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		if hasPrefix(t, c, trashPrefix) && !hasPrefix(t, c, deployPrefix) {
-			return
+	err := settle.Until(t.Context(), 90*time.Second, func(ctx context.Context) (bool, error) {
+		inTrash, err := c.HasPrefix(ctx, trashPrefix)
+		if err != nil {
+			return false, err
 		}
-		time.Sleep(500 * time.Millisecond)
+		stillLive, err := c.HasPrefix(ctx, deployPrefix)
+		if err != nil {
+			return false, err
+		}
+		return inTrash && !stillLive, nil
+	}, settle.Every(500*time.Millisecond))
+	if err != nil {
+		t.Fatalf("gc-site did not tombstone-move %q -> %q: %v", deployPrefix, trashPrefix, err)
 	}
-	t.Fatalf("gc-site did not tombstone-move %q -> %q within 90s", deployPrefix, trashPrefix)
 }
 
 func waitOutbox(t *testing.T, pool *pgxpool.Pool, site string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	err := settle.Until(t.Context(), 10*time.Second, func(ctx context.Context) (bool, error) {
 		var n int
-		err := pool.QueryRow(ctx,
-			`SELECT count(*) FROM outbox WHERE topic='site.changed' AND payload->>'site'=$1`, site).Scan(&n)
-		if err == nil && n >= 1 {
-			return
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM outbox WHERE topic='site.changed' AND payload->>'site'=$1`, site).Scan(&n); err != nil {
+			return false, err
 		}
-		time.Sleep(250 * time.Millisecond)
+		return n >= 1, nil
+	}, settle.Every(250*time.Millisecond), settle.PerAttempt(5*time.Second))
+	if err != nil {
+		t.Fatalf("pg outbox: no site.changed row for site=%q: %v", site, err)
 	}
-	t.Fatalf("pg outbox: no site.changed row for site=%q within 10s", site)
 }
 
 func containsSlug(rows []struct {
