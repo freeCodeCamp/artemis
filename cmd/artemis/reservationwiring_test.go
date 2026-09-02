@@ -100,11 +100,17 @@ func TestWiring_ReservationsAndTombstonesArriveTogether(t *testing.T) {
 // registry writer that also expires and releases reservations.
 type reservingWriter struct{ registry.Writer }
 
-func (reservingWriter) ExpiredReservations(context.Context, time.Time, int) ([]registry.Reservation, error) {
+func (reservingWriter) ReclaimableReservations(context.Context, time.Time, time.Duration, int) ([]registry.Reservation, error) {
 	return nil, nil
 }
 
-func (reservingWriter) ReleaseReservation(context.Context, sitekey.Slug) error { return nil }
+func (reservingWriter) ClaimReclaim(context.Context, sitekey.Slug, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (reservingWriter) ReleaseReservationAudited(context.Context, sitekey.Slug, pg.AuditEvent) error {
+	return nil
+}
 
 func (reservingWriter) IsHeld(context.Context, sitekey.Slug) (bool, error) { return false, nil }
 
@@ -129,10 +135,12 @@ func TestNewGCWiring_WiresTheReservationSweepWhenTheWriterSupportsIt(t *testing.
 	require.NotNil(t, w)
 
 	require.NotNil(t, w.Reservations,
-		"a nil source makes sweepExpiredReservations return (0, nil) with no log and no Sentry event, "+
+		"a nil source makes scheduleReclaims return (0, nil) with no log and no Sentry event, "+
 			"so every reserved name is held forever and its bytes are never reclaimed")
-	require.NotNil(t, w.NameReleaser,
-		"a nil releaser has the same silent effect as a nil source")
+	require.NotNil(t, w.Lifecycle,
+		"a nil emitter has the same silent effect as a nil source")
+	require.NotNil(t, w.Reclaim.Claimer, "an unwired claimer makes every reclaim run a wiring error")
+	require.NotNil(t, w.Reclaim.Releaser, "an unwired releaser makes every reclaim run a wiring error")
 }
 
 func TestNewGCWiring_LeavesTheSweepUnwiredForAWriterWithoutReservations(t *testing.T) {
@@ -141,7 +149,8 @@ func TestNewGCWiring_LeavesTheSweepUnwiredForAWriterWithoutReservations(t *testi
 
 	assert.Nil(t, w.Reservations,
 		"a valkey-only deployment has no reservation table; the sweep must stay unwired rather than panic")
-	assert.Nil(t, w.NameReleaser)
+	assert.Nil(t, w.Reclaim.Claimer)
+	assert.Nil(t, w.Reclaim.Releaser)
 }
 
 // legacyOnlyWriter is a registry writer with no reservation support,

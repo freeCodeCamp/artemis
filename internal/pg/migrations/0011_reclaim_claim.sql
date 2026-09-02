@@ -1,0 +1,1 @@
+ALTER TABLE sites ADD COLUMN IF NOT EXISTS reclaim_started_at TIMESTAMPTZ;

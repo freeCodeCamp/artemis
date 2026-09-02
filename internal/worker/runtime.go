@@ -7,19 +7,30 @@ import (
 	"time"
 )
 
-const ConcurrencyKeySite = "site"
+const (
+	ConcurrencyKeySite   = "site"
+	ConcurrencyKeySlug   = "slug"
+	ConcurrencyKeyAction = "action"
+)
 
 const (
 	WorkflowGCSite         = "gc-site"
 	WorkflowTombstonePurge = "tombstone-purge"
 	WorkflowDriftDetect    = "drift-detect"
+	WorkflowSiteLifecycle  = "site.lifecycle"
 )
+
+type ConcurrencyLimit struct {
+	Key     string
+	MaxRuns int32
+}
 
 type Handler func(ctx context.Context, input map[string]any) error
 
 type WorkflowDef struct {
 	Name             string
 	ConcurrencyKey   string
+	ExtraConcurrency []ConcurrencyLimit
 	EventTriggers    []string
 	Cron             []string
 	ExecutionTimeout time.Duration

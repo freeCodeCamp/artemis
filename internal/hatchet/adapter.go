@@ -116,16 +116,30 @@ func (a *Adapter) Publish(ctx context.Context, topic string, payload []byte) err
 	return nil
 }
 
+func concurrencyLimit(key string, maxRuns int32) types.Concurrency {
+	strategy := types.GroupRoundRobin
+	return types.Concurrency{
+		Expression:    "input." + key,
+		MaxRuns:       &maxRuns,
+		LimitStrategy: &strategy,
+	}
+}
+
+func concurrencyStrategies(def worker.WorkflowDef) []types.Concurrency {
+	var out []types.Concurrency
+	if def.ConcurrencyKey != "" {
+		out = append(out, concurrencyLimit(def.ConcurrencyKey, 1))
+	}
+	for _, l := range def.ExtraConcurrency {
+		out = append(out, concurrencyLimit(l.Key, l.MaxRuns))
+	}
+	return out
+}
+
 func (a *Adapter) buildWorkflow(client *hsdk.Client, def worker.WorkflowDef) *hsdk.Workflow {
 	var opts []hsdk.WorkflowOption
-	if def.ConcurrencyKey != "" {
-		maxRuns := int32(1)
-		strategy := types.GroupRoundRobin
-		opts = append(opts, hsdk.WithWorkflowConcurrency(types.Concurrency{
-			Expression:    "input." + def.ConcurrencyKey,
-			MaxRuns:       &maxRuns,
-			LimitStrategy: &strategy,
-		}))
+	if strategies := concurrencyStrategies(def); len(strategies) > 0 {
+		opts = append(opts, hsdk.WithWorkflowConcurrency(strategies...))
 	}
 	if len(def.EventTriggers) > 0 {
 		opts = append(opts, hsdk.WithWorkflowEvents(def.EventTriggers...))

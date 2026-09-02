@@ -198,8 +198,8 @@ type gcWiring struct {
 	SiteGC          *gc.SiteGC
 	Reconciler      *gc.Reconciler
 	Purge           *gc.TombstonePurge
-	Reservations    expiredReservationSource
-	NameReleaser    reservationReleaser
+	Reservations    reclaimableSource
+	Lifecycle       lifecycleEmitter
 	Reclaim         reclaimDeps
 	Outbox          outboxPurger
 	OutboxRetention time.Duration
@@ -211,6 +211,20 @@ func expiredClaimChecker(src expiredClaimSource) func(context.Context, sitekey.S
 		return nil
 	}
 	return src.IsExpiredReservation
+}
+
+func reclaimClaimerOf(w reservationWiring) reclaimClaimer {
+	if w == nil {
+		return nil
+	}
+	return w
+}
+
+func auditedReleaserOf(w reservationWiring) auditedReleaser {
+	if w == nil {
+		return nil
+	}
+	return w
 }
 
 func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug, bool)) func(context.Context, sitekey.Dirname) (bool, error) {
@@ -245,8 +259,10 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 	}
 	toSlug := siteSlugFn(tmpl.SiteSlug)
 	var outbox outboxPurger
+	var lifecycle lifecycleEmitter
 	if repo != nil {
 		outbox = repo
+		lifecycle = repo
 	}
 	var pendingSites pendingSiteSource
 	var gcStore gc.Store
@@ -273,12 +289,14 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 	return &gcWiring{
 		Repo:         repo,
 		Reservations: resv,
-		NameReleaser: resv,
+		Lifecycle:    lifecycle,
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
 			Tombstone: tombstoneRecorder,
 			Locker:    gcLocker,
 			Claim:     expiredClaimChecker(resv),
+			Claimer:   reclaimClaimerOf(resv),
+			Releaser:  auditedReleaserOf(resv),
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 		},

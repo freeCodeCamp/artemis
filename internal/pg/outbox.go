@@ -13,7 +13,17 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-const TopicSiteChanged = "site.changed"
+const (
+	TopicSiteChanged       = "site.changed"
+	TopicSiteLifecycle     = "site.lifecycle"
+	LifecycleActionReclaim = "reclaim"
+)
+
+type SiteLifecycleEvent struct {
+	Action string `json:"action"`
+	Slug   string `json:"slug"`
+	Site   string `json:"site"`
+}
 
 type OutboxEvent struct {
 	ID      int64
@@ -39,6 +49,20 @@ func Enqueue(ctx context.Context, tx pgx.Tx, topic string, payload any) error {
 func (r *Repo) EnqueueSiteChanged(ctx context.Context, site sitekey.Dirname) error {
 	return r.WithTx(ctx, func(tx pgx.Tx) error {
 		return Enqueue(ctx, tx, TopicSiteChanged, map[string]string{"site": string(site)})
+	})
+}
+
+func (r *Repo) EnqueueSiteLifecycle(ctx context.Context, events []SiteLifecycleEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	return r.WithTx(ctx, func(tx pgx.Tx) error {
+		for _, e := range events {
+			if err := Enqueue(ctx, tx, TopicSiteLifecycle, e); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

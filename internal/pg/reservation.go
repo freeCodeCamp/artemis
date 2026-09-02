@@ -105,7 +105,8 @@ func (s *RegistryStore) Undelete(ctx context.Context, slug sitekey.Slug) (regist
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if err := scanReservation(tx.QueryRow(ctx,
 			`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
-			 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until > now() FOR UPDATE`,
+			 FROM sites WHERE slug = $1 AND state = $2 AND reserved_until > now()
+			   AND reclaim_started_at IS NULL FOR UPDATE`,
 			slug, registry.StateReserved), &res); err != nil {
 			return err
 		}
@@ -239,4 +240,59 @@ func aliasPointers(ctx context.Context, tx pgx.Tx, site sitekey.Dirname) (produc
 		return "", "", fmt.Errorf("pg reserve read aliases %s: %w", site, err)
 	}
 	return production, preview, nil
+}
+
+func (s *RegistryStore) ReclaimableReservations(ctx context.Context, before time.Time, claimTTL time.Duration, limit int) ([]registry.Reservation, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
+		 FROM sites WHERE state = $1 AND reserved_until < $2
+		   AND (reclaim_started_at IS NULL OR reclaim_started_at < $2 - $3::interval)
+		 ORDER BY reserved_until LIMIT $4`,
+		registry.StateReserved, before.UTC(), claimTTL.String(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("pg reclaimable reservations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []registry.Reservation
+	for rows.Next() {
+		var r registry.Reservation
+		if err := scanReservationRow(rows, &r); err != nil {
+			return nil, fmt.Errorf("pg reclaimable reservations scan: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *RegistryStore) ClaimReclaim(ctx context.Context, slug sitekey.Slug, claimTTL time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE sites SET reclaim_started_at = now(), updated_at = now()
+		 WHERE slug = $1 AND state = $2 AND reserved_until < now()
+		   AND (reclaim_started_at IS NULL OR reclaim_started_at < now() - $3::interval)`,
+		slug, registry.StateReserved, claimTTL.String())
+	if err != nil {
+		return false, fmt.Errorf("pg claim reclaim %s: %w", slug, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (s *RegistryStore) ReleaseReservationAudited(ctx context.Context, slug sitekey.Slug, e AuditEvent) error {
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`DELETE FROM sites WHERE slug = $1 AND state = $2 AND reserved_until < now()`,
+			slug, registry.StateReserved)
+		if err != nil {
+			return fmt.Errorf("pg release reservation audited %s: %w", slug, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return registry.ErrNotFound
+		}
+		return RecordAuditTx(ctx, tx, e)
+	})
+	if err != nil {
+		return err
+	}
+	s.changed(slug)
+	return nil
 }

@@ -56,3 +56,24 @@ func TestAdapterRegisterPreservesTriggerAndConcurrency(t *testing.T) {
 	require.Equal(t, []string{"some.topic"}, regd[0].EventTriggers,
 		"Registered() must return the EventTriggers it was given, not drop them")
 }
+
+func TestConcurrencyStrategies_OneSliceCarriesEveryLimit(t *testing.T) {
+	def := worker.WorkflowDef{
+		Name:             worker.WorkflowSiteLifecycle,
+		ConcurrencyKey:   worker.ConcurrencyKeySlug,
+		ExtraConcurrency: []worker.ConcurrencyLimit{{Key: worker.ConcurrencyKeyAction, MaxRuns: 4}},
+	}
+
+	got := concurrencyStrategies(def)
+
+	require.Len(t, got, 2,
+		"WithWorkflowConcurrency assigns its variadic slice (sdks/go/workflow.go:213); a second call would overwrite the first, so every strategy must travel in one slice")
+	require.Equal(t, "input.slug", got[0].Expression)
+	require.EqualValues(t, 1, *got[0].MaxRuns, "the primary key serialises per site")
+	require.Equal(t, "input.action", got[1].Expression)
+	require.EqualValues(t, 4, *got[1].MaxRuns)
+	for _, c := range got {
+		require.NotNil(t, c.LimitStrategy)
+	}
+	require.Empty(t, concurrencyStrategies(worker.WorkflowDef{Name: "plain"}), "a def without keys registers no strategy")
+}

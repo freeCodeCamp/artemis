@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type AuditEvent struct {
@@ -115,7 +118,19 @@ func (r *Repo) DeployActors(ctx context.Context, site string) (map[string]string
 	return out, nil
 }
 
+type auditExecutor interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 func (r *Repo) RecordAudit(ctx context.Context, e AuditEvent) error {
+	return insertAudit(ctx, r.pool, e)
+}
+
+func RecordAuditTx(ctx context.Context, tx pgx.Tx, e AuditEvent) error {
+	return insertAudit(ctx, tx, e)
+}
+
+func insertAudit(ctx context.Context, db auditExecutor, e AuditEvent) error {
 	detail := e.Detail
 	if detail == nil {
 		detail = map[string]any{}
@@ -124,7 +139,7 @@ func (r *Repo) RecordAudit(ctx context.Context, e AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("pg audit marshal %s: %w", e.Action, err)
 	}
-	if _, err := r.pool.Exec(ctx,
+	if _, err := db.Exec(ctx,
 		`INSERT INTO audit_log (actor, action, site, deploy_id, outcome, request_id, detail)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		e.Actor, e.Action, e.Site, e.DeployID, e.Outcome, e.RequestID, b); err != nil {

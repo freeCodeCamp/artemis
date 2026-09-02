@@ -174,3 +174,25 @@ the bytes", and only the second runs storage accounting and takedown compliance.
 neither. The destructive reading fails closed either way, and
 `universe-cli` omits the flag entirely today (`src/lib/proxy-client.ts:667-674`), so no shipped
 caller relies on it.
+
+## Closed 2026-09-02 — the reclaim is a `site.lifecycle` run
+
+ADR-022 owns the contract: one `site.lifecycle` workflow, concurrency key `slug`, and only the
+reclaim is durable. This repo owns the mechanism, and it is now built:
+
+- `tombstone-purge` no longer reclaims. It emits one `site.lifecycle` event per expired reservation,
+  oldest first, at most `reservationSweepLimit` per night, in one outbox transaction
+  (`cmd/artemis/reservationsweep.go`).
+- One run reclaims one site (`cmd/artemis/reclaim.go`). It claims the row by setting
+  `sites.reclaim_started_at`; a claim younger than `reclaimClaimTTL` (23 h) makes every duplicate or
+  late event a no-op, and a claim older than the TTL is a crashed run that the next night retries.
+  Under the site lock it re-checks the row, records the tombstone, moves the prefix, then deletes
+  the row and writes the `site.reclaim` audit row in one transaction
+  (`RegistryStore.ReleaseReservationAudited`).
+- Two concurrency strategies bound the run: `input.slug` at 1, `input.action` at
+  `reclaimParallelism` (4). Each run holds one advisory-lock connection, so the second strategy is
+  the connection cap.
+- `Undelete` refuses a claimed row. An expired reservation was already unrestorable; the predicate
+  keeps ADR-022's sentence true if the grace semantics ever change.
+- Retries stay 0. The nightly re-emit is the retry. The bound after N failures is N nights, which is
+  what the in-process loop offered.

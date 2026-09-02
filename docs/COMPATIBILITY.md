@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 32, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 33, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -54,6 +54,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 30 | An abandoned pending deploy is swept nightly, not only on the next site event | unreleased | API callers and operators |
 | 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
 | 32 | An upload into a finalized deploy answers `409`, not `200` | unreleased | API callers and CI pipelines |
+| 33 | An expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row | unreleased | Audit readers and operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -731,3 +732,36 @@ The exposure is the duration of that one upload, not the remaining permit.
 **Action:** a client that uploads after calling `finalize` must call `POST /api/deploy/init` for a
 new deploy id. A CI pipeline that retries a whole deploy step should re-run `init`, not reuse the
 previous permit.
+
+## 33 — an expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row
+
+**Release:** unreleased.
+
+**Old:** the nightly `tombstone-purge` cron reclaimed every expired reservation itself, in one
+process, up to 50 names per night. It moved the site prefix to `_trash/`, deleted the row, and wrote
+no audit row. A reclaim that died mid-move left no record beyond a Sentry event, and the next night
+started the same batch again from the top.
+
+**New:** `tombstone-purge` only emits one `site.lifecycle` event per expired reservation, still at
+most 50 per night, oldest expiry first, in one outbox transaction. A separate Hatchet workflow named
+`site.lifecycle` reclaims one site per run: it claims the row by setting `sites.reclaim_started_at`,
+takes the site lock, records the tombstone, moves the prefix to `_trash/`, and deletes the row and
+writes the audit row in one transaction. Runs are serialised per slug and capped at four at a time.
+
+Observable to a caller:
+
+- `GET /api/audit` shows one `site.reclaim` row per reclaimed site, `actor=system:gc`,
+  `outcome=success`, `detail.moved` and `detail.tombstoned`. A reclaim that fails writes no row and
+  is retried the next night. `site.release` rows are unchanged.
+- `sites.reclaim_started_at` is a new nullable column. A reserved row with the column set is a
+  reclaim in flight or one that failed inside the last 23 hours. `POST /api/site/{slug}/undelete`
+  refuses such a row with the same `404` it answers for an expired reservation.
+- A reclaim that fails is retried once per night, so a site that keeps failing is N nights late,
+  as before. A claim older than two days is a stuck reclaim; nothing alerts on it yet.
+
+**Action:** an audit consumer that keys on `site.release` alone now misses nightly reclaims; add
+`site.reclaim`. An operator who releases artemis around 03:00 UTC should release outside
+02:55–03:35 UTC, because a worker still on the previous release can take that night's cron run and
+reclaim without audit rows. Proof: `cmd/artemis/reservationsweep.go`, `cmd/artemis/reclaim.go`,
+`internal/pg/reservation.go` (`ClaimReclaim`, `ReleaseReservationAudited`),
+`internal/pg/migrations/0011_reclaim_claim.sql`.

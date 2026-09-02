@@ -7,24 +7,23 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/observability"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 const (
-	opReservationSweep        = "reservation.sweep"
-	reservationSweepLimit     = 50
-	reservationReclaimTimeout = 10 * time.Minute
+	opReservationSweep    = "reservation.sweep"
+	reservationSweepLimit = 50
 )
 
-type expiredReservationSource interface {
-	ExpiredReservations(ctx context.Context, before time.Time, limit int) ([]registry.Reservation, error)
+type reclaimableSource interface {
+	ReclaimableReservations(ctx context.Context, before time.Time, claimTTL time.Duration, limit int) ([]registry.Reservation, error)
 }
 
-type reservationReleaser interface {
-	ReleaseReservation(ctx context.Context, slug sitekey.Slug) error
+type lifecycleEmitter interface {
+	EnqueueSiteLifecycle(ctx context.Context, events []pg.SiteLifecycleEvent) error
 }
 
 type heldNameSource interface {
@@ -36,167 +35,76 @@ type expiredClaimSource interface {
 }
 
 type reservationWiring interface {
-	expiredReservationSource
-	reservationReleaser
+	reclaimableSource
 	heldNameSource
 	expiredClaimSource
+	reclaimClaimer
+	auditedReleaser
 }
 
-type siteReclaimer interface {
-	MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (int, error)
-}
-
-type siteTombstoneRecorder interface {
-	RecordSiteTombstone(ctx context.Context, site sitekey.Dirname) error
-}
-
-type reclaimDeps struct {
-	Mover     siteReclaimer
-	Tombstone siteTombstoneRecorder
-	Locker    gc.Locker
-	Claim     func(ctx context.Context, slug sitekey.Slug) (bool, error)
-	Dirname   func(sitekey.Slug) sitekey.Dirname
-	TrashBase string
-}
-
-func sweepExpiredReservations(ctx context.Context, src expiredReservationSource,
-	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool,
+func scheduleReclaims(ctx context.Context, src reclaimableSource, emit lifecycleEmitter,
+	dirname func(sitekey.Slug) sitekey.Dirname, now func() time.Time, dryRun bool,
 ) (int, error) {
-	if src == nil || rel == nil {
+	if src == nil || emit == nil {
 		slog.WarnContext(ctx, "reservation.sweep.unwired",
-			"source", src != nil, "releaser", rel != nil)
+			"source", src != nil, "emitter", emit != nil)
 		return 0, nil
 	}
-	expired, err := src.ExpiredReservations(ctx, now().UTC(), reservationSweepLimit)
+	rows, err := src.ReclaimableReservations(ctx, now().UTC(), reclaimClaimTTL, reservationSweepLimit)
 	if err != nil {
 		return 0, fmt.Errorf("reservation sweep: %w", err)
 	}
 	if dryRun {
-		for _, res := range expired {
-			slog.InfoContext(ctx, "reservation.sweep.would_release",
-				"slug", res.Slug, "reservedUntil", res.ReservedUntil)
+		for _, r := range rows {
+			slog.InfoContext(ctx, "reservation.sweep.would_emit",
+				"slug", r.Slug, "reservedUntil", r.ReservedUntil)
 		}
-		warnIfSweepCapped(ctx, len(expired))
+		warnIfSweepCapped(ctx, len(rows))
 		return 0, nil
 	}
-	if len(expired) == 0 {
+	if len(rows) == 0 {
 		return 0, nil
 	}
-	if deps.Locker == nil || deps.Dirname == nil || deps.Claim == nil {
-		return 0, errors.New("reservation sweep: live run without site Locker or claim check (wiring bug)")
+	if dirname == nil {
+		return 0, errors.New("reservation sweep: live run without a dirname template (wiring bug)")
 	}
-	sess, err := deps.Locker.NewLockSession(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("reservation sweep: lock session: %w", err)
+	events := make([]pg.SiteLifecycleEvent, 0, len(rows))
+	for _, r := range rows {
+		events = append(events, pg.SiteLifecycleEvent{
+			Action: pg.LifecycleActionReclaim,
+			Slug:   string(r.Slug),
+			Site:   string(dirname(r.Slug)),
+		})
 	}
-	defer sess.Close(ctx)
-
-	released := 0
-	var runErrs []error
-	for _, res := range expired {
-		freed, err := releaseOneReservation(ctx, sess, rel, deps, res)
-		if err != nil {
-			slog.WarnContext(ctx, "reservation.sweep.site_failed",
-				"slug", res.Slug, "err", err,
-				"detail", "the sweep continues; a first row that always fails would otherwise block every later row forever")
-			observability.CaptureBackground(opReservationSweep, err)
-			runErrs = append(runErrs, err)
-			continue
-		}
-		if !freed {
-			continue
-		}
-		released++
-		slog.InfoContext(ctx, "reservation.sweep.released",
-			"slug", res.Slug, "reservedUntil", res.ReservedUntil)
+	if err := emit.EnqueueSiteLifecycle(ctx, events); err != nil {
+		return 0, fmt.Errorf("reservation sweep emit: %w", err)
 	}
-	warnIfSweepCapped(ctx, len(expired))
-	return released, errors.Join(runErrs...)
+	for _, r := range rows {
+		slog.InfoContext(ctx, "reservation.sweep.emitted",
+			"slug", r.Slug, "reservedUntil", r.ReservedUntil)
+	}
+	warnIfSweepCapped(ctx, len(rows))
+	return len(rows), nil
 }
 
 func warnIfSweepCapped(ctx context.Context, n int) {
 	if n == reservationSweepLimit {
 		slog.WarnContext(ctx, "reservation.sweep.capped",
 			"limit", reservationSweepLimit,
-			"detail", "more names were expired than one run releases; the rest wait for tomorrow")
+			"detail", "more names were expired than one run emits; the rest wait for tomorrow")
 	}
 }
 
-func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reservationReleaser,
-	deps reclaimDeps, res registry.Reservation,
-) (bool, error) {
-	freed := false
-	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reservationReclaimTimeout)
-	defer cancel()
-	lockErr := sess.WithSiteLock(opCtx, deps.Dirname(res.Slug), func(opCtx context.Context) error {
-		expired, err := deps.Claim(opCtx, res.Slug)
-		if err != nil {
-			return fmt.Errorf("reservation sweep claim check %s: %w", res.Slug, err)
-		}
-		if !expired {
-			slog.WarnContext(opCtx, "reservation.sweep.claim_not_held",
-				"slug", res.Slug, "reservedUntil", res.ReservedUntil,
-				"detail", "under the lock the row is not an expired reservation; it is still inside its grace, or it was released and the name re-registered, and either way its bytes belong to someone else")
-			return nil
-		}
-		if err := reclaimSiteBytes(opCtx, deps, res.Slug); err != nil {
-			return err
-		}
-		if err := rel.ReleaseReservation(opCtx, res.Slug); err != nil {
-			if errors.Is(err, registry.ErrNotFound) {
-				slog.WarnContext(opCtx, "reservation.sweep.claim_lost",
-					"slug", res.Slug,
-					"detail", "the row stopped being an expired reservation after its bytes were trashed")
-				return nil
-			}
-			return fmt.Errorf("reservation sweep release %s: %w", res.Slug, err)
-		}
-		freed = true
-		return nil
-	})
-	if lockErr != nil {
-		return false, lockErr
-	}
-	return freed, nil
-}
-
-func runReservationSweep(ctx context.Context, src expiredReservationSource,
-	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool,
+func runReservationSweep(ctx context.Context, src reclaimableSource, emit lifecycleEmitter,
+	dirname func(sitekey.Slug) sitekey.Dirname, now func() time.Time, dryRun bool,
 ) error {
-	n, err := sweepExpiredReservations(ctx, src, rel, deps, now, dryRun)
+	n, err := scheduleReclaims(ctx, src, emit, dirname, now, dryRun)
 	if n > 0 {
-		slog.InfoContext(ctx, "reservation.sweep.done", "released", n)
+		slog.InfoContext(ctx, "reservation.sweep.done", "emitted", n)
 	}
 	if err != nil {
-		if n == 0 {
-			observability.CaptureBackground(opReservationSweep, err)
-		}
+		observability.CaptureBackground(opReservationSweep, err)
 		return err
-	}
-	return nil
-}
-
-func reclaimSiteBytes(ctx context.Context, deps reclaimDeps, slug sitekey.Slug) error {
-	if deps.Mover == nil || deps.Dirname == nil {
-		return nil
-	}
-	dirname := deps.Dirname(slug)
-	base := deps.TrashBase
-	if base == "" {
-		base = "_trash/"
-	}
-	if deps.Tombstone != nil {
-		if err := deps.Tombstone.RecordSiteTombstone(ctx, dirname); err != nil {
-			return fmt.Errorf("reservation sweep tombstone %s: %w", dirname, err)
-		}
-	}
-	src := string(dirname) + "/"
-	n, err := deps.Mover.MovePrefix(ctx, src, base+src)
-	if err != nil {
-		return fmt.Errorf("reservation sweep reclaim %s: %w", dirname, err)
-	}
-	if n > 0 {
-		slog.InfoContext(ctx, "reservation.sweep.reclaimed", "site", dirname, "moved", n)
 	}
 	return nil
 }

@@ -205,11 +205,25 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 				if err := runPendingSweep(ctx, gcw.PendingSites, gcw.SiteGC, dryRun); err != nil {
 					errs = append(errs, err)
 				}
-				if err := runReservationSweep(ctx, gcw.Reservations, gcw.NameReleaser, gcw.Reclaim, time.Now, dryRun); err != nil {
+				if err := runReservationSweep(ctx, gcw.Reservations, gcw.Lifecycle, gcw.Reclaim.Dirname, time.Now, dryRun); err != nil {
 					errs = append(errs, err)
 				}
 				return errors.Join(errs...)
 			})),
+		},
+		{
+			Name:             worker.WorkflowSiteLifecycle,
+			ConcurrencyKey:   worker.ConcurrencyKeySlug,
+			ExtraConcurrency: []worker.ConcurrencyLimit{{Key: worker.ConcurrencyKeyAction, MaxRuns: reclaimParallelism}},
+			EventTriggers:    []string{pg.TopicSiteLifecycle},
+			ExecutionTimeout: gcRunBudget,
+			Handler: observeWorkflow(worker.WorkflowSiteLifecycle, func(ctx context.Context, input map[string]any) error {
+				if err := runSiteReclaim(ctx, gcw.Reclaim, input, dryRun); err != nil {
+					observability.CaptureBackground(opSiteReclaim, err)
+					return err
+				}
+				return nil
+			}),
 		},
 	}
 }

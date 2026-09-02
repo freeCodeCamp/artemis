@@ -11,6 +11,7 @@ import (
 
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 	"github.com/freeCodeCamp/artemis/internal/worker"
@@ -223,14 +224,16 @@ func TestRunPendingSweep_DryRunMovesNothing(t *testing.T) {
 
 type orderingReservations struct{ order *[]string }
 
-func (o orderingReservations) ExpiredReservations(context.Context, time.Time, int) ([]registry.Reservation, error) {
+func (o orderingReservations) ReclaimableReservations(context.Context, time.Time, time.Duration, int) ([]registry.Reservation, error) {
 	*o.order = append(*o.order, "reservation")
 	return nil, nil
 }
 
-type orderingReleaser struct{}
+type orderingEmitter struct{}
 
-func (orderingReleaser) ReleaseReservation(context.Context, sitekey.Slug) error { return nil }
+func (orderingEmitter) EnqueueSiteLifecycle(context.Context, []pg.SiteLifecycleEvent) error {
+	return nil
+}
 
 type orderingSites struct{ order *[]string }
 
@@ -247,7 +250,7 @@ func TestTombstonePurgeHandler_SweepsPendingBeforeReleasingNames(t *testing.T) {
 		Reconciler:   &gc.Reconciler{},
 		PendingSites: orderingSites{order: &order},
 		Reservations: orderingReservations{order: &order},
-		NameReleaser: orderingReleaser{},
+		Lifecycle:    orderingEmitter{},
 	}
 
 	var purge worker.WorkflowDef

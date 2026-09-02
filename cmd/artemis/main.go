@@ -256,7 +256,8 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		}
 		slog.Info("gc.wired",
 			"siteGCReady", gcw.SiteGC != nil,
-			"reservationSweepReady", gcw.Reservations != nil && gcw.NameReleaser != nil,
+			"reservationSweepReady", gcw.Reservations != nil && gcw.Lifecycle != nil,
+			"siteReclaimReady", gcw.Reclaim.Claimer != nil && gcw.Reclaim.Releaser != nil,
 			"siteGCHeldReady", gcw.SiteGC != nil && gcw.SiteGC.Held != nil,
 			"blastCap", cfg.Cleanup.BlastCap,
 			"retentionDays", cfg.Cleanup.RetentionDays,

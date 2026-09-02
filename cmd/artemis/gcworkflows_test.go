@@ -192,7 +192,7 @@ func TestWorkflowScope_RunID(t *testing.T) {
 func TestGCWorkflowDefs(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	defs := gcWorkflowDefs(gcw, true, cleanSweep)
-	require.Len(t, defs, 3, "the per-site reconcile fan-out and its scheduler are gone")
+	require.Len(t, defs, 4, "drift-detect, gc-site, tombstone-purge and site.lifecycle; the per-site reconcile fan-out and its scheduler are gone")
 
 	byName := map[string]worker.WorkflowDef{}
 	for _, d := range defs {
@@ -360,5 +360,26 @@ func TestRegisterGCWorkflows(t *testing.T) {
 	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
 	rt := worker.NewRuntime(&captureEngine{})
 	require.NoError(t, registerGCWorkflows(rt, gcw, false, cleanSweep))
-	assert.Len(t, rt.Registered(), 3)
+	assert.Len(t, rt.Registered(), 4)
+}
+
+func TestSiteLifecycleDef(t *testing.T) {
+	gcw := &gcWiring{SiteGC: &gc.SiteGC{}, Purge: &gc.TombstonePurge{}, Reconciler: &gc.Reconciler{}}
+	var lifecycle *worker.WorkflowDef
+	for _, d := range gcWorkflowDefs(gcw, true, cleanSweep) {
+		if d.Name == worker.WorkflowSiteLifecycle {
+			d := d
+			lifecycle = &d
+		}
+	}
+	require.NotNil(t, lifecycle, "ADR-022: one site.lifecycle workflow carries the durable reclaim")
+
+	assert.Equal(t, "site.lifecycle", lifecycle.Name)
+	assert.Equal(t, []string{pg.TopicSiteLifecycle}, lifecycle.EventTriggers, "triggered by the outbox topic of the same name")
+	assert.Equal(t, worker.ConcurrencyKeySlug, lifecycle.ConcurrencyKey, "ADR-022: the concurrency key is the slug, MaxRuns 1")
+	require.Equal(t, []worker.ConcurrencyLimit{{Key: worker.ConcurrencyKeyAction, MaxRuns: reclaimParallelism}}, lifecycle.ExtraConcurrency,
+		"each run opens one advisory-lock connection; the action-wide limit bounds the connections a post-recovery pile-on can open")
+	assert.Empty(t, lifecycle.Cron, "an event-driven step, never a schedule")
+	assert.Equal(t, gcRunBudget, lifecycle.ExecutionTimeout)
+	require.NotNil(t, lifecycle.Handler)
 }
