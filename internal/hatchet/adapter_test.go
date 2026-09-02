@@ -68,12 +68,14 @@ func TestConcurrencyStrategies_OneSliceCarriesEveryLimit(t *testing.T) {
 
 	require.Len(t, got, 2,
 		"WithWorkflowConcurrency assigns its variadic slice (sdks/go/workflow.go:213); a second call would overwrite the first, so every strategy must travel in one slice")
-	require.Equal(t, "input.slug", got[0].Expression)
+	require.Equal(t, "input.slug", got[0].Expression,
+		"the engine evaluates the expression against the event payload; a different key fails every run before it starts")
 	require.EqualValues(t, 1, *got[0].MaxRuns, "the primary key serialises per site")
 	require.Equal(t, "input.action", got[1].Expression)
 	require.EqualValues(t, 4, *got[1].MaxRuns)
 	for _, c := range got {
-		require.NotNil(t, c.LimitStrategy)
+		require.NotNil(t, c.LimitStrategy,
+			"a nil strategy makes the engine pick its own default, not the queueing GROUP_ROUND_ROBIN the reclaim relies on")
 	}
 	require.Empty(t, concurrencyStrategies(worker.WorkflowDef{Name: "plain"}), "a def without keys registers no strategy")
 }
