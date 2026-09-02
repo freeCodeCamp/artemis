@@ -9,6 +9,7 @@ export GOTOOLCHAIN := env_var_or_default("GOTOOLCHAIN", `awk '/^go /{n=split($2,
 goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
 staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
+govulncheck := "golang.org/x/vuln/cmd/govulncheck@v1.7.0"
 bin := "bin/artemis"
 image := env_var_or_default("IMAGE", "ghcr.io/freecodecamp/artemis")
 version := `git rev-parse --short HEAD 2>/dev/null || echo dev`
@@ -27,17 +28,17 @@ build:
 
 # go test -race -cover (unit only — integration excluded by build tag)
 test:
-    {{go}} test -race -cover {{pkg}}
+    {{go}} test -race -shuffle=on -cover {{pkg}}
 
 # CI's coverage gate: statement coverage, every package, per .testcoverage.yml
 covgate:
-    {{go}} test -race -coverprofile=coverage.out {{pkg}}
+    {{go}} test -race -shuffle=on -coverprofile=coverage.out {{pkg}}
     {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml \
         --threshold-file=70 --threshold-package=80 --threshold-total=80
 
 # go test with coverage profile + html report (unit only)
 cover:
-    {{go}} test -race -coverprofile=coverage.out {{pkg}}
+    {{go}} test -race -shuffle=on -coverprofile=coverage.out {{pkg}}
     {{go}} tool cover -html=coverage.out -o coverage.html
     @echo "open coverage.html"
 
@@ -168,6 +169,10 @@ staticcheck:
     {{go}} run {{staticcheck}} -tags=load {{pkg}}
     {{go}} run {{staticcheck}} -tags=e2e {{pkg}}
     {{go}} run {{staticcheck}} -tags=integration {{pkg}}
+
+# Reachable-vulnerability scan; exits non-zero only on a call path we reach
+vulncheck:
+    {{go}} run {{govulncheck}} {{pkg}}
 
 # Boot artemis locally — expects .env (loaded by direnv)
 run:
