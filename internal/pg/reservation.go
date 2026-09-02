@@ -210,9 +210,9 @@ func (s *RegistryStore) ReclaimableReservations(ctx context.Context, before time
 	rows, err := s.pool.Query(ctx,
 		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
 		 FROM sites WHERE state = $1 AND reserved_until < $2
-		   AND (reclaim_started_at IS NULL OR reclaim_started_at < $2 - $3::interval)
+		   AND (reclaim_started_at IS NULL OR reclaim_started_at < $2 - make_interval(secs => $3))
 		 ORDER BY reserved_until LIMIT $4`,
-		registry.StateReserved, before.UTC(), claimTTL.String(), limit)
+		registry.StateReserved, before.UTC(), claimTTL.Seconds(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("pg reclaimable reservations: %w", err)
 	}
@@ -233,8 +233,8 @@ func (s *RegistryStore) ClaimReclaim(ctx context.Context, slug sitekey.Slug, cla
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE sites SET reclaim_started_at = now()
 		 WHERE slug = $1 AND state = $2 AND reserved_until < now()
-		   AND (reclaim_started_at IS NULL OR reclaim_started_at < now() - $3::interval)`,
-		slug, registry.StateReserved, claimTTL.String())
+		   AND (reclaim_started_at IS NULL OR reclaim_started_at < now() - make_interval(secs => $3))`,
+		slug, registry.StateReserved, claimTTL.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("pg claim reclaim %s: %w", slug, err)
 	}

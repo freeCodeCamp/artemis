@@ -73,7 +73,7 @@ func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error)
 	err := r.WithTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
 			`UPDATE outbox
-			 SET claimed_at = now(), claim_expires_at = now() + $2::interval
+			 SET claimed_at = now(), claim_expires_at = now() + make_interval(secs => $2)
 			 WHERE id IN (
 			   SELECT id FROM outbox
 			   WHERE published_at IS NULL
@@ -81,7 +81,7 @@ func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error)
 			   ORDER BY id
 			   LIMIT $1
 			   FOR UPDATE SKIP LOCKED)
-			 RETURNING id, topic, payload`, limit, claimTTL.String())
+			 RETURNING id, topic, payload`, limit, claimTTL.Seconds())
 		if err != nil {
 			return fmt.Errorf("pg outbox claim: %w", err)
 		}
