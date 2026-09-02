@@ -316,7 +316,7 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		sweepDrift := func(ctx context.Context) (sweepResult, error) {
 			store := pg.NewRegistryStore(pgDB)
 			return newReadOnlySweeper(gcw.Reconciler, r2Client, pgRepo,
-				store, deployPrefix, r2Client, sweepTails, ledgerUnlessDryRun(store, cfg.Cleanup.DryRun)).Run(ctx)
+				store, deployPrefix, r2Client, sweepTails, ledgerFor(store, cfg.Cleanup.DryRun)).Run(ctx)
 		}
 		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, sweepDrift); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)

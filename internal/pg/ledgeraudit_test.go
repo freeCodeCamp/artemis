@@ -53,6 +53,11 @@ func TestRegistryStore_LedgerAuditReportsStuckClaimsAndOverdueReservations(t *te
 	}
 	assert.Equal(t, []sitekey.Slug{"overdue"}, overdue,
 		"only an unclaimed reservation past the overdue horizon; a claimed one is stuck, not overdue; an active row is neither")
+
+	d, err = store.LedgerAudit(ctx, now, 30*time.Minute, 0)
+	require.NoError(t, err)
+	assert.Len(t, d.Stuck, 3, "no overdue window still audits the claims")
+	assert.Empty(t, d.Overdue, "no overdue window means no overdue audit")
 }
 
 func TestRegistryStore_LedgerAuditIsEmptyOnACleanLedger(t *testing.T) {

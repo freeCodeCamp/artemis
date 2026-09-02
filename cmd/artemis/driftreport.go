@@ -383,7 +383,7 @@ func runDriftReport(ctx context.Context, out io.Writer) error {
 	}
 
 	store := pg.NewRegistryStore(db)
-	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, store, tmpl, r2Client, tails, ledgerUnlessDryRun(store, cfg.Cleanup.DryRun)).Run(ctx)
+	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, store, tmpl, r2Client, tails, ledgerFor(store, cfg.Cleanup.DryRun)).Run(ctx)
 	if err != nil {
 		return err
 	}
@@ -394,7 +394,10 @@ func finishReport(out io.Writer, res sweepResult, cleanup config.CleanupConfig) 
 	reports := res.Reports
 	stats := res.Stats
 	stats.ReadFailures = countReadFailures(reports)
-	reportErr := errors.Join(writeDriftReport(out, reports, res.OrphanAliases, cleanup), orphanScanErr(out, res.OrphanErr))
+	reportErr := errors.Join(
+		writeDriftReport(out, reports, res.OrphanAliases, cleanup),
+		orphanScanErr(out, res.OrphanErr),
+		ledgerReport(out, res.Ledger, res.LedgerErr, time.Now().UTC()))
 	fmt.Fprintf(out, "SWEPT sites=%d r2-objects=%d pg-deploys=%d/%d read-failures=%d\n",
 		stats.Sites, stats.R2Objects, stats.PGDeploys, stats.IndexedTotal, stats.ReadFailures)
 	if err := stats.validate(); err != nil {
@@ -409,6 +412,17 @@ func orphanScanErr(out io.Writer, err error) error {
 	}
 	fmt.Fprintf(out, "ORPHAN-ALIAS SCAN FAILED: %s\n", err)
 	return fmt.Errorf("orphan-alias scan: %w", err)
+}
+
+func ledgerReport(out io.Writer, d pg.LedgerDrift, err error, now time.Time) error {
+	if err != nil {
+		fmt.Fprintf(out, "LEDGER AUDIT FAILED: %s\n", err)
+		return fmt.Errorf("ledger audit: %w", err)
+	}
+	if msg := ledgerMessage(d, now); msg != nil {
+		fmt.Fprintf(out, "LEDGER: %s\n", msg)
+	}
+	return nil
 }
 
 func writeDriftReport(out io.Writer, reports []siteDrift, orphans []orphanAlias, cleanup config.CleanupConfig) error {

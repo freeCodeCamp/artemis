@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,11 +71,22 @@ func TestDriftSweep_NoLedgerMeansNoPhase(t *testing.T) {
 }
 
 func TestLedgerOverdue_CoversAFullBatchAfterTheNextSweep(t *testing.T) {
-	assert.Greater(t, ledgerOverdue, 24*time.Hour+reclaimBatchWorstCase,
+	spacing := cronHour(t, cronDriftDetect) - cronHour(t, cronTombstonePurge)
+	require.Positive(t, spacing, "drift-detect must run after the sweep that emits the rows it audits")
+	assert.GreaterOrEqual(t, ledgerOverdue, 24*time.Hour+reclaimBatchWorstCase+spacing,
 		"a row emitted by tonight's sweep and still queued behind a full batch must not be reported as overdue")
 }
 
-func TestLedgerUnlessDryRun(t *testing.T) {
-	assert.Nil(t, ledgerUnlessDryRun(&pg.RegistryStore{}, true), "a dry run never writes a claim, so every expired row would read as overdue")
-	assert.NotNil(t, ledgerUnlessDryRun(&pg.RegistryStore{}, false))
+func cronHour(t *testing.T, expr string) time.Duration {
+	t.Helper()
+	h, err := strconv.Atoi(strings.Fields(expr)[1])
+	require.NoError(t, err, expr)
+	return time.Duration(h) * time.Hour
+}
+
+func TestLedgerFor_DryRunAuditsStuckClaimsOnly(t *testing.T) {
+	store := &pg.RegistryStore{}
+	assert.Equal(t, stuckOnlyLedger{store}, ledgerFor(store, true),
+		"a dry run never writes a claim, so every expired row would read as overdue; a claim written before the flag is still stuck")
+	assert.Same(t, store, ledgerFor(store, false))
 }

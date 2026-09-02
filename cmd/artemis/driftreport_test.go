@@ -14,6 +14,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/config"
 	"github.com/freeCodeCamp/artemis/internal/gc"
 	"github.com/freeCodeCamp/artemis/internal/handler"
+	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
@@ -292,4 +293,35 @@ func TestDriftReportSites_ScansAReservedName(t *testing.T) {
 
 	assert.Contains(t, sites, sitekey.Dirname("held.freecode.camp"),
 		"an upload accepted while the name was reserved leaves bytes only this sweep finds; filtering reserved names here strands them for good")
+}
+
+func TestFinishReport_PrintsTheLedger(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	err := finishReport(&buf,
+		sweepResult{
+			Ledger: pg.LedgerDrift{Stuck: []pg.StuckClaim{{Slug: "held", ClaimedAt: time.Now().Add(-2 * time.Hour)}}},
+			Stats:  sweepStats{Sites: 1, IndexedTotal: 1, PGDeploys: 1, R2Objects: 1},
+		},
+		config.CleanupConfig{})
+
+	require.NoError(t, err, "a ledger finding is drift to read, not a failed report")
+	assert.Contains(t, buf.String(), "LEDGER: 1 reserved names hold a reclaim claim")
+	assert.Contains(t, buf.String(), "held (claimed 2h0m0s ago)")
+}
+
+func TestFinishReport_ALedgerFailureIsAnError(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	err := finishReport(&buf,
+		sweepResult{
+			LedgerErr: context.DeadlineExceeded,
+			Stats:     sweepStats{Sites: 1, IndexedTotal: 1, PGDeploys: 1, R2Objects: 1},
+		},
+		config.CleanupConfig{})
+
+	require.ErrorContains(t, err, "ledger audit: context deadline exceeded")
+	assert.Contains(t, buf.String(), "LEDGER AUDIT FAILED: context deadline exceeded")
 }

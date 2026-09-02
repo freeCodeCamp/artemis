@@ -50,6 +50,9 @@ func (s *RegistryStore) LedgerAudit(ctx context.Context, now time.Time, runBudge
 		return d, fmt.Errorf("pg ledger audit stuck rows: %w", err)
 	}
 	rows.Close()
+	if overdue <= 0 {
+		return d, nil
+	}
 
 	rows, err = s.pool.Query(ctx,
 		`SELECT slug, reserved_until FROM sites

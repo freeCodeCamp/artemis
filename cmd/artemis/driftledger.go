@@ -22,9 +22,15 @@ type ledgerAuditor interface {
 	LedgerAudit(ctx context.Context, now time.Time, runBudget, overdue time.Duration) (pg.LedgerDrift, error)
 }
 
-func ledgerUnlessDryRun(store *pg.RegistryStore, dryRun bool) ledgerAuditor {
+type stuckOnlyLedger struct{ store *pg.RegistryStore }
+
+func (l stuckOnlyLedger) LedgerAudit(ctx context.Context, now time.Time, runBudget, _ time.Duration) (pg.LedgerDrift, error) {
+	return l.store.LedgerAudit(ctx, now, runBudget, 0)
+}
+
+func ledgerFor(store *pg.RegistryStore, dryRun bool) ledgerAuditor {
 	if dryRun {
-		return nil
+		return stuckOnlyLedger{store}
 	}
 	return store
 }
