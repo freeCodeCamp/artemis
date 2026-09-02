@@ -111,7 +111,7 @@ func runReconcileCLI(ctx context.Context, out io.Writer, args []string) error {
 	}
 
 	if !apply {
-		res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl, nil, nil).
+		res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl, nil, nil, nil).
 			runSite(ctx, resolved)
 		if err != nil {
 			return err

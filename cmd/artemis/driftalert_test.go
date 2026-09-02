@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -243,4 +247,74 @@ func TestClassifyDrift_StillNamesAnOrphanFoundBeforeTheScanFailed(t *testing.T) 
 		"the payload must still say the scan was incomplete, or the operator reads one orphan as the whole set")
 	assert.True(t, v.Fails,
 		"the scan did not finish, so the run goes red even though the orphan is what pages")
+}
+
+func captureOps(t *testing.T) (*[]string, *[]error) {
+	t.Helper()
+	var ops []string
+	var errs []error
+	restore := captureBackground
+	captureBackground = func(op string, err error) { ops = append(ops, op); errs = append(errs, err) }
+	t.Cleanup(func() { captureBackground = restore })
+	return &ops, &errs
+}
+
+func ledgerWithBoth() pg.LedgerDrift {
+	return pg.LedgerDrift{
+		Stuck:   []pg.StuckClaim{{Slug: "held", ClaimedAt: time.Now().Add(-2 * time.Hour)}},
+		Overdue: []pg.OverdueReservation{{Slug: "waiting", ReservedUntil: time.Now().Add(-40 * time.Hour)}},
+	}
+}
+
+func TestAlertOnDrift_EmitsTheLedgerEventBesideTheRankedVerdict(t *testing.T) {
+	ops, errs := captureOps(t)
+	res := healthySweep()
+	res.Reports[0].Tombstone = []string{"a"}
+	res.Ledger = ledgerWithBoth()
+
+	require.NoError(t, alertOnDrift(context.Background(), res))
+
+	require.Equal(t, []string{opDriftReclaimable, opDriftLedger}, *ops,
+		"the ledger audit is additive: it must never suppress, or be suppressed by, the ranked verdict")
+	msg := (*errs)[1].Error()
+	assert.Contains(t, msg, "held")
+	assert.Contains(t, msg, "waiting")
+	assert.Contains(t, msg, "second night")
+	assert.Contains(t, msg, "sweep cap")
+}
+
+func TestAlertOnDrift_LedgerEventFiresOnACleanSweepToo(t *testing.T) {
+	ops, _ := captureOps(t)
+	res := healthySweep()
+	res.Ledger = ledgerWithBoth()
+
+	require.NoError(t, alertOnDrift(context.Background(), res))
+
+	assert.Equal(t, []string{opDriftLedger}, *ops)
+}
+
+func TestAlertOnDrift_SilentWhenTheLedgerIsClean(t *testing.T) {
+	ops, _ := captureOps(t)
+	require.NoError(t, alertOnDrift(context.Background(), healthySweep()))
+	assert.Empty(t, *ops)
+}
+
+func TestLedgerMessage_CapsTheList(t *testing.T) {
+	var d pg.LedgerDrift
+	for i := range 12 {
+		d.Stuck = append(d.Stuck, pg.StuckClaim{Slug: sitekey.Slug(fmt.Sprintf("s%02d", i)), ClaimedAt: time.Now().Add(-time.Hour)})
+	}
+	msg := ledgerMessage(d, time.Now()).Error()
+	assert.Contains(t, msg, "s09")
+	assert.NotContains(t, msg, "s11")
+	assert.Contains(t, msg, "and 2 more")
+}
+
+func TestClassifyDrift_ALedgerReadFailureIsUnknownDrift(t *testing.T) {
+	res := healthySweep()
+	res.LedgerErr = errors.New("pg down")
+	v := classifyDrift(res)
+	assert.Equal(t, opDriftUnreadable, v.Op)
+	assert.True(t, v.Fails)
+	assert.ErrorContains(t, v.Err, "pg down")
 }

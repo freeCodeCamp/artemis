@@ -389,6 +389,7 @@ var cronShapedOps = map[string]bool{
 	"tombstone.purge":       true,
 	"reservation.sweep":     true,
 	"site.reclaim":          true,
+	"drift.ledger":          true,
 }
 
 // CaptureBackground reports an error raised outside any HTTP request

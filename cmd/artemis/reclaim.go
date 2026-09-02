@@ -20,6 +20,8 @@ const (
 	reclaimParallelism = 4
 )
 
+var reclaimBatchWorstCase = time.Duration(reservationSweepLimit/reclaimParallelism+1) * gcRunBudget
+
 type siteReclaimer interface {
 	MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (int, error)
 }

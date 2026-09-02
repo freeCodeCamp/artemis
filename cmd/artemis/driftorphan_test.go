@@ -73,7 +73,7 @@ func newOrphanSweeper(t *testing.T, bucket bucketAliasReader, repo driftSweepRep
 		},
 		Now: time.Now,
 	}
-	return newReadOnlySweeper(base, staticLister{}, repo, reg, tmpl, bucket, []string{"production", "preview"})
+	return newReadOnlySweeper(base, staticLister{}, repo, reg, tmpl, bucket, []string{"production", "preview"}, nil)
 }
 
 func TestDriftSweep_OrphanAliasReportsAnUnregisteredAliasKey(t *testing.T) {

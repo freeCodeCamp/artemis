@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/pg"
 )
 
 const (
@@ -27,7 +30,7 @@ type driftVerdict struct {
 }
 
 func classifyDrift(res sweepResult) driftVerdict {
-	unread := errors.Join(unreadableErr(unreadableSites(res.Reports), res.Stats.Sites), res.OrphanErr)
+	unread := errors.Join(unreadableErr(unreadableSites(res.Reports), res.Stats.Sites), res.OrphanErr, res.LedgerErr)
 	if err := res.Stats.validate(); err != nil {
 		return driftVerdict{Op: opDriftSelfCheck, Err: errors.Join(err, unread), Fails: true}
 	}
@@ -131,6 +134,7 @@ func aliasedMissingSites(reports []siteDrift) ([]string, int) {
 
 func alertOnDrift(ctx context.Context, res sweepResult) error {
 	reindex, tombstone, prune, aliased := res.totals()
+	defer alertOnLedger(ctx, res.Ledger)
 	v := classifyDrift(res)
 	if v.Op == "" {
 		slog.InfoContext(ctx, "drift.clean",
@@ -156,4 +160,13 @@ func alertOnDrift(ctx context.Context, res sweepResult) error {
 		return v.Err
 	}
 	return nil
+}
+
+func alertOnLedger(ctx context.Context, d pg.LedgerDrift) {
+	err := ledgerMessage(d, time.Now())
+	if err == nil {
+		return
+	}
+	slog.ErrorContext(ctx, "drift.ledger", "stuck", len(d.Stuck), "overdue", len(d.Overdue), "err", err)
+	captureBackground(opDriftLedger, err)
 }

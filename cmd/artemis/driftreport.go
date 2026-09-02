@@ -152,6 +152,8 @@ type sweepResult struct {
 	Reports       []siteDrift
 	OrphanAliases []orphanAlias
 	OrphanErr     error
+	Ledger        pg.LedgerDrift
+	LedgerErr     error
 	Stats         sweepStats
 }
 
@@ -174,11 +176,13 @@ type driftSweep struct {
 	tmpl       handler.DeployPrefixTemplate
 	bucket     bucketAliasReader
 	aliasTails []string
+	ledger     ledgerAuditor
 }
 
 func newReadOnlySweeper(base *gc.Reconciler, lister gc.ReconcileLister, repo driftSweepRepo,
 	reg registrySiteReader, tmpl handler.DeployPrefixTemplate,
 	bucket bucketAliasReader, aliasTails []string,
+	ledger ledgerAuditor,
 ) *driftSweep {
 	counting := &countingLister{inner: lister}
 	store := &countingStore{ReconcileStore: readOnlyStore{inner: repo}}
@@ -193,7 +197,7 @@ func newReadOnlySweeper(base *gc.Reconciler, lister gc.ReconcileLister, repo dri
 
 	return &driftSweep{
 		rc: &rc, lister: counting, store: store, repo: repo, reg: reg, tmpl: tmpl,
-		bucket: bucket, aliasTails: aliasTails,
+		bucket: bucket, aliasTails: aliasTails, ledger: ledger,
 	}
 }
 
@@ -288,6 +292,11 @@ func (s *driftSweep) sweep(ctx context.Context, sites []sitekey.Dirname, scoped 
 	if !scoped {
 		orphans, orphanErr = s.orphanAliases(ctx)
 	}
+	var ledger pg.LedgerDrift
+	var ledgerErr error
+	if !scoped && s.ledger != nil {
+		ledger, ledgerErr = s.ledger.LedgerAudit(ctx, time.Now().UTC(), gcRunBudget, ledgerOverdue)
+	}
 
 	stats := sweepStats{
 		Scoped:       scoped,
@@ -300,7 +309,7 @@ func (s *driftSweep) sweep(ctx context.Context, sites []sitekey.Dirname, scoped 
 		stats.Prunes += len(r.Prune)
 	}
 	stats.ReadFailures = countReadFailures(reports)
-	return sweepResult{Reports: reports, OrphanAliases: orphans, OrphanErr: orphanErr, Stats: stats}, nil
+	return sweepResult{Reports: reports, OrphanAliases: orphans, OrphanErr: orphanErr, Ledger: ledger, LedgerErr: ledgerErr, Stats: stats}, nil
 }
 
 func countReadFailures(reports []siteDrift) int {
@@ -373,7 +382,8 @@ func runDriftReport(ctx context.Context, out io.Writer) error {
 		return fmt.Errorf("alias key formats: %w", err)
 	}
 
-	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, pg.NewRegistryStore(db), tmpl, r2Client, tails).Run(ctx)
+	store := pg.NewRegistryStore(db)
+	res, err := newReadOnlySweeper(wiring.Reconciler, r2Client, repo, store, tmpl, r2Client, tails, ledgerUnlessDryRun(store, cfg.Cleanup.DryRun)).Run(ctx)
 	if err != nil {
 		return err
 	}

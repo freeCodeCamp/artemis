@@ -53,7 +53,7 @@ func TestClassifyDrift_AliasedMissingOutranksTheReclaimableThreshold(t *testing.
 func TestEveryDriftVerdictOpIsCronShaped(t *testing.T) {
 	t.Parallel()
 
-	for _, op := range []string{opDriftSweep, opDriftSelfCheck, opDriftUnreadable, opDriftAliasedMissing, opDriftReclaimable} {
+	for _, op := range []string{opDriftSweep, opDriftSelfCheck, opDriftUnreadable, opDriftAliasedMissing, opDriftReclaimable, opDriftOrphanAliases, opDriftLedger} {
 		assert.True(t, observability.IsCronShaped(op),
 			"op %s bypasses the transient-rate tracker only if cronShapedOps lists it; this test lives "+
 				"beside the op constants so adding a sixth verdict here fails until the map learns it — "+

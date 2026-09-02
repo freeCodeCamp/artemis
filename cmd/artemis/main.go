@@ -314,8 +314,9 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 			return fmt.Errorf("drift alias formats: %w", tailErr)
 		}
 		sweepDrift := func(ctx context.Context) (sweepResult, error) {
+			store := pg.NewRegistryStore(pgDB)
 			return newReadOnlySweeper(gcw.Reconciler, r2Client, pgRepo,
-				pg.NewRegistryStore(pgDB), deployPrefix, r2Client, sweepTails).Run(ctx)
+				store, deployPrefix, r2Client, sweepTails, ledgerUnlessDryRun(store, cfg.Cleanup.DryRun)).Run(ctx)
 		}
 		if err := registerGCWorkflows(workerRuntime, gcw, cfg.Cleanup.DryRun, sweepDrift); err != nil {
 			return fmt.Errorf("register gc workflows: %w", err)

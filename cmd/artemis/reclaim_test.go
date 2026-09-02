@@ -350,8 +350,7 @@ func TestRunSiteReclaim_TheSameEventTwiceReclaimsOnce(t *testing.T) {
 }
 
 func TestReclaimClaimTTL_ReemitsNextNight(t *testing.T) {
-	worstClaimOffset := time.Duration(reservationSweepLimit/reclaimParallelism+1) * gcRunBudget
-	assert.Less(t, reclaimClaimTTL+worstClaimOffset, 24*time.Hour,
+	assert.Less(t, reclaimClaimTTL+reclaimBatchWorstCase, 24*time.Hour,
 		"a claim taken by the last run of a full batch must be older than the TTL at the next 03:00 sweep")
 }
 

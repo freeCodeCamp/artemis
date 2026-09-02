@@ -19,6 +19,7 @@ func TestCronShapedOps_CoverEveryNightlyDriftVerdict(t *testing.T) {
 		"tombstone.purge",
 		"reservation.sweep",
 		"site.reclaim",
+		"drift.ledger",
 	} {
 		assert.True(t, cronShapedOps[op],
 			"%s fires once a night, so its 24h gap sits exactly on the 24h escalation cooldown: ordinary "+
