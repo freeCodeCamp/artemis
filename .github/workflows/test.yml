@@ -31,6 +31,11 @@ jobs:
       - name: go mod tidy check
         run: go mod tidy -diff
 
+      - name: formatting (gofumpt + goimports)
+        run: |
+          out=$(go run mvdan.cc/gofumpt@v0.11.0 -l . ; go run golang.org/x/tools/cmd/goimports@v0.49.0 -l .)
+          if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run just fmt"; exit 1; fi
+
       - name: go vet
         run: go vet ./...
 

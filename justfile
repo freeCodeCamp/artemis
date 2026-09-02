@@ -10,6 +10,8 @@ goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
 staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
 govulncheck := "golang.org/x/vuln/cmd/govulncheck@v1.7.0"
+gofumpt := "mvdan.cc/gofumpt@v0.11.0"
+goimports := "golang.org/x/tools/cmd/goimports@v0.49.0"
 bin := "bin/artemis"
 image := env_var_or_default("IMAGE", "ghcr.io/freecodecamp/artemis")
 version := `git rev-parse --short HEAD 2>/dev/null || echo dev`
@@ -173,6 +175,18 @@ staticcheck:
 # Reachable-vulnerability scan; exits non-zero only on a call path we reach
 vulncheck:
     {{go}} run {{govulncheck}} {{pkg}}
+
+# Rewrite every Go file: gofumpt (stricter gofmt), then goimports
+fmt:
+    {{go}} run {{gofumpt}} -w .
+    {{go}} run {{goimports}} -w .
+
+# CI's formatting gate: prints every unformatted file and fails on any
+fmtcheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=$({{go}} run {{gofumpt}} -l . ; {{go}} run {{goimports}} -l .)
+    if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run 'just fmt'"; exit 1; fi
 
 # Boot artemis locally — expects .env (loaded by direnv)
 run:
