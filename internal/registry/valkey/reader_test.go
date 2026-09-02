@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/registry"
@@ -13,19 +15,10 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
-// eventually polls fn every 10ms until it returns true or timeout
-// expires. Used for pub-sub propagation assertions where the cache
-// refresh races with the test goroutine.
 func eventually(t *testing.T, timeout time.Duration, msg string, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if fn() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("eventually timed out (%s): %s", timeout, msg)
+	err := settle.Until(t.Context(), timeout, func(context.Context) (bool, error) { return fn(), nil }, settle.Every(10*time.Millisecond))
+	require.NoError(t, err, msg)
 }
 
 func TestReader_SatisfiesRegistryReader(t *testing.T) {

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
@@ -130,22 +132,24 @@ func waitEngineReady(t *testing.T) {
 	}
 	url := "http://127.0.0.1:" + port + "/api/ready"
 	client := &http.Client{Timeout: 3 * time.Second}
-	deadline := time.Now().Add(engineReadyTimeout)
 	var last string
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			code := resp.StatusCode
-			resp.Body.Close()
-			if code == http.StatusOK {
-				time.Sleep(2 * time.Second)
-				return
-			}
-			last = fmt.Sprintf("status %d", code)
-		} else {
-			last = err.Error()
+	err := settle.Until(t.Context(), engineReadyTimeout, func(ctx context.Context) (bool, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return false, err
 		}
-		time.Sleep(time.Second)
+		resp, err := client.Do(req)
+		if err != nil {
+			last = err.Error()
+			return false, err
+		}
+		resp.Body.Close()
+		last = fmt.Sprintf("status %d", resp.StatusCode)
+		return resp.StatusCode == http.StatusOK, nil
+	}, settle.Every(time.Second))
+	if err == nil {
+		time.Sleep(2 * time.Second)
+		return
 	}
 	t.Fatalf("hatchet-lite did not answer %s within %s (last: %s); the engine restarts behind a healthcheck "+
 		"that allows up to 120s, so a fixed sleep here races it and the worker resubscribes against a "+

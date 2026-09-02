@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
+
 	"github.com/stretchr/testify/require"
 
 	hatchetadapter "github.com/freeCodeCamp/artemis/internal/hatchet"
@@ -73,10 +75,9 @@ func TestR6TwoConcurrencyStrategiesBothBindAndQueue(t *testing.T) {
 	for _, site := range sites {
 		h.waitStarts(t, site, 1, "every event must reach the worker; a missing concurrency key fails the run before it starts")
 	}
-	deadline := time.Now().Add(runReadyTimeout)
-	for completed.Load() < multiStrategySites && time.Now().Before(deadline) {
-		time.Sleep(pollInterval)
-	}
+	_ = settle.Until(t.Context(), runReadyTimeout, func(context.Context) (bool, error) {
+		return completed.Load() >= multiStrategySites, nil
+	}, settle.Every(pollInterval))
 
 	require.EqualValues(t, multiStrategySites, completed.Load(),
 		"GROUP_ROUND_ROBIN must queue the excess, never cancel it; a cancelled run leaves a reclaim half done")

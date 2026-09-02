@@ -4,6 +4,7 @@ package hatchet_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	hatchetadapter "github.com/freeCodeCamp/artemis/internal/hatchet"
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 )
 
@@ -244,15 +246,11 @@ func instrumented(obs *observer, hold time.Duration, fail error) worker.Handler 
 
 func waitPublishable(t *testing.T, pub worker.Publisher) {
 	t.Helper()
-	deadline := time.Now().Add(startupTimeout)
-	for time.Now().Before(deadline) {
-		err := pub.Publish(context.Background(), "artemis.it.warmup", []byte(`{"site":"__warmup__"}`))
-		if err == nil {
-			return
-		}
-		time.Sleep(pollInterval)
-	}
-	t.Fatalf("worker did not become publishable within %s", startupTimeout)
+	err := settle.Until(t.Context(), startupTimeout, func(ctx context.Context) (bool, error) {
+		err := pub.Publish(ctx, "artemis.it.warmup", []byte(`{"site":"__warmup__"}`))
+		return err == nil, err
+	}, settle.Every(pollInterval))
+	require.NoError(t, err, "worker did not become publishable within %s", startupTimeout)
 }
 
 func (h *harness) fire(t *testing.T, topic, site string) {
@@ -264,12 +262,14 @@ func (h *harness) fire(t *testing.T, topic, site string) {
 func (h *harness) waitStarts(t *testing.T, site string, want int, why string) {
 	t.Helper()
 	started := time.Now()
-	deadline := started.Add(runReadyTimeout)
-	for time.Now().Before(deadline) {
-		if h.observed.startsFor(site) >= want {
-			return
-		}
-		time.Sleep(pollInterval)
+	err := settle.Until(t.Context(), runReadyTimeout, func(context.Context) (bool, error) {
+		return h.observed.startsFor(site) >= want, nil
+	}, settle.Every(pollInterval))
+	if err == nil {
+		return
+	}
+	if !errors.Is(err, settle.ErrBudgetExpired) {
+		t.Fatalf("site=%s: wait cancelled after %s: %v", site, time.Since(started).Round(time.Second), err)
 	}
 	if err := h.workerDied(); err != nil {
 		t.Fatalf("site=%s: got %d starts, want >= %d after %s; the worker exited during the wait, which is the actual cause: %v",
