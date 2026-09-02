@@ -231,7 +231,7 @@ func (s *RegistryStore) ReclaimableReservations(ctx context.Context, before time
 
 func (s *RegistryStore) ClaimReclaim(ctx context.Context, slug sitekey.Slug, claimTTL time.Duration) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
-		`UPDATE sites SET reclaim_started_at = now(), updated_at = now()
+		`UPDATE sites SET reclaim_started_at = now()
 		 WHERE slug = $1 AND state = $2 AND reserved_until < now()
 		   AND (reclaim_started_at IS NULL OR reclaim_started_at < now() - $3::interval)`,
 		slug, registry.StateReserved, claimTTL.String())

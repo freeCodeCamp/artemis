@@ -95,6 +95,8 @@ func TestRegistryStore_ReclaimableReservationsIsOldestFirstAndHonoursItsLimit(t 
 func TestRegistryStore_ClaimReclaimWinsOnceAndKeepsTheRowReserved(t *testing.T) {
 	store, repo, ctx := newReservationFixture(t)
 	expireReservation(t, store, ctx, reservationSlug, reservationDirname)
+	var before time.Time
+	require.NoError(t, repo.pool.QueryRow(ctx, `SELECT updated_at FROM sites WHERE slug = $1`, reservationSlug).Scan(&before))
 
 	won, err := store.ClaimReclaim(ctx, reservationSlug, reclaimTestTTL)
 	require.NoError(t, err)
@@ -102,11 +104,14 @@ func TestRegistryStore_ClaimReclaimWinsOnceAndKeepsTheRowReserved(t *testing.T) 
 
 	again, err := store.ClaimReclaim(ctx, reservationSlug, reclaimTestTTL)
 	require.NoError(t, err)
-	assert.False(t, again, "a duplicate event inside the TTL must lose the claim, or two runs move the same prefix")
+	assert.False(t, again, "a duplicate event inside the TTL must lose the claim, or two runs move the same dirname")
 
 	var state string
 	var claimed *time.Time
-	require.NoError(t, repo.pool.QueryRow(ctx, `SELECT state, reclaim_started_at FROM sites WHERE slug = $1`, reservationSlug).Scan(&state, &claimed))
+	var after time.Time
+	require.NoError(t, repo.pool.QueryRow(ctx, `SELECT state, reclaim_started_at, updated_at FROM sites WHERE slug = $1`, reservationSlug).Scan(&state, &claimed, &after))
+	assert.Equal(t, before, after,
+		"a claim is not an edit; an updated_at that moves on every nightly claim makes a held site look freshly touched to every reader of the column")
 	assert.Equal(t, registry.StateReserved, state, "the claim is a timestamp on the reserved row, not a new state")
 	require.NotNil(t, claimed)
 	assert.WithinDuration(t, time.Now(), *claimed, time.Minute)
@@ -155,7 +160,7 @@ func TestRegistryStore_ReleaseReservationAuditedCommitsTheDeleteAndTheAuditToget
 	assert.Zero(t, n, "the name is free")
 	assert.Equal(t, 1, countAudit(t, repo, ctx, "site.reclaim"))
 	assert.Equal(t, []sitekey.Slug{reservationSlug}, changed,
-		"the cached sites snapshot must drop the slug after the delete commits, as ReleaseReservation does")
+		"the cached sites snapshot must drop the slug after the delete commits, as ReleaseReservationNow does")
 
 	err := store.ReleaseReservationAudited(ctx, reservationSlug, event)
 	assert.ErrorIs(t, err, registry.ErrNotFound)
