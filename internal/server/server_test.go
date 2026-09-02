@@ -212,3 +212,27 @@ func TestRouter_SiteLifecycleRoutesAreMounted(t *testing.T) {
 			"%s must be mounted; an unmounted route answers 404 and the handler behind it is dead code", target)
 	}
 }
+
+func TestRouter_EveryResponseCarriesArtemisVersion(t *testing.T) {
+	r := New(&handler.Handlers{Version: "1.2.3"})
+
+	cases := []struct {
+		name string
+		path string
+		want int
+	}{
+		{"public 200", "/healthz", http.StatusOK},
+		{"unknown route 404", "/api/nonsense", http.StatusNotFound},
+		{"unauthenticated 401", "/api/whoami", http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, tc.want, w.Code)
+			assert.Equal(t, "1.2.3", w.Header().Get("X-Artemis-Version"))
+		})
+	}
+}

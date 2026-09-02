@@ -160,6 +160,7 @@ type Handlers struct {
 	Index                  DeployIndexWriter
 	Pending                PendingDeployWriter
 	Locker                 SiteLocker
+	Version                string
 	Audit                  AuditStore
 	// DeployPrefix is the parsed deploy-key template.
 	DeployPrefix DeployPrefixTemplate

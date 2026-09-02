@@ -497,6 +497,7 @@ type handlerDeps struct {
 
 func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 	h := &handler.Handlers{
+		Version:            version,
 		GH:                 d.gh,
 		JWT:                d.jwt,
 		Sites:              d.sites,

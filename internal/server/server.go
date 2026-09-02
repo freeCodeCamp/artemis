@@ -55,8 +55,8 @@ const apiRequestTimeout = 60 * time.Second
 const uploadRequestTimeout = 10 * time.Minute
 
 // New returns a chi router fully wired with the Handlers' endpoints +
-// the standard middleware chain (Sentry → RequestID → AccessLog →
-// Recoverer).
+// the standard middleware chain (Sentry → RequestID → VersionHeader →
+// AccessLog → retagTransaction → Recoverer).
 func New(h *handler.Handlers) http.Handler {
 	return newWithUploadTimeout(h, uploadRequestTimeout)
 }
@@ -73,6 +73,7 @@ func newWithUploadTimeout(h *handler.Handlers, uploadTimeout time.Duration) http
 		r.Use(sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle)
 	}
 	r.Use(handler.RequestID)
+	r.Use(handler.VersionHeader(h.Version))
 	r.Use(handler.AccessLog)
 	r.Use(retagTransaction)
 	r.Use(handler.Recoverer)

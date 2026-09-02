@@ -276,3 +276,15 @@ func TestStatusWriter_ImplicitWriteLatchesStatus(t *testing.T) {
 		"an implicit-200 body write must latch the status against a late WriteHeader")
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+func TestVersionHeader_SurvivesPanic500(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	VersionHeader("9.9.9")(Recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	}))).ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "9.9.9", w.Header().Get(HeaderArtemisVersion))
+}

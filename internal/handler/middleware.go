@@ -156,6 +156,17 @@ func (h *Handlers) RequireDeployJWT(next http.Handler) http.Handler {
 	})
 }
 
+const HeaderArtemisVersion = "X-Artemis-Version"
+
+func VersionHeader(version string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(HeaderArtemisVersion, version)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequestID assigns a per-request id, exposes it on the response header
 // `X-Request-ID`, and stashes it in the request context.
 func RequestID(next http.Handler) http.Handler {
