@@ -402,6 +402,10 @@ Edge cases:
 
 `just preflight` mints an App JWT from the live `GH_APP_*` env via artemis's own signer and exercises the App-JWT → installation-token path against GitHub (non-mutating). Use it to confirm the Apollo-11 credentials before a deploy that enables `/api/repo*`.
 
+### Flaky-test quarantine
+
+A test that flakes and cannot be fixed in the same change calls `quarantine.Skip(t, "<ref>", "<YYYY-MM-DD>")` (`internal/testutil/quarantine`) as its first line. The gating `go test` run skips it. Any non-empty `ARTEMIS_RUN_QUARANTINED` runs it; `just flake` sets it for you, so a quarantined test stays measurable. The call sites are the registry: `just quarantined` lists them. `scripts/quarantine-check.sh check` runs in CI and fails on an expired date (UTC), a non-literal ref or date, a call outside a `_test.go` file, or a production binary that links the package. A skipped test contributes no coverage, so the quarantining commit must keep the coverage gate green.
+
 ## curl examples
 
 ```sh

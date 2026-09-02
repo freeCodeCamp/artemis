@@ -133,7 +133,7 @@ flake test n="20" pkg="./internal/...":
     case "{{n}}" in ''|*[!0-9]*) echo "n must be a positive integer, got '{{n}}'"; exit 2;; esac
     echo "running {{test}} x{{n}} in one binary"
     set +e
-    {{go}} test -race -tags=integration -count={{n}} -run '{{test}}' -timeout=30m {{pkg}} > /tmp/flake.log 2>&1
+    ARTEMIS_RUN_QUARANTINED=1 {{go}} test -race -tags=integration -count={{n}} -run '{{test}}' -timeout=30m {{pkg}} > /tmp/flake.log 2>&1
     code=$?
     set -e
     ran=$(grep -cE '^(\s*)--- (PASS|FAIL|SKIP): ' /tmp/flake.log || true)
@@ -150,6 +150,14 @@ flake test n="20" pkg="./internal/...":
         grep -E '^\s*--- FAIL|Error:|Messages:' /tmp/flake.log | head -20
         exit 1
     fi
+
+# List every quarantined test: the quarantine.Skip call sites are the registry.
+quarantined:
+    scripts/quarantine-check.sh list
+
+# CI gate: expired, non-literal, aliased or production-linked quarantines fail here, never as a flaky red.
+quarantine-check:
+    scripts/quarantine-check.sh check
 
 # Repeat the Hatchet suite N times against ONE compose stack (HATCHET_COUNT).
 flake-hatchet n="3":
