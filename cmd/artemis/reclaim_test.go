@@ -350,11 +350,13 @@ func TestRunSiteReclaim_TheSameEventTwiceReclaimsOnce(t *testing.T) {
 }
 
 func TestReclaimClaimTTL_ReemitsNextNight(t *testing.T) {
-	assert.Less(t, reclaimClaimTTL+reclaimBatchWorstCase, 24*time.Hour,
-		"a claim taken by the last run of a full batch must be older than the TTL at the next 03:00 sweep")
+	assert.Less(t, reclaimClaimTTL+reclaimBatchWorstCase, 24*time.Hour-gcRunBudget,
+		"a claim taken by the last run of a full batch must be older than the TTL when the next 03:00 task reaches its sweep step")
+	assert.Greater(t, reclaimClaimTTL, reclaimBatchWorstCase,
+		"a duplicate event still queued behind the batch must lose the claim, so the TTL outlives the batch drain")
 }
 
 func TestSiteReclaimOpIsCronShaped(t *testing.T) {
 	assert.True(t, observability.IsCronShaped(opSiteReclaim),
-		"a nightly reclaim failure must reach Sentry every time, never through the transient-rate tracker")
+		"a reclaim failure must never be held back by the transient-rate tracker")
 }

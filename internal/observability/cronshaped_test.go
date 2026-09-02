@@ -18,7 +18,6 @@ func TestCronShapedOps_CoverEveryNightlyDriftVerdict(t *testing.T) {
 		"drift.orphan_aliases",
 		"tombstone.purge",
 		"reservation.sweep",
-		"site.reclaim",
 		"drift.ledger",
 	} {
 		assert.True(t, cronShapedOps[op],
@@ -26,4 +25,11 @@ func TestCronShapedOps_CoverEveryNightlyDriftVerdict(t *testing.T) {
 				"cron jitter (03:00:11 one night, 03:00:00 the next) would suppress a night. The "+
 				"short-circuit removes the boundary", op)
 	}
+}
+
+func TestCronShapedOps_CoverTheEventTriggeredReclaim(t *testing.T) {
+	t.Parallel()
+	assert.True(t, cronShapedOps["site.reclaim"],
+		"up to 50 event-triggered reclaim runs a night share one op; the bypass keeps every failure visible instead "+
+			"of collapsing the batch into one rate-limited event")
 }

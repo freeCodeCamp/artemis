@@ -198,7 +198,7 @@ One policy per layer. Nothing retries a destructive sub-step in-process.
 | L3 engine task retries | artemis sets no retry count; the SDK omits a zero, and the engine stores `retries = 0` for every registered workflow (probed in the `hatchet` database on 2026-09-03) | all four workflows |
 | L4 scheduled re-run | the next cron run is the retry: `drift-detect` and `tombstone-purge` nightly, `gc-site` on the next site change or the nightly pending sweep, `site.lifecycle` re-emitted by the sweep once the claim is older than `reclaimClaimTTL` (12h) | all four workflows |
 
-There is no L2 (in-process retry around a sub-step). Sub-steps 2 to 6 of a reclaim run under the site lock on the lock's context; the lock heartbeat cancels that context within 5s of the failure class a retry would target, so a retry loop would never run a second attempt, and the shared helper discards the cause on cancel. A one-shot query that fails ends the run, pages once (`site.reclaim` is cron-shaped in Sentry), and the next sweep runs it again.
+There is no L2 (in-process retry around a sub-step). Sub-steps 3 to 6 of a reclaim run on the lock's context; the lock heartbeat cancels that context within about 10s (one 5s tick plus a 5s ping timeout) of the failure class a retry would target, so a retry loop would never run a second attempt, and the shared helper discards the cause on cancel. A one-shot query that fails ends the run and the next sweep runs it again. The failure reaches Sentry every time for the transient classes, because `site.reclaim` is cron-shaped there; a run ended by a cancel is a shutdown class and is not reported.
 
 `site.lifecycle` reclaim sub-steps, re-derived against `cmd/artemis/reclaim.go`:
 
@@ -208,9 +208,9 @@ There is no L2 (in-process retry around a sub-step). Sub-steps 2 to 6 of a recla
 | 2 | `NewLockSession` | yes |
 | 3 | expiry re-check under the lock | yes, a read |
 | 4 | `RecordSiteTombstone` | yes, an upsert; a re-run refreshes `trashed_at`, which defers the purge of those bytes |
-| 5 | `MovePrefix` | conditional, safe under the 72h reservation grace |
+| 5 | `MovePrefix` | conditional, safe because the 72h reservation grace has already elapsed |
 | 6 | `ReleaseReservationAudited` | yes; `ErrNotFound` on a re-run means the row is already released |
 
-Re-emit bound. A claim lands up to `reservationSweepLimit / reclaimParallelism` run budgets after 03:00 (50/4 × 30m, about 6h15m). `reclaimClaimTTL` (12h) plus that offset stays under 24h, so a run that died after sub-step 1 is re-emitted by the very next sweep; `TestReclaimClaimTTL_ReemitsNextNight` pins the arithmetic. Task-level engine retries stay at zero for `site.lifecycle` because a retry of the same run would re-run sub-step 1 and lose its own claim.
+Re-emit bound. A claim lands up to `reservationSweepLimit / reclaimParallelism` run budgets after 03:00 (13 run budgets, 6h30m: 50/4 rounded down plus one budget that covers the sweep's own start inside the 03:00 task). `reclaimClaimTTL` (12h) plus that offset stays under 24h, so a run that died after sub-step 1 is re-emitted by the very next sweep; `TestReclaimClaimTTL_ReemitsNextNight` pins the arithmetic. Task-level engine retries stay at zero for `site.lifecycle` because a retry of the same run would re-run sub-step 1 and lose its own claim.
 
 `SiteRelease` over HTTP has no server-side retry of `MovePrefix`; there the grace margin does not exist.
