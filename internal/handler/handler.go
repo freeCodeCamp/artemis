@@ -234,7 +234,8 @@ func (h *Handlers) denyUnregisteredSite(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *Handlers) writeFenceError(w http.ResponseWriter, r *http.Request, op, goneMessage string,
-	site registry.Site, err error) {
+	site registry.Site, err error,
+) {
 	switch {
 	case errors.Is(err, registry.ErrReserved):
 		writeErrorDetail(w, http.StatusConflict, "site_reserved",

@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -85,7 +85,8 @@ func (s *lockSession) WithSiteLock(ctx context.Context, site sitekey.Dirname, fn
 const defaultLockHeartbeat = 5 * time.Second
 
 func (s *lockSession) watchLiveness(ctx context.Context, site sitekey.Dirname,
-	lost context.CancelFunc) func() {
+	lost context.CancelFunc,
+) func() {
 	done := make(chan struct{})
 	exited := make(chan struct{})
 	go func() {

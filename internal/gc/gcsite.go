@@ -181,7 +181,8 @@ func (g *SiteGC) stillPending(ctx context.Context, site sitekey.Dirname, id stri
 }
 
 func (g *SiteGC) execute(ctx context.Context, site sitekey.Dirname, plan Plan, dryRun bool, res GCResult,
-	revalidate func(context.Context, sitekey.Dirname, string) (bool, error)) (GCResult, error) {
+	revalidate func(context.Context, sitekey.Dirname, string) (bool, error),
+) (GCResult, error) {
 	for _, d := range plan.Delete {
 		res.Planned = append(res.Planned, d.ID)
 	}

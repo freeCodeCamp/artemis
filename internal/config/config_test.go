@@ -2,14 +2,15 @@ package config
 
 import (
 	"bytes"
-	"github.com/freeCodeCamp/artemis/internal/config/configtest"
-	"github.com/freeCodeCamp/artemis/internal/pg"
-	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 	"log/slog"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
+	"github.com/freeCodeCamp/artemis/internal/pg"
+	"github.com/freeCodeCamp/artemis/internal/registry/valkey"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -508,8 +509,18 @@ func TestConfigLoad_BooleanEnvAcceptsEveryParseBoolSpelling(t *testing.T) {
 		val  string
 		want bool
 	}{
-		{"1", true}, {"t", true}, {"T", true}, {"TRUE", true}, {"true", true}, {"True", true},
-		{"0", false}, {"f", false}, {"F", false}, {"FALSE", false}, {"false", false}, {"False", false},
+		{"1", true},
+		{"t", true},
+		{"T", true},
+		{"TRUE", true},
+		{"true", true},
+		{"True", true},
+		{"0", false},
+		{"f", false},
+		{"F", false},
+		{"FALSE", false},
+		{"false", false},
+		{"False", false},
 	} {
 		t.Run("CLEANUP_DRY_RUN="+tc.val, func(t *testing.T) {
 			configtest.Hermetic(t, EnvKeys(), requiredEnv())

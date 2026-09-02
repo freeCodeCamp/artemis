@@ -13,7 +13,8 @@ import (
 )
 
 func (s *RegistryStore) Reserve(ctx context.Context, slug sitekey.Slug, site sitekey.Dirname,
-	until time.Time, by string, observed registry.ObservedAliases) (registry.Reservation, error) {
+	until time.Time, by string, observed registry.ObservedAliases,
+) (registry.Reservation, error) {
 	now := s.now().UTC()
 	var res registry.Reservation
 	var flipped bool

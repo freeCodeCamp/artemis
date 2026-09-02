@@ -472,7 +472,7 @@ func parseLogLevel(level string) slog.Level {
 // non-nil (the Sentry Logs bridge) records are teed to both — stdout
 // stays the source of truth for Loki while Sentry mirrors them.
 func configureLogger(lvl slog.Level, extra slog.Handler) {
-	var h slog.Handler = observability.NewScrubbingHandler(
+	h := observability.NewScrubbingHandler(
 		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}),
 	)
 	if extra != nil {

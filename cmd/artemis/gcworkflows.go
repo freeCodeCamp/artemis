@@ -18,8 +18,10 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-var captureCheckIn = sentry.CaptureCheckIn
-var captureBackground = observability.CaptureBackground
+var (
+	captureCheckIn    = sentry.CaptureCheckIn
+	captureBackground = observability.CaptureBackground
+)
 
 func onConcurrentMigrateErr(ctx context.Context, err error) {
 	if err == nil {

@@ -60,7 +60,8 @@ type reclaimDeps struct {
 }
 
 func sweepExpiredReservations(ctx context.Context, src expiredReservationSource,
-	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool) (int, error) {
+	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool,
+) (int, error) {
 	if src == nil || rel == nil {
 		slog.WarnContext(ctx, "reservation.sweep.unwired",
 			"source", src != nil, "releaser", rel != nil)
@@ -122,7 +123,8 @@ func warnIfSweepCapped(ctx context.Context, n int) {
 }
 
 func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reservationReleaser,
-	deps reclaimDeps, res registry.Reservation) (bool, error) {
+	deps reclaimDeps, res registry.Reservation,
+) (bool, error) {
 	freed := false
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reservationReclaimTimeout)
 	defer cancel()
@@ -159,7 +161,8 @@ func releaseOneReservation(ctx context.Context, sess gc.LockSession, rel reserva
 }
 
 func runReservationSweep(ctx context.Context, src expiredReservationSource,
-	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool) error {
+	rel reservationReleaser, deps reclaimDeps, now func() time.Time, dryRun bool,
+) error {
 	n, err := sweepExpiredReservations(ctx, src, rel, deps, now, dryRun)
 	if n > 0 {
 		slog.InfoContext(ctx, "reservation.sweep.done", "released", n)

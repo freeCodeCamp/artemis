@@ -420,7 +420,7 @@ func githubTokenHandlerValidatingJWT(
 			writeGitHubJWTError(w, "A JSON web token could not be decoded")
 			return
 		}
-		if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(now().Add(600*time.Second)) {
+		if claims.ExpiresAt == nil || claims.ExpiresAt.After(now().Add(600*time.Second)) {
 			writeGitHubJWTError(w, "'Expiration time' claim ('exp') is too far in the future")
 			return
 		}
@@ -526,14 +526,20 @@ func TestFormatGitHubError(t *testing.T) {
 		want      string
 		retryable bool
 	}{
-		{"template not accessible", http.StatusUnprocessableEntity,
-			`{"message":"Could not clone: repository not found"}`, "starter", "Contents:read", false},
-		{"forbidden with message", http.StatusForbidden,
-			`{"message":"Resource not accessible by integration"}`, "", "Resource not accessible by integration", false},
+		{
+			"template not accessible", http.StatusUnprocessableEntity,
+			`{"message":"Could not clone: repository not found"}`, "starter", "Contents:read", false,
+		},
+		{
+			"forbidden with message", http.StatusForbidden,
+			`{"message":"Resource not accessible by integration"}`, "", "Resource not accessible by integration", false,
+		},
 		{"forbidden without message", http.StatusForbidden, ``, "", "contact an org admin", false},
 		{"server error is retryable", http.StatusBadGateway, ``, "", "temporarily unavailable", true},
-		{"other with message", http.StatusUnprocessableEntity,
-			`{"message":"name already exists on this account"}`, "", "name already exists on this account", false},
+		{
+			"other with message", http.StatusUnprocessableEntity,
+			`{"message":"name already exists on this account"}`, "", "name already exists on this account", false,
+		},
 		{"other without message", http.StatusTeapot, `not json`, "", "GitHub API error (418)", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

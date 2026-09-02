@@ -254,6 +254,7 @@ func (c *Client) CreateRepo(ctx context.Context, spec CreateSpec) (Created, erro
 		})
 	}
 
+	//nolint:bodyclose // bodyclose cannot see across c.do, which drains and closes the body itself
 	resp, body, err := c.do(ctx, http.MethodPost, url, token, reqBody)
 	if err != nil {
 		return Created{}, err
@@ -292,6 +293,7 @@ func (c *Client) RepoExists(ctx context.Context, name string) (bool, string, err
 
 func (c *Client) repoExists(ctx context.Context, token, name string) (bool, string, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", c.apiBase, c.org, name)
+	//nolint:bodyclose // bodyclose cannot see across c.do, which drains and closes the body itself
 	resp, body, err := c.do(ctx, http.MethodGet, url, token, nil)
 	if err != nil {
 		return false, "", err
@@ -319,6 +321,7 @@ func (c *Client) repoExists(ctx context.Context, token, name string) (bool, stri
 func (c *Client) disableActions(ctx context.Context, token, name string) {
 	url := fmt.Sprintf("%s/repos/%s/%s/actions/permissions", c.apiBase, c.org, name)
 	body, _ := json.Marshal(map[string]any{"enabled": false})
+	//nolint:bodyclose // bodyclose cannot see across c.do, which drains and closes the body itself
 	resp, respBody, err := c.do(ctx, http.MethodPut, url, token, body)
 	if err != nil {
 		slog.WarnContext(ctx, "githubapp.disable_actions.failed", "repo", name, "err", err)
@@ -352,6 +355,7 @@ func (c *Client) ListTemplates(ctx context.Context) ([]string, error) {
 	for page := 1; page <= listMaxPages; page++ {
 		url := fmt.Sprintf("%s/orgs/%s/repos?type=all&per_page=%d&page=%d",
 			c.apiBase, c.org, listPageSize, page)
+		//nolint:bodyclose // bodyclose cannot see across c.do, which drains and closes the body itself
 		resp, body, err := c.do(ctx, http.MethodGet, url, token, nil)
 		if err != nil {
 			return nil, err
@@ -398,6 +402,7 @@ func (c *Client) ListTemplates(ctx context.Context) ([]string, error) {
 
 func (c *Client) isAccessible(ctx context.Context, token, name string) bool {
 	url := fmt.Sprintf("%s/repos/%s/%s/contents/", c.apiBase, c.org, name)
+	//nolint:bodyclose // bodyclose cannot see across c.do, which drains and closes the body itself
 	resp, _, err := c.do(ctx, http.MethodGet, url, token, nil)
 	if err != nil {
 		return false

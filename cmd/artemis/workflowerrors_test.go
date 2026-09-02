@@ -159,6 +159,7 @@ func (nopReconcileStore) AliasTargets(context.Context, sitekey.Dirname) (map[str
 func (nopReconcileStore) ReindexDeploy(context.Context, sitekey.Dirname, string, time.Time, bool) (bool, error) {
 	return true, nil
 }
+
 func (nopReconcileStore) RecordTombstone(context.Context, sitekey.Dirname, string, int64) error {
 	return nil
 }

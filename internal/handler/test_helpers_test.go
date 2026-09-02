@@ -3,12 +3,11 @@ package handler
 import (
 	"context"
 	"io"
+	"slices"
+	"sort"
 	"sync"
 	"testing"
 	"time"
-
-	"slices"
-	"sort"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/gc"
@@ -140,15 +139,19 @@ type erroringRegistry struct{ err error }
 func (e *erroringRegistry) Register(_ context.Context, _ sitekey.Slug, _ []string, _ string) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
+
 func (e *erroringRegistry) UpdateTeams(_ context.Context, _ sitekey.Slug, _ []string) (registry.Site, error) {
 	return registry.Site{}, e.err
 }
+
 func (e *erroringRegistry) Delete(_ context.Context, _ sitekey.Slug) error {
 	return e.err
 }
+
 func (e *erroringRegistry) Sites(_ context.Context) ([]registry.Site, error) {
 	return nil, e.err
 }
+
 func (e *erroringRegistry) GetSite(_ context.Context, _ sitekey.Slug) (registry.Site, error) {
 	return registry.Site{}, e.err
 }

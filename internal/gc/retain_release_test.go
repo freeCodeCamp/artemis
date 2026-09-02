@@ -31,8 +31,10 @@ func TestRetain_ReleasedDeployHeldWithinServeCacheTTL(t *testing.T) {
 		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
 		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
 		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
-		{ID: "just-released", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
-			AliasReleasedAt: testNow.Add(-5 * time.Second)},
+		{
+			ID: "just-released", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-5 * time.Second),
+		},
 	}
 	_, del := Retain(RetainInput{Deploys: deploys, Now: testNow}, testPolicy())
 
@@ -45,8 +47,10 @@ func TestRetain_ReleasedDeployCollectableAfterServeCacheTTL(t *testing.T) {
 		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
 		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
 		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
-		{ID: "released-long-ago", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
-			AliasReleasedAt: testNow.Add(-30 * time.Second)},
+		{
+			ID: "released-long-ago", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-30 * time.Second),
+		},
 	}
 	_, del := Retain(RetainInput{Deploys: deploys, Now: testNow}, testPolicy())
 

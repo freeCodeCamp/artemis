@@ -38,8 +38,10 @@ type AuditRecord struct {
 	Detail     map[string]any
 }
 
-const auditListDefaultLimit = 100
-const auditListMaxLimit = 500
+const (
+	auditListDefaultLimit = 100
+	auditListMaxLimit     = 500
+)
 
 func (r *Repo) ListAudit(ctx context.Context, f AuditFilter) ([]AuditRecord, error) {
 	limit := f.Limit

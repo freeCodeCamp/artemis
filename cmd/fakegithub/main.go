@@ -146,7 +146,7 @@ func (s *server) handleAccessToken(w http.ResponseWriter, r *http.Request) {
 			writeGH(w, http.StatusUnauthorized, map[string]string{"message": "A JSON web token could not be decoded"})
 			return
 		}
-		if claims.ExpiresAt == nil || claims.ExpiresAt.Time.After(time.Now().Add(600*time.Second)) {
+		if claims.ExpiresAt == nil || claims.ExpiresAt.After(time.Now().Add(600*time.Second)) {
 			writeGH(w, http.StatusUnauthorized, map[string]string{"message": "'Expiration time' claim ('exp') is too far in the future"})
 			return
 		}

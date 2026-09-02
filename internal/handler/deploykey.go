@@ -58,7 +58,7 @@ func (t DeployPrefixTemplate) SitePrefix(site sitekey.Slug) string {
 }
 
 func (t DeployPrefixTemplate) SiteDirname(site sitekey.Slug) sitekey.Dirname {
-	p := t.SitePrefix(sitekey.Slug(site))
+	p := t.SitePrefix(site)
 	if i := strings.IndexByte(p, '/'); i >= 0 {
 		return sitekey.Dirname(p[:i])
 	}

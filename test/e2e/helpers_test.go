@@ -111,7 +111,8 @@ func waitOutbox(t *testing.T, pool *pgxpool.Pool, site string) {
 
 func containsSlug(rows []struct {
 	Slug string `json:"slug"`
-}, slug string) bool {
+}, slug string,
+) bool {
 	for _, r := range rows {
 		if r.Slug == slug {
 			return true
@@ -122,7 +123,8 @@ func containsSlug(rows []struct {
 
 func containsID(rows []struct {
 	ID string `json:"id"`
-}, id string) bool {
+}, id string,
+) bool {
 	for _, r := range rows {
 		if r.ID == id {
 			return true

@@ -83,6 +83,7 @@ type stubRepoStore struct{}
 func (stubRepoStore) Create(context.Context, reporequest.Request) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+
 func (stubRepoStore) Get(context.Context, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
@@ -90,15 +91,19 @@ func (stubRepoStore) List(context.Context) ([]reporequest.Request, error) { retu
 func (stubRepoStore) Approve(context.Context, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+
 func (stubRepoStore) Reject(context.Context, string, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+
 func (stubRepoStore) MarkActive(context.Context, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+
 func (stubRepoStore) MarkFailed(context.Context, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }
+
 func (stubRepoStore) MarkStale(context.Context, string, string) (reporequest.Request, error) {
 	return reporequest.Request{}, nil
 }

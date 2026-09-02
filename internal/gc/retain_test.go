@@ -88,8 +88,10 @@ func TestRetain_ServeCacheSafe(t *testing.T) {
 		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
 		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
 		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
-		{ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
-			AliasReleasedAt: testNow.Add(-5 * time.Second)},
+		{
+			ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-5 * time.Second),
+		},
 	}
 
 	_, delFresh := Retain(RetainInput{Deploys: freshDeploys, Now: testNow}, testPolicy())
@@ -100,8 +102,10 @@ func TestRetain_ServeCacheSafe(t *testing.T) {
 		{ID: "n1", Mtime: ago(time.Hour), HasMarker: true},
 		{ID: "n2", Mtime: ago(2 * time.Hour), HasMarker: true},
 		{ID: "n3", Mtime: ago(3 * time.Hour), HasMarker: true},
-		{ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
-			AliasReleasedAt: testNow.Add(-30 * time.Second)},
+		{
+			ID: "just-superseded", Mtime: ago(30 * 24 * time.Hour), HasMarker: true,
+			AliasReleasedAt: testNow.Add(-30 * time.Second),
+		},
 	}
 
 	_, delLater := Retain(RetainInput{Deploys: laterDeploys, Now: testNow}, testPolicy())

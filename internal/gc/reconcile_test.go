@@ -71,6 +71,7 @@ type fakeReconcileStore struct {
 func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
 	return s.deploys[string(site)], nil
 }
+
 func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ sitekey.Dirname) (map[string]struct{}, time.Time, error) {
 	s.aliasCalls++
 	if s.aliasesAfter != nil && s.aliasCalls >= 2 {
@@ -78,6 +79,7 @@ func (s *fakeReconcileStore) AliasTargets(_ context.Context, _ sitekey.Dirname) 
 	}
 	return s.aliases, time.Time{}, nil
 }
+
 func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname, id string, _ time.Time, _ bool) (bool, error) {
 	if s.tombstonedIDs[id] {
 		return false, nil
@@ -85,10 +87,12 @@ func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname,
 	s.reindexed = append(s.reindexed, id)
 	return true, nil
 }
+
 func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
 	s.tombstoned = append(s.tombstoned, id)
 	return nil
 }
+
 func (s *fakeReconcileStore) PruneDeploy(_ context.Context, _ sitekey.Dirname, id string) error {
 	s.pruned = append(s.pruned, id)
 	return nil

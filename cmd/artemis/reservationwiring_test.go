@@ -166,7 +166,7 @@ func assertNoNilFields(t *testing.T, v reflect.Value, path string) {
 		f := v.Field(i)
 		name := path + "." + v.Type().Field(i).Name
 		switch f.Kind() {
-		case reflect.Interface, reflect.Ptr, reflect.Func, reflect.Map, reflect.Slice:
+		case reflect.Interface, reflect.Pointer, reflect.Func, reflect.Map, reflect.Slice:
 			assert.False(t, f.IsNil(), "%s is nil after newGCWiring; every dependency the constructor "+
 				"owns must be assigned there, or a boot-order change silently disables it", name)
 		}

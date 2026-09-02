@@ -29,8 +29,10 @@ func TestGitHubClient_CachesAreBoundedAcrossTokenChurn(t *testing.T) {
 		_, _ = w.Write([]byte(`{"state":"active"}`))
 	}))
 	t.Cleanup(srv.Close)
-	tc := NewGitHubClient(GitHubClientConfig{APIBase: srv.URL, Org: "freeCodeCamp",
-		Now: func() time.Time { return clock }})
+	tc := NewGitHubClient(GitHubClientConfig{
+		APIBase: srv.URL, Org: "freeCodeCamp",
+		Now: func() time.Time { return clock },
+	})
 	for i := 0; i < maxCacheEntries+64; i++ {
 		_, err := tc.IsTeamMember(context.Background(), "tok", fmt.Sprintf("u-%d", i), "t")
 		require.NoError(t, err)

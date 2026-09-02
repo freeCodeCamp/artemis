@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - bodyclose
+    - ineffassign
+    - misspell
+    - nakedret
+    - unconvert
+    - whitespace
+    - dupl
+    - gochecknoinits
+  exclusions:
+    rules:
+      - path: internal/hatchet/adapter\.go
+        linters:
+          - staticcheck
+        text: "SA1019.*hatchet-dev/hatchet/pkg/client"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports

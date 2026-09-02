@@ -52,6 +52,7 @@ type staleReaper struct{ tomb Tombstone }
 func (r staleReaper) ExpiredTombstones(context.Context, time.Time) ([]Tombstone, error) {
 	return []Tombstone{r.tomb}, nil
 }
+
 func (staleReaper) ClearTombstone(context.Context, sitekey.Dirname, string) (bool, error) {
 	return false, nil
 }

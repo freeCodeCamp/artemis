@@ -73,7 +73,7 @@ func TestDeployPrefixTemplate_SiteSlugInvertsSiteDirname(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, slug := range []sitekey.Slug{"www", "test", "a", "learn-beta", "a.freecode.camp"} {
-		dirname := tpl.SiteDirname(sitekey.Slug(slug))
+		dirname := tpl.SiteDirname(slug)
 		got, ok := tpl.SiteSlug(dirname)
 
 		require.True(t, ok, "SiteDirname(%q) rendered %q, which SiteSlug must accept", slug, dirname)

@@ -1,8 +1,9 @@
 package config
 
 import (
-	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 	"testing"
+
+	"github.com/freeCodeCamp/artemis/internal/config/configtest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

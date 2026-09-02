@@ -29,6 +29,7 @@ func TestRoundTripper_SetsRequestIDHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://api.example/x", nil).
 		WithContext(telemetry.NewContext(context.Background(), sc))
 
+	//nolint:bodyclose // bodyclose flags the stub's http.NoBody, which holds no connection
 	_, err := rt.RoundTrip(req)
 	require.NoError(t, err)
 	assert.Equal(t, "req-42", got)
@@ -46,6 +47,7 @@ func TestRoundTripper_NoScopeNoHeader(t *testing.T) {
 	rt := telemetry.NewRoundTripper(base)
 
 	req := httptest.NewRequest(http.MethodGet, "https://api.example/x", nil)
+	//nolint:bodyclose // bodyclose flags the stub's http.NoBody, which holds no connection
 	_, err := rt.RoundTrip(req)
 	require.NoError(t, err)
 	assert.Empty(t, got)

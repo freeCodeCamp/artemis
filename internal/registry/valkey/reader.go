@@ -59,7 +59,7 @@ func (r *Reader) SetOnRefreshError(f func(error)) {
 		r.onRefreshError.Store(nil)
 		return
 	}
-	fn := onRefreshErrorFn(f)
+	fn := f
 	r.onRefreshError.Store(&fn)
 }
 

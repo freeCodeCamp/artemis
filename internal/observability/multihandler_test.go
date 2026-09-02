@@ -34,6 +34,7 @@ func (h recordingAttrHandler) WithAttrs(a []slog.Attr) slog.Handler {
 	*h.attrs = append(*h.attrs, a)
 	return h
 }
+
 func (h recordingAttrHandler) WithGroup(name string) slog.Handler {
 	*h.groups = append(*h.groups, name)
 	return h

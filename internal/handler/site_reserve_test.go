@@ -27,7 +27,8 @@ type fakeReservations struct {
 }
 
 func (f *fakeReservations) Reserve(ctx context.Context, slug sitekey.Slug, _ sitekey.Dirname,
-	until time.Time, by string, observed registry.ObservedAliases) (registry.Reservation, error) {
+	until time.Time, by string, observed registry.ObservedAliases,
+) (registry.Reservation, error) {
 	if f.reg != nil {
 		if _, err := f.reg.GetSite(ctx, slug); err != nil {
 			return registry.Reservation{}, err

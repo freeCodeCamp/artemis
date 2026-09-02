@@ -178,7 +178,8 @@ type driftSweep struct {
 
 func newReadOnlySweeper(base *gc.Reconciler, lister gc.ReconcileLister, repo driftSweepRepo,
 	reg registrySiteReader, tmpl handler.DeployPrefixTemplate,
-	bucket bucketAliasReader, aliasTails []string) *driftSweep {
+	bucket bucketAliasReader, aliasTails []string,
+) *driftSweep {
 	counting := &countingLister{inner: lister}
 	store := &countingStore{ReconcileStore: readOnlyStore{inner: repo}}
 
