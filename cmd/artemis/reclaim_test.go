@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/gc"
+	"github.com/freeCodeCamp/artemis/internal/observability"
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
@@ -346,4 +347,15 @@ func TestRunSiteReclaim_TheSameEventTwiceReclaimsOnce(t *testing.T) {
 	assert.Len(t, f.mover.moved, 1, "an at-least-once outbox can deliver one event twice; the dirname must move once")
 	assert.Len(t, f.releaser.events, 1, "exactly one audit row per reclaimed site, however many times the event arrives")
 	assert.Equal(t, 1, f.locker.sessions, "the losing run never takes the lock, so it never holds a connection")
+}
+
+func TestReclaimClaimTTL_ReemitsNextNight(t *testing.T) {
+	worstClaimOffset := time.Duration(reservationSweepLimit/reclaimParallelism+1) * gcRunBudget
+	assert.Less(t, reclaimClaimTTL+worstClaimOffset, 24*time.Hour,
+		"a claim taken by the last run of a full batch must be older than the TTL at the next 03:00 sweep")
+}
+
+func TestSiteReclaimOpIsCronShaped(t *testing.T) {
+	assert.True(t, observability.IsCronShaped(opSiteReclaim),
+		"a nightly reclaim failure must reach Sentry every time, never through the transient-rate tracker")
 }

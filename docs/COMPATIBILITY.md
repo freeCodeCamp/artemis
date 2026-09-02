@@ -757,7 +757,7 @@ Observable to a caller:
   `outcome=success`, `detail.moved` and `detail.tombstoned`. A reclaim that fails writes no row and
   is retried the next night. `site.release` rows are unchanged.
 - `sites.reclaim_started_at` is a new nullable column. A reserved row with the column set is a
-  reclaim in flight or one that failed inside the last 23 hours. `POST /api/site/{slug}/undelete`
+  reclaim in flight or one that failed inside the last 12 hours (the claim TTL; 23 hours in the first cut of this entry, shortened so a run that dies late in the batch is re-emitted the next night, not the night after). `POST /api/site/{slug}/undelete`
   refuses such a row with the same `404` it answers for an expired reservation.
 - A reclaim that fails is retried once per night, so a site that keeps failing is N nights late,
   as before. A claim older than two days is a stuck reclaim; nothing alerts on it yet.

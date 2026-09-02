@@ -16,7 +16,7 @@ import (
 const (
 	opSiteReclaim      = "site.reclaim"
 	reclaimActor       = "system:gc"
-	reclaimClaimTTL    = 23 * time.Hour
+	reclaimClaimTTL    = 12 * time.Hour
 	reclaimParallelism = 4
 )
 

@@ -187,3 +187,30 @@ The repair itself stays in `internal/gc`, with its site lock, its in-lock second
 The reason is empirical. The repair cron ran nightly for months and repaired nothing, because it swept registry slugs where the bytes live under storage dirnames. A read-only sweep of production then measured the real drift: 32 orphan byte prefixes and 5 lost index rows, with zero rows to prune and zero aliases pointing at nothing. The dangerous classes were empty. A daily unattended job that deletes bytes is not worth that.
 
 See [0004](0004-drift-detection-and-alerting.md).
+
+## Retry policy (2026-09-03)
+
+One policy per layer. Nothing retries a destructive sub-step in-process.
+
+| layer | mechanism | applies to |
+|-------|-----------|------------|
+| L1 SDK per call | aws-sdk-go-v2 default retryer on every R2 call with a seekable body; pgx retries nothing | every R2 list, copy and delete inside `MovePrefix` |
+| L3 engine task retries | artemis sets no retry count; the SDK omits a zero, and the engine stores `retries = 0` for every registered workflow (probed in the `hatchet` database on 2026-09-03) | all four workflows |
+| L4 scheduled re-run | the next cron run is the retry: `drift-detect` and `tombstone-purge` nightly, `gc-site` on the next site change or the nightly pending sweep, `site.lifecycle` re-emitted by the sweep once the claim is older than `reclaimClaimTTL` (12h) | all four workflows |
+
+There is no L2 (in-process retry around a sub-step). Sub-steps 2 to 6 of a reclaim run under the site lock on the lock's context; the lock heartbeat cancels that context within 5s of the failure class a retry would target, so a retry loop would never run a second attempt, and the shared helper discards the cause on cancel. A one-shot query that fails ends the run, pages once (`site.reclaim` is cron-shaped in Sentry), and the next sweep runs it again.
+
+`site.lifecycle` reclaim sub-steps, re-derived against `cmd/artemis/reclaim.go`:
+
+| # | sub-step | idempotent on a re-run |
+|---|----------|------------------------|
+| 1 | `ClaimReclaim` | no for the same run: a second claim inside the TTL loses and the run no-ops; yes across nights |
+| 2 | `NewLockSession` | yes |
+| 3 | expiry re-check under the lock | yes, a read |
+| 4 | `RecordSiteTombstone` | yes, an upsert; a re-run refreshes `trashed_at`, which defers the purge of those bytes |
+| 5 | `MovePrefix` | conditional, safe under the 72h reservation grace |
+| 6 | `ReleaseReservationAudited` | yes; `ErrNotFound` on a re-run means the row is already released |
+
+Re-emit bound. A claim lands up to `reservationSweepLimit / reclaimParallelism` run budgets after 03:00 (50/4 × 30m, about 6h15m). `reclaimClaimTTL` (12h) plus that offset stays under 24h, so a run that died after sub-step 1 is re-emitted by the very next sweep; `TestReclaimClaimTTL_ReemitsNextNight` pins the arithmetic. Task-level engine retries stay at zero for `site.lifecycle` because a retry of the same run would re-run sub-step 1 and lose its own claim.
+
+`SiteRelease` over HTTP has no server-side retry of `MovePrefix`; there the grace margin does not exist.
