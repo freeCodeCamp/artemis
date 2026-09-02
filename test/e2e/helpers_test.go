@@ -53,7 +53,7 @@ func waitSiteVisible(t *testing.T, e env, slug string) {
 			return false, err
 		}
 		return containsString(resp.AuthorizedSites, slug), nil
-	}, settle.Every(250*time.Millisecond), settle.PerAttempt(30*time.Second))
+	}, settle.Every(250*time.Millisecond))
 	if err != nil {
 		t.Fatalf("site %q not visible in whoami authorizedSites (registry cache propagation): %v", slug, err)
 	}

@@ -75,9 +75,9 @@ func TestUntil_BudgetExpiryWrapsLastError(t *testing.T) {
 
 func TestUntil_BudgetExpiryWithoutErrorNamesBudgetAndAttempts(t *testing.T) {
 	obs, calls := script(false)
-	err := Until(t.Context(), 30*time.Millisecond, obs, Every(5*time.Millisecond))
+	err := Until(t.Context(), 150*time.Millisecond, obs, Every(5*time.Millisecond))
 	require.ErrorIs(t, err, ErrBudgetExpired)
-	assert.Contains(t, err.Error(), "30ms")
+	assert.Contains(t, err.Error(), "150ms")
 	assert.Contains(t, err.Error(), "attempt")
 	assert.Greater(t, *calls, 1)
 }
@@ -115,4 +115,22 @@ func TestUntil_ConsecutiveBelowOneIsOne(t *testing.T) {
 	obs, calls := script(true)
 	require.NoError(t, Until(t.Context(), time.Second, obs, Consecutive(0)))
 	assert.Equal(t, 1, *calls)
+}
+
+func TestUntil_CancelKeepsTheLastObservationError(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	boom := errors.New("boom")
+	obs, _ := script(boom)
+	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	err := Until(ctx, time.Minute, obs, Every(10*time.Second))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, err, boom)
+}
+
+func TestUntil_ExpiryNamesOnlyTheLatestError(t *testing.T) {
+	boom := errors.New("boom")
+	obs, _ := script(boom, false)
+	err := Until(t.Context(), 60*time.Millisecond, obs, Every(5*time.Millisecond))
+	require.ErrorIs(t, err, ErrBudgetExpired)
+	assert.NotErrorIs(t, err, boom, "a clean miss after a transient error must not blame the old error")
 }

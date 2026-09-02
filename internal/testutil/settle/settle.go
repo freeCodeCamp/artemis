@@ -38,7 +38,7 @@ func Until(ctx context.Context, budget time.Duration, observe Observation, opts 
 	var lastErr error
 	for {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("settle: %w", err)
+			return cancelled(err, lastErr)
 		}
 		if attempts > 0 && !time.Now().Before(deadline) {
 			break
@@ -50,11 +50,13 @@ func Until(ctx context.Context, budget time.Duration, observe Observation, opts 
 			lastErr = err
 			streak = 0
 		case ok:
+			lastErr = nil
 			streak++
 			if streak >= cfg.consecutive {
 				return nil
 			}
 		default:
+			lastErr = nil
 			streak = 0
 		}
 		if !time.Now().Before(deadline) {
@@ -64,7 +66,7 @@ func Until(ctx context.Context, budget time.Duration, observe Observation, opts 
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("settle: %w", ctx.Err())
+			return cancelled(ctx.Err(), lastErr)
 		case <-timer.C:
 		}
 	}
@@ -81,4 +83,11 @@ func observeOnce(ctx context.Context, perAttempt time.Duration, observe Observat
 	actx, cancel := context.WithTimeout(ctx, perAttempt)
 	defer cancel()
 	return observe(actx)
+}
+
+func cancelled(ctxErr, lastErr error) error {
+	if lastErr != nil {
+		return fmt.Errorf("settle: %w (last observation: %w)", ctxErr, lastErr)
+	}
+	return fmt.Errorf("settle: %w", ctxErr)
 }

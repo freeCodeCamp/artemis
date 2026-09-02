@@ -75,9 +75,9 @@ func TestR6TwoConcurrencyStrategiesBothBindAndQueue(t *testing.T) {
 	for _, site := range sites {
 		h.waitStarts(t, site, 1, "every event must reach the worker; a missing concurrency key fails the run before it starts")
 	}
-	_ = settle.Until(t.Context(), runReadyTimeout, func(context.Context) (bool, error) {
+	require.NoError(t, settle.Until(t.Context(), runReadyTimeout, func(context.Context) (bool, error) {
 		return completed.Load() >= multiStrategySites, nil
-	}, settle.Every(pollInterval))
+	}, settle.Every(pollInterval)), "every queued run must complete within the run budget")
 
 	require.EqualValues(t, multiStrategySites, completed.Load(),
 		"GROUP_ROUND_ROBIN must queue the excess, never cancel it; a cancelled run leaves a reclaim half done")
