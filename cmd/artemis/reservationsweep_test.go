@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/pg"
 	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 	"github.com/freeCodeCamp/artemis/internal/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,6 +81,10 @@ func TestScheduleReclaims_EmitsOneEventPerReclaimableRowInOneBatch(t *testing.T)
 }
 
 func TestScheduleReclaims_EmitsAtMostTheSweepLimit(t *testing.T) {
+	rec := &capturingHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
+	t.Cleanup(func() { slog.SetDefault(old) })
 	var rows []registry.Reservation
 	for i := 0; i < reservationSweepLimit+7; i++ {
 		rows = append(rows, registry.Reservation{Slug: sitekey.Slug("s" + string(rune('a'+i%26)) + string(rune('a'+i/26)))})
@@ -92,6 +99,10 @@ func TestScheduleReclaims_EmitsAtMostTheSweepLimit(t *testing.T) {
 		"ADR-022 keeps reservationSweepLimit as the nightly cap; the rest wait for tomorrow")
 	require.Len(t, emit.batches, 1)
 	assert.Len(t, emit.batches[0], reservationSweepLimit)
+	level, logged := rec.levelOf("reservation.sweep.capped")
+	require.True(t, logged, "a capped night must say so; silence reads as an empty backlog")
+	assert.Equal(t, slog.LevelWarn, level, "warn is what reaches the alert channel; an info line on a capped night is silence")
+	assert.Equal(t, strconv.Itoa(reservationSweepLimit), rec.attr("reservation.sweep.capped", "limit"), "the warning names the cap so the reader knows the rest waits for tomorrow")
 }
 
 func TestScheduleReclaims_DryRunEmitsNothing(t *testing.T) {

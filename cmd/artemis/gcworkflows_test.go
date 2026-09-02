@@ -368,13 +368,13 @@ func TestSiteLifecycleDef(t *testing.T) {
 	var lifecycle *worker.WorkflowDef
 	for _, d := range gcWorkflowDefs(gcw, true, cleanSweep) {
 		if d.Name == worker.WorkflowSiteLifecycle {
-			d := d
 			lifecycle = &d
 		}
 	}
 	require.NotNil(t, lifecycle, "ADR-022: one site.lifecycle workflow carries the durable reclaim")
 
-	assert.Equal(t, "site.lifecycle", lifecycle.Name)
+	assert.Equal(t, "site.lifecycle", worker.WorkflowSiteLifecycle,
+		"COMPATIBILITY entry 33 and ADR-022 publish this name and Hatchet run history carries it; a rename is a contract change, not a refactor")
 	assert.Equal(t, []string{pg.TopicSiteLifecycle}, lifecycle.EventTriggers, "triggered by the outbox topic of the same name")
 	assert.Equal(t, worker.ConcurrencyKeySlug, lifecycle.ConcurrencyKey, "ADR-022: the concurrency key is the slug, MaxRuns 1")
 	require.Equal(t, []worker.ConcurrencyLimit{{Key: worker.ConcurrencyKeyAction, MaxRuns: reclaimParallelism}}, lifecycle.ExtraConcurrency,

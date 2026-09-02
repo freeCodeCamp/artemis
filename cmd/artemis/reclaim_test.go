@@ -68,15 +68,19 @@ func (s *recordingLockSession) Close(context.Context) {
 }
 
 type scriptedClaimer struct {
-	won   bool
-	err   error
-	calls []sitekey.Slug
-	ttl   time.Duration
+	won      bool
+	winsOnce bool
+	err      error
+	calls    []sitekey.Slug
+	ttl      time.Duration
 }
 
 func (c *scriptedClaimer) ClaimReclaim(_ context.Context, slug sitekey.Slug, ttl time.Duration) (bool, error) {
 	c.calls = append(c.calls, slug)
 	c.ttl = ttl
+	if c.winsOnce {
+		return len(c.calls) == 1, c.err
+	}
 	return c.won, c.err
 }
 
@@ -162,7 +166,7 @@ func newReclaimFixture() (reclaimFixture, reclaimDeps) {
 		Mover:     f.mover,
 		Tombstone: f.tb,
 		Locker:    f.locker,
-		Claim:     claimExpired,
+		Expired:   claimExpired,
 		Claimer:   f.claimer,
 		Releaser:  f.releaser,
 		Dirname:   testDirname,
@@ -177,14 +181,16 @@ func TestRunSiteReclaim_ClaimsThenMovesThenReleasesUnderTheSiteLock(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, []sitekey.Slug{"gone"}, f.claimer.calls)
-	assert.Equal(t, reclaimClaimTTL, f.claimer.ttl)
+	assert.Equal(t, reclaimClaimTTL, f.claimer.ttl,
+		"the TTL decides how long a duplicate event stays a no-op; a shorter one lets two runs move the same site")
 	assert.Equal(t, []sitekey.Dirname{"gone.freecode.camp"}, f.locker.locked,
 		"an unlocked MovePrefix races SiteRelease on the same prefix and deletes an object the peer is still copying")
 	assert.Equal(t, 1, f.locker.sessions, "one lock session per run, opened once")
 	assert.Equal(t, 1, f.locker.closed, "the lock session must be released when the run ends")
 	require.Len(t, f.mover.moved, 1,
 		"tombstone-purge collects _trash only; bytes left at the origin have no collector and no alert")
-	assert.Equal(t, [2]string{"gone.freecode.camp/", "_trash/gone.freecode.camp/"}, f.mover.moved[0])
+	assert.Equal(t, [2]string{"gone.freecode.camp/", "_trash/gone.freecode.camp/"}, f.mover.moved[0],
+		"the dirname keeps its name under _trash/, which is where the purge and any recovery look for it")
 	assert.True(t, f.mover.sawLock, "the origin-prefix move must run inside the site lock")
 	assert.True(t, f.releaser.sawLock, "freeing the name must run inside the same lock that moved its bytes")
 	assert.True(t, f.releaser.sawMove, "the name is freed only after its bytes moved")
@@ -210,8 +216,8 @@ func TestRunSiteReclaim_AuditsTheReleaseExactlyOnceWithTheMoveCount(t *testing.T
 
 	require.Len(t, f.releaser.events, 1)
 	e := f.releaser.events[0]
-	assert.Equal(t, "system:gc", e.Actor)
-	assert.Equal(t, opSiteReclaim, e.Action)
+	assert.Equal(t, "system:gc", e.Actor, "audit readers separate system rows from staff rows by actor")
+	assert.Equal(t, "site.reclaim", e.Action, "COMPATIBILITY entry 33 names site.reclaim; any other action hides the row from every filter and dashboard keyed on it")
 	assert.Equal(t, "gone.freecode.camp", e.Site)
 	assert.Equal(t, "success", e.Outcome)
 	assert.Equal(t, map[string]any{"moved": 3, "tombstoned": true}, e.Detail)
@@ -244,7 +250,7 @@ func TestRunSiteReclaim_KeepsTheNameWhenTheMoveFails(t *testing.T) {
 
 func TestRunSiteReclaim_RefusesARowTheDatabaseNoLongerHoldsExpired(t *testing.T) {
 	f, deps := newReclaimFixture()
-	deps.Claim = func(context.Context, sitekey.Slug) (bool, error) { return false, nil }
+	deps.Expired = func(context.Context, sitekey.Slug) (bool, error) { return false, nil }
 
 	err := runSiteReclaim(context.Background(), deps, reclaimInput("reborn"), false)
 
@@ -252,7 +258,7 @@ func TestRunSiteReclaim_RefusesARowTheDatabaseNoLongerHoldsExpired(t *testing.T)
 	assert.Empty(t, f.mover.moved,
 		"between the claim and the lock the row stopped being an expired reservation; a new owner's whole object tree must not move to _trash")
 	assert.Empty(t, f.tb.sites,
-		"a site tombstone for a live site makes tombstone-purge hard-delete a new owner's bytes seven days later")
+		"a site tombstone for a live site makes tombstone-purge purge a new owner's bytes seven days later")
 	assert.Empty(t, f.releaser.released)
 }
 
@@ -263,7 +269,7 @@ func TestRunSiteReclaim_AClaimLostAfterTheMoveIsNotAFailure(t *testing.T) {
 	err := runSiteReclaim(context.Background(), deps, reclaimInput("gone"), false)
 
 	require.NoError(t, err, "the row stopped being an expired reservation after its bytes were trashed; the bytes sit in _trash under a tombstone and the purge collects them")
-	assert.Len(t, f.mover.moved, 1)
+	assert.Len(t, f.mover.moved, 1, "the bytes moved before the release was refused; they sit in _trash under a tombstone")
 }
 
 func TestRunSiteReclaim_DryRunClaimsNothingAndMovesNothing(t *testing.T) {
@@ -310,7 +316,7 @@ func TestRunSiteReclaim_RejectsMissingOrForeignInput(t *testing.T) {
 func TestRunSiteReclaim_LiveRunWithoutItsDependenciesIsAWiringError(t *testing.T) {
 	cases := map[string]func(*reclaimDeps){
 		"no-locker":    func(d *reclaimDeps) { d.Locker = nil },
-		"no-claim":     func(d *reclaimDeps) { d.Claim = nil },
+		"no-expired":   func(d *reclaimDeps) { d.Expired = nil },
 		"no-claimer":   func(d *reclaimDeps) { d.Claimer = nil },
 		"no-releaser":  func(d *reclaimDeps) { d.Releaser = nil },
 		"no-tombstone": func(d *reclaimDeps) { d.Tombstone = nil },
@@ -327,4 +333,17 @@ func TestRunSiteReclaim_LiveRunWithoutItsDependenciesIsAWiringError(t *testing.T
 			assert.Empty(t, f.releaser.released)
 		})
 	}
+}
+
+func TestRunSiteReclaim_TheSameEventTwiceReclaimsOnce(t *testing.T) {
+	f, deps := newReclaimFixture()
+	f.claimer.winsOnce = true
+
+	require.NoError(t, runSiteReclaim(context.Background(), deps, reclaimInput("gone"), false))
+	require.NoError(t, runSiteReclaim(context.Background(), deps, reclaimInput("gone"), false))
+
+	assert.Len(t, f.claimer.calls, 2, "both deliveries reach the claim; the claim is what decides")
+	assert.Len(t, f.mover.moved, 1, "an at-least-once outbox can deliver one event twice; the dirname must move once")
+	assert.Len(t, f.releaser.events, 1, "exactly one audit row per reclaimed site, however many times the event arrives")
+	assert.Equal(t, 1, f.locker.sessions, "the losing run never takes the lock, so it never holds a connection")
 }

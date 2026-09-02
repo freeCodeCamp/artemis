@@ -213,20 +213,6 @@ func expiredClaimChecker(src expiredClaimSource) func(context.Context, sitekey.S
 	return src.IsExpiredReservation
 }
 
-func reclaimClaimerOf(w reservationWiring) reclaimClaimer {
-	if w == nil {
-		return nil
-	}
-	return w
-}
-
-func auditedReleaserOf(w reservationWiring) auditedReleaser {
-	if w == nil {
-		return nil
-	}
-	return w
-}
-
 func heldChecker(src heldNameSource, toSlug func(sitekey.Dirname) (sitekey.Slug, bool)) func(context.Context, sitekey.Dirname) (bool, error) {
 	if src == nil {
 		return nil
@@ -294,9 +280,9 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			Mover:     r2c,
 			Tombstone: tombstoneRecorder,
 			Locker:    gcLocker,
-			Claim:     expiredClaimChecker(resv),
-			Claimer:   reclaimClaimerOf(resv),
-			Releaser:  auditedReleaserOf(resv),
+			Expired:   expiredClaimChecker(resv),
+			Claimer:   resv,
+			Releaser:  resv,
 			Dirname:   tmpl.SiteDirname,
 			TrashBase: cfg.Cleanup.TrashPrefix,
 		},

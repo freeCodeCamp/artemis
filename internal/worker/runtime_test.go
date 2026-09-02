@@ -72,3 +72,8 @@ func TestRuntime_PropagatesRegisterError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "register x")
 }
+
+func TestWorkflowSiteLifecycleIsTheWireName(t *testing.T) {
+	assert.Equal(t, "site.lifecycle", WorkflowSiteLifecycle,
+		"Hatchet run history on the live engine carries this literal; a rename orphans every run recorded under the old name")
+}

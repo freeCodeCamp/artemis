@@ -40,7 +40,7 @@ type reclaimDeps struct {
 	Mover     siteReclaimer
 	Tombstone siteTombstoneRecorder
 	Locker    gc.Locker
-	Claim     func(ctx context.Context, slug sitekey.Slug) (bool, error)
+	Expired   func(ctx context.Context, slug sitekey.Slug) (bool, error)
 	Claimer   reclaimClaimer
 	Releaser  auditedReleaser
 	Dirname   func(sitekey.Slug) sitekey.Dirname
@@ -71,17 +71,17 @@ func runSiteReclaim(ctx context.Context, deps reclaimDeps, input map[string]any,
 	if in.Action != pg.LifecycleActionReclaim {
 		return fmt.Errorf("site.lifecycle: unknown action %q for %s", in.Action, in.Slug)
 	}
-	if deps.Dirname == nil || deps.Claim == nil {
-		return errors.New("site.reclaim: run without a dirname template or claim check (wiring bug)")
+	if deps.Dirname == nil || deps.Expired == nil {
+		return errors.New("site.reclaim: run without a dirname template or expiry check (wiring bug)")
 	}
 	dirname := deps.Dirname(in.Slug)
 	if in.Site != "" && in.Site != dirname {
 		return fmt.Errorf("site.reclaim %s: payload site %q is not the slug's dirname %q", in.Slug, in.Site, dirname)
 	}
 	if dryRun {
-		expired, err := deps.Claim(ctx, in.Slug)
+		expired, err := deps.Expired(ctx, in.Slug)
 		if err != nil {
-			return fmt.Errorf("site.reclaim claim check %s: %w", in.Slug, err)
+			return fmt.Errorf("site.reclaim expiry check %s: %w", in.Slug, err)
 		}
 		slog.InfoContext(ctx, "site.reclaim.would_reclaim", "slug", in.Slug, "site", dirname, "expired", expired)
 		return nil
@@ -104,9 +104,9 @@ func runSiteReclaim(ctx context.Context, deps reclaimDeps, input map[string]any,
 	}
 	defer sess.Close(ctx)
 	return sess.WithSiteLock(ctx, dirname, func(ctx context.Context) error {
-		expired, err := deps.Claim(ctx, in.Slug)
+		expired, err := deps.Expired(ctx, in.Slug)
 		if err != nil {
-			return fmt.Errorf("site.reclaim claim check %s: %w", in.Slug, err)
+			return fmt.Errorf("site.reclaim expiry check %s: %w", in.Slug, err)
 		}
 		if !expired {
 			slog.WarnContext(ctx, "site.reclaim.claim_not_held", "slug", in.Slug, "site", dirname,

@@ -118,3 +118,8 @@ func TestOutbox_EnqueueSiteChanged(t *testing.T) {
 	require.NoError(t, json.Unmarshal(events[0].Payload, &p))
 	assert.Equal(t, "learn", p["site"])
 }
+
+func TestTopicSiteLifecycleIsTheWireLiteral(t *testing.T) {
+	assert.Equal(t, "site.lifecycle", TopicSiteLifecycle,
+		"outbox rows already enqueued carry this literal; a rename leaves them with no consumer")
+}
