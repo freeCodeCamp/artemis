@@ -139,20 +139,6 @@ func (s *RegistryStore) ExpireReservation(ctx context.Context, slug sitekey.Slug
 	return nil
 }
 
-func (s *RegistryStore) ReleaseReservation(ctx context.Context, slug sitekey.Slug) error {
-	tag, err := s.pool.Exec(ctx,
-		`DELETE FROM sites WHERE slug = $1 AND state = $2 AND reserved_until < now()`,
-		slug, registry.StateReserved)
-	if err != nil {
-		return fmt.Errorf("pg release reservation %s: %w", slug, err)
-	}
-	if tag.RowsAffected() == 0 {
-		return registry.ErrNotFound
-	}
-	s.changed(slug)
-	return nil
-}
-
 func (s *RegistryStore) ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error {
 	tag, err := s.pool.Exec(ctx,
 		`DELETE FROM sites WHERE slug = $1 AND state = $2`,
@@ -165,28 +151,6 @@ func (s *RegistryStore) ReleaseReservationNow(ctx context.Context, slug sitekey.
 	}
 	s.changed(slug)
 	return nil
-}
-
-func (s *RegistryStore) ExpiredReservations(ctx context.Context, before time.Time, limit int) ([]registry.Reservation, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
-		 FROM sites WHERE state = $1 AND reserved_until < $2
-		 ORDER BY reserved_until LIMIT $3`,
-		registry.StateReserved, before.UTC(), limit)
-	if err != nil {
-		return nil, fmt.Errorf("pg expired reservations: %w", err)
-	}
-	defer rows.Close()
-
-	var out []registry.Reservation
-	for rows.Next() {
-		var r registry.Reservation
-		if err := scanReservationRow(rows, &r); err != nil {
-			return nil, fmt.Errorf("pg expired reservations scan: %w", err)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
 }
 
 type rowScanner interface {

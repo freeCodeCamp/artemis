@@ -118,41 +118,6 @@ func TestRegistryStore_UndeleteOnAnActiveRowIsNotReserved(t *testing.T) {
 		"undelete on a live site would overwrite its production alias with a stale pointer")
 }
 
-func TestRegistryStore_ExpiredReservationsSelectsOnlyPastDeadlines(t *testing.T) {
-	store, _, ctx := newReservationFixture(t)
-	_, err := store.Register(ctx, "livehold", []string{"staff"}, "alice")
-	require.NoError(t, err)
-
-	now := time.Now().UTC()
-	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Minute), "bob", registry.ObservedAliases{})
-	require.NoError(t, err)
-	_, err = store.Reserve(ctx, "livehold", "livehold.freecode.camp", now.Add(time.Hour), "bob", registry.ObservedAliases{})
-	require.NoError(t, err)
-
-	expired, err := store.ExpiredReservations(ctx, now, 10)
-	require.NoError(t, err)
-
-	require.Len(t, expired, 1, "a reservation still inside its grace window is not reclaimable")
-	assert.Equal(t, reservationSlug, expired[0].Slug)
-}
-
-func TestRegistryStore_ExpiredReservationsHonoursItsLimit(t *testing.T) {
-	store, _, ctx := newReservationFixture(t)
-	now := time.Now().UTC()
-	for _, slug := range []sitekey.Slug{"alpha", "bravo"} {
-		_, err := store.Register(ctx, slug, []string{"staff"}, "alice")
-		require.NoError(t, err)
-		_, err = store.Reserve(ctx, slug, sitekey.Dirname(string(slug)+".freecode.camp"), now.Add(-time.Hour), "bob", registry.ObservedAliases{})
-		require.NoError(t, err)
-	}
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Hour), "bob", registry.ObservedAliases{})
-	require.NoError(t, err)
-
-	expired, err := store.ExpiredReservations(ctx, now, 2)
-	require.NoError(t, err)
-	assert.Len(t, expired, 2)
-}
-
 func TestRegistryStore_ReserveDoesNotEnqueueSiteChanged(t *testing.T) {
 	store, repo, ctx := newReservationFixture(t)
 
@@ -215,40 +180,6 @@ func TestRegistryStore_UndeleteRefusesAReservationPastItsDeadline(t *testing.T) 
 	site, err := store.GetSite(ctx, reservationSlug)
 	require.NoError(t, err)
 	assert.True(t, site.IsReserved(), "the refused undelete leaves the row for the sweep")
-}
-
-func TestRegistryStore_ReleaseReservationDeletesAnExpiredReservedRow(t *testing.T) {
-	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(-time.Minute), "bob", registry.ObservedAliases{})
-	require.NoError(t, err)
-
-	require.NoError(t, store.ReleaseReservation(ctx, reservationSlug))
-
-	_, err = store.GetSite(ctx, reservationSlug)
-	assert.ErrorIs(t, err, registry.ErrNotFound)
-}
-
-func TestRegistryStore_ReleaseReservationRefusesARowInsideItsGraceWindow(t *testing.T) {
-	store, _, ctx := newReservationFixture(t)
-	_, err := store.Reserve(ctx, reservationSlug, reservationDirname, time.Now().UTC().Add(time.Hour), "bob", registry.ObservedAliases{})
-	require.NoError(t, err)
-
-	assert.ErrorIs(t, store.ReleaseReservation(ctx, reservationSlug), registry.ErrNotFound)
-
-	site, err := store.GetSite(ctx, reservationSlug)
-	require.NoError(t, err)
-	assert.True(t, site.IsReserved(), "a name still inside its grace window is not the sweep's to free")
-}
-
-func TestRegistryStore_ReleaseReservationRefusesARowThatIsNoLongerReserved(t *testing.T) {
-	store, _, ctx := newReservationFixture(t)
-
-	assert.ErrorIs(t, store.ReleaseReservation(ctx, reservationSlug), registry.ErrNotFound,
-		"an unguarded delete here would drop a live site the sweep only ever saw as reserved")
-
-	site, err := store.GetSite(ctx, reservationSlug)
-	require.NoError(t, err)
-	assert.False(t, site.IsReserved())
 }
 
 func TestRegistryStore_ReleaseReservationNowFreesAReservationBeforeItsDeadline(t *testing.T) {

@@ -111,8 +111,8 @@ type ReservationReverser interface {
 	Undelete(ctx context.Context, slug sitekey.Slug) (registry.Reservation, error)
 }
 
-// NameReleaser carries no deadline predicate, unlike the sweep's
-// ReleaseReservation, which is why its caller is approver-gated.
+// NameReleaser carries no deadline predicate, unlike the reclaim's
+// ReleaseReservationAudited, which is why its caller is approver-gated.
 type NameReleaser interface {
 	ReleaseReservationNow(ctx context.Context, slug sitekey.Slug) error
 	ExpireReservation(ctx context.Context, slug sitekey.Slug) error
