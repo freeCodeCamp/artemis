@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
 )
 
 const (
@@ -129,24 +131,24 @@ func siteState(ctx context.Context, t *testing.T, c cfg, slug string) (string, s
 
 func aliasDeployID(ctx context.Context, t *testing.T, c cfg, slug, mode string, budget time.Duration) (string, error) {
 	t.Helper()
-	deadline := time.Now().Add(budget)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	var deployID string
+	err := settle.Until(ctx, budget, func(ctx context.Context) (bool, error) {
 		var alias struct {
 			DeployID string `json:"deployId"`
 		}
 		err := c.doJSON(ctx, http.MethodGet,
 			fmt.Sprintf("/api/site/%s/alias/%s", slug, mode), c.GHToken, nil, &alias)
-		if err == nil {
-			return alias.DeployID, nil
+		if err != nil {
+			t.Logf("[alias] %s/%s not readable yet: %v", slug, mode, err)
+			return false, err
 		}
-		lastErr = err
-		t.Logf("[alias] %s/%s not readable yet: %v", slug, mode, err)
-		if werr := sleepCtx(ctx, 5*time.Second); werr != nil {
-			return "", fmt.Errorf("%w (last alias error: %v)", werr, lastErr)
-		}
+		deployID = alias.DeployID
+		return true, nil
+	}, settle.Every(5*time.Second))
+	if err != nil {
+		return "", err
 	}
-	return "", lastErr
+	return deployID, nil
 }
 
 func TestSiteLifecycle_DeleteHoldsTheNameAndUndeleteRestoresService(t *testing.T) {
@@ -328,18 +330,14 @@ func publishLifecycleSite(ctx context.Context, t *testing.T, c cfg, slug string,
 		DeployID string `json:"deployId"`
 		JWT      string `json:"jwt"`
 	}
-	deadline := time.Now().Add(90 * time.Second)
-	var initErr error
-	for time.Now().Before(deadline) {
-		initErr = c.doJSON(ctx, http.MethodPost, "/api/deploy/init", c.GHToken, initReq, &initResp)
-		if initErr == nil {
-			break
+	initErr := settle.Until(ctx, 90*time.Second, func(ctx context.Context) (bool, error) {
+		err := c.doJSON(ctx, http.MethodPost, "/api/deploy/init", c.GHToken, initReq, &initResp)
+		if err != nil {
+			t.Logf("[init] %s not authorizable yet, the registry snapshot refreshes on pub-sub with a 60s TTL fallback: %v", slug, err)
+			return false, err
 		}
-		t.Logf("[init] %s not authorizable yet, the registry snapshot refreshes on pub-sub with a 60s TTL fallback: %v", slug, initErr)
-		if werr := sleepCtx(ctx, 5*time.Second); werr != nil {
-			t.Fatalf("init %s: %v (last init error: %v)", slug, werr, initErr)
-		}
-	}
+		return true, nil
+	}, settle.Every(5*time.Second))
 	if initErr != nil {
 		t.Fatalf("init %s: %v", slug, initErr)
 	}
@@ -368,21 +366,21 @@ func publishLifecycleSite(ctx context.Context, t *testing.T, c cfg, slug string,
 
 func deployCountAfterRelease(ctx context.Context, t *testing.T, c cfg, slug string, budget time.Duration) (int, error) {
 	t.Helper()
-	deadline := time.Now().Add(budget)
-	var lastErr error
-	for time.Now().Before(deadline) {
+	count := 0
+	err := settle.Until(ctx, budget, func(ctx context.Context) (bool, error) {
 		var deploys []struct {
 			DeployID string `json:"deployId"`
 		}
 		err := c.doJSON(ctx, http.MethodGet, "/api/site/"+slug+"/deploys", c.GHToken, nil, &deploys)
-		if err == nil {
-			return len(deploys), nil
+		if err != nil {
+			t.Logf("[deploys] %s not readable yet, the re-registered row reaches the snapshot on pub-sub with a 60s TTL fallback: %v", slug, err)
+			return false, err
 		}
-		lastErr = err
-		t.Logf("[deploys] %s not readable yet, the re-registered row reaches the snapshot on pub-sub with a 60s TTL fallback: %v", slug, err)
-		if werr := sleepCtx(ctx, 5*time.Second); werr != nil {
-			return 0, fmt.Errorf("%w (last deploys error: %v)", werr, lastErr)
-		}
+		count = len(deploys)
+		return true, nil
+	}, settle.Every(5*time.Second))
+	if err != nil {
+		return 0, err
 	}
-	return 0, lastErr
+	return count, nil
 }

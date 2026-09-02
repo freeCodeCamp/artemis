@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
 )
 
 // cfg holds the shared integration-suite configuration resolved from env.
@@ -241,37 +243,23 @@ func (c cfg) fetchAndContains(ctx context.Context, url, marker string) (bool, in
 // Returns total wait + error.
 func (c cfg) pollForMarker(t *testing.T, url, marker string, budget time.Duration) error {
 	t.Helper()
-	deadline := time.Now().Add(budget)
-	consecutive := 0
 	const consecutiveTarget = 2
-	const interval = 5 * time.Second
-
-	ctx, cancel := context.WithDeadline(context.Background(), deadline.Add(10*time.Second))
-	defer cancel()
-
-	for time.Now().Before(deadline) {
+	err := settle.Until(t.Context(), budget, func(ctx context.Context) (bool, error) {
 		hit, status, err := c.fetchAndContains(ctx, url, marker)
 		switch {
 		case err != nil:
-			t.Logf("[poll] %s: err=%v (resetting streak)", url, err)
-			consecutive = 0
+			t.Logf("[poll] %s: err=%v (streak reset)", url, err)
 		case hit:
-			consecutive++
-			t.Logf("[poll] %s: status=%d hit (streak=%d/%d)", url, status, consecutive, consecutiveTarget)
-			if consecutive >= consecutiveTarget {
-				return nil
-			}
+			t.Logf("[poll] %s: status=%d hit", url, status)
 		default:
 			t.Logf("[poll] %s: status=%d miss (streak reset)", url, status)
-			consecutive = 0
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("poll cancelled: %w", ctx.Err())
-		case <-time.After(interval):
-		}
+		return hit, err
+	}, settle.Every(5*time.Second), settle.Consecutive(consecutiveTarget))
+	if err != nil {
+		return fmt.Errorf("marker %q not seen on %d consecutive hits within %s: %w", marker, consecutiveTarget, budget, err)
 	}
-	return fmt.Errorf("marker %q not seen on %d consecutive hits within %s", marker, consecutiveTarget, budget)
+	return nil
 }
 
 // --------------------------------------------------------------------

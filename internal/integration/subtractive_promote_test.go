@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/freeCodeCamp/artemis/internal/testutil/settle"
 )
 
 // TestSubtractivePromote pins the empirical 2026-05-12 finding: a
@@ -192,45 +194,24 @@ func finalizePreviewMulti(
 // inverted: we are waiting for absence rather than presence.
 func pollFor404(t *testing.T, c cfg, url string, budget time.Duration) error {
 	t.Helper()
-	deadline := time.Now().Add(budget)
-	consecutive := 0
 	const consecutiveTarget = 2
-	const interval = 5 * time.Second
-
-	ctx, cancel := context.WithDeadline(context.Background(), deadline.Add(10*time.Second))
-	defer cancel()
-
-	for time.Now().Before(deadline) {
+	err := settle.Until(t.Context(), budget, func(ctx context.Context) (bool, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return err
+			return false, err
 		}
 		req.Header.Set("Cache-Control", "no-cache")
 		resp, err := c.HTTP.Do(req)
-		switch {
-		case err != nil:
+		if err != nil {
 			t.Logf("[poll-404] %s: err=%v (streak reset)", url, err)
-			consecutive = 0
-		case resp.StatusCode == http.StatusNotFound:
-			resp.Body.Close()
-			consecutive++
-			t.Logf("[poll-404] %s: status=404 (streak=%d/%d)",
-				url, consecutive, consecutiveTarget)
-			if consecutive >= consecutiveTarget {
-				return nil
-			}
-		default:
-			resp.Body.Close()
-			t.Logf("[poll-404] %s: status=%d (streak reset)",
-				url, resp.StatusCode)
-			consecutive = 0
+			return false, err
 		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("poll cancelled: %w", ctx.Err())
-		case <-time.After(interval):
-		}
+		resp.Body.Close()
+		t.Logf("[poll-404] %s: status=%d", url, resp.StatusCode)
+		return resp.StatusCode == http.StatusNotFound, nil
+	}, settle.Every(5*time.Second), settle.Consecutive(consecutiveTarget))
+	if err != nil {
+		return fmt.Errorf("404 not seen on %d consecutive hits within %s: %w", consecutiveTarget, budget, err)
 	}
-	return fmt.Errorf("404 not seen on %d consecutive hits within %s",
-		consecutiveTarget, budget)
+	return nil
 }
