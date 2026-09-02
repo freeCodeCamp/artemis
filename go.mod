@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.21
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.1
 	github.com/aws/smithy-go v1.27.1
+	github.com/getkin/kin-openapi v0.135.0
 	github.com/getsentry/sentry-go v0.46.2
 	github.com/getsentry/sentry-go/slog v0.46.2
 	github.com/go-chi/chi/v5 v5.3.0
@@ -65,7 +66,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
-	github.com/getkin/kin-openapi v0.135.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect

@@ -1,0 +1,4840 @@
+---
+openapi: 3.0.3
+info:
+  title: artemis deploy proxy
+  version: '1'
+  description: Static-apps deploy proxy for the freeCodeCamp Universe platform. This
+    document is the authoritative API surface (ADR-016, amendment 2026-09-03). Every
+    routed response carries X-Request-ID and X-Artemis-Version.
+servers:
+- url: https://uploads.freecode.camp
+paths:
+  "/healthz":
+    get:
+      operationId: getHealthz
+      security: []
+      responses:
+        '200':
+          description: always; no auth, no upstream calls, no branches
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - ok
+                additionalProperties: false
+                properties:
+                  ok:
+                    type: boolean
+                    enum:
+                    - true
+        '500':
+          description: "`internal_error`: any panic in the chain, converted by Recoverer.
+            No code path in HealthZ itself can panic."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - public
+  "/readyz":
+    get:
+      operationId: getReadyz
+      security: []
+      responses:
+        '200':
+          description: |-
+            Valkey ping OK and both R2 and Postgres pings OK (or their deps are nil);. `degraded` key is ABSENT, not false.
+            Valkey ping OK but R2 ping and/or Postgres ping failed;. One body regardless of how many degradable upstreams are down.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - ready
+                additionalProperties: false
+                properties:
+                  ready:
+                    type: boolean
+                    enum:
+                    - true
+        '500':
+          description: "`internal_error`: any panic, converted by Recoverer"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: '`valkey_unreachable`: h.Health.Ping fails. message is the
+            literal "upstream call failed". Valkey failure short-circuits before the
+            degraded branch, so it wins over a simultaneous R2/PG failure.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - public
+  "/api/whoami":
+    get:
+      operationId: getWhoami
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: token valid and GH.UserTeams succeeded;
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - login
+                - authorizedSites
+                additionalProperties: false
+                properties:
+                  login:
+                    type: string
+                    description: GitHub login resolved by RequireGitHubBearer
+                  authorizedSites:
+                    type: array
+                    items:
+                      type: string
+                    description: sitekey.Slug is `type Slug string` with no custom
+                      JSON marshaller, so plain strings. Sorted ascending. Initialised
+                      to an empty slice so it serialises as [] and never null.
+        '401':
+          description: |-
+            `missing_bearer`: no Authorization header, or not exactly `Bearer <token>` with no internal whitespace
+            `unauthenticated`: GH ValidateToken failed. Two messages, one code: "invalid github token" on a GitHub 401/403, "could not validate github token" on anything else
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: '`rate_limited`: GitHub rate limit. From the middleware, message
+            "github api rate limited; retry later"; from the in-handler UserTeams
+            probe via writeGitHubProbeError, the same code and message'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: any panic, converted by Recoverer"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: '`upstream_unavailable`: middleware: GitHub 5xx, message "github
+            api unavailable; retry later". Handler: any non-rate-limit UserTeams error,
+            message "could not probe team membership"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: request exceeds the 60s apiRequestTimeout on the bearer group;
+            chi middleware.Timeout writes a bare 504 with no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - whoami
+  "/api/deploy/init":
+    post:
+      operationId: postDeployInit
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: site registered, caller on an authorized team, JWT signed
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - deployId
+                - jwt
+                - expiresAt
+                additionalProperties: false
+                properties:
+                  deployId:
+                    type: string
+                    description: minted by h.NewDeployID(sha); production form <ts>-<sha7>,
+                      e.g. 20260420-141522-abc1234
+                  jwt:
+                    type: string
+                    description: deploy-session HS256 JWT scoped to (login, site,
+                      deployId);
+                  expiresAt:
+                    type: string
+                    description: UTC, formatted with the literal layout "2006-01-02T15:04:05Z"
+                      -- second precision, always a trailing Z
+                description: DeployInitResponse,; written at
+        '400':
+          description: '`bad_request`: three distinct causes, one code. (a) body is
+            not valid JSON -> message "invalid json body". (b) site or sha empty ->
+            "site and sha are required". (c) sha fails the charset/length pattern
+            -> "sha must match [A-Za-z0-9-]{1,64}"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: missing/malformed Authorization header
+            `unauthenticated`: GitHub token invalid or unvalidatable
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: the registry snapshot has no teams for the slug and the site is not merely reserved -- unregistered or teamless. message "site is not registered or has no authorized teams"
+            `user_unauthorized`: AuthorizeForSite returned false -- caller is on none of the site's teams; message "user is not on any authorized team for this site"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_reserved`: the slug is held by a post-delete reservation.
+            Extra key `reservedUntil` = RFC3339 UTC"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: '`too_large`: request body exceeds 8 MiB; message "request
+            body too large"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: AuthorizeForSite hit the GitHub rate limit.
+            Also emitted earlier by the bearer middleware"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: '`client_closed_request`: the registry read failed with context.Canceled.
+            If the request context is not yet done the envelope is written with message
+            "request canceled by client"; if it is done, nothing is written and only
+            the access log records 499'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: |-
+            `jwt_sign_failed`: h.JWT.Sign returned an error; message "could not sign deploy-session jwt"
+            `internal_error`: any panic, converted by Recoverer
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`registry_read_failed`: the authoritative registry read behind
+            the snapshot miss failed for any reason other than ErrReserved/ErrNotFound;
+            message "upstream call failed"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: '`upstream_unavailable`: AuthorizeForSite failed for any other
+            reason, message "could not probe team membership". Also emitted by the
+            middleware on a GitHub 5xx with a different message'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s apiRequestTimeout exceeded; bare 504, no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - deploy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - site
+              - sha
+              additionalProperties: true
+              properties:
+                site:
+                  type: string
+                  description: 'sitekey.Slug (plain string). Required: rejected when
+                    empty.'
+                sha:
+                  type: string
+                  pattern: "^[A-Za-z0-9-]{1,64}$"
+                  description: Required and non-empty; must match shaPattern.
+                files:
+                  type: array
+                  items:
+                    type: string
+                  description: Optional (`json:"files,omitempty"`). DECODED BUT NEVER
+                    READ by DeployInit -- no reference to req.Files anywhere in. The
+                    struct comment calls it the manifest used by /finalize, but finalize
+                    reads its own body.
+              description: DeployInitRequest,. Decoded with decodeJSON at 8 MiB. Unknown
+                fields are ignored.
+  "/api/deploy/{deployId}/upload":
+    put:
+      operationId: putDeployUpload
+      security:
+      - deployJWT: []
+      responses:
+        '200':
+          description: bytes stored in R2
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - received
+                - key
+                additionalProperties: false
+                properties:
+                  received:
+                    type: string
+                    description: the ?path= value, echoed verbatim
+                  key:
+                    type: string
+                    description: 'the full R2 object key: deploy prefix + path, e.g.
+                      www/deploys/20260420-141522-abc1234/index.html'
+                description: written at as an inline map, not a named struct
+        '400':
+          description: '`bad_request`: two causes, one code: missing/empty ?path=
+            -> "missing ?path="; unclean path -> "path must be relative and not traverse"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: missing/malformed Authorization header
+            `jwt_expired`: the deploy-session JWT is past exp; message "deploy-session jwt expired"
+            `missing_jwt`: claims absent from the request context; message "deploy-session jwt missing". Defensive -- unreachable behind RequireDeployJWT on the mounted route.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `jwt_invalid`: any other JWT parse/verify failure -- bad signature, wrong alg, malformed; message "invalid deploy-session jwt"
+            `site_unauthorized`: the JWT verifies but its `site` claim has no teams in the registry snapshot and is not reserved
+            `jwt_wrong_deploy`: the {deployId} URL param differs from the JWT's deployId claim; message "deploy-session jwt does not match url deploy id"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `site_reserved`: the JWT's site claim is held by a post-delete reservation AND the snapshot already dropped it. A stale snapshot that still lists teams lets the upload through with 200 -- an upload is not fenced per file.
+            `deploy_finalized`: the deploy is already fenced as finalized; message "deploy is finalized and immutable; start a new deploy"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: '`too_large`: body exceeds h.UploadMaxBytes (only enforced
+            when > 0); message "upload body exceeds configured limit"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the fence read or the R2 put failed
+            with context.Canceled -- the nominal 503/502 is replaced by 499 and no
+            Sentry event is raised"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: any panic, converted by Recoverer"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `registry_read_failed`: the registry read inside denyUnregisteredSite failed
+            `r2_put_failed`: R2 PutObject failed for a non-size reason; op tag r2.put.upload; message "upstream call failed"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: '`fence_unavailable`: h.DeployFence.IsDeployFinalized failed
+            (Valkey read fault). Fails closed. message "upstream call failed"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 10-minute uploadRequestTimeout exceeded on the JWT group; bare
+            504, no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - deploy
+      parameters:
+      - name: deployId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+        description: 'Destination path relative to the deploy prefix; the R2 key is
+          deployPrefix + path. Missing/empty -> 400 bad_request "missing ?path=".
+          Must pass isCleanRelPath: rejects "", ".", any leading "/", ".." traversal,
+          bytes < 0x20, 0x7F, backslash, and anything path.Clean would rewrite. High-bit
+          UTF-8 is accepted.'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: 'Raw opaque bytes -- NOT JSON. The body is streamed straight
+                into R2. Request headers that matter: `Content-Type` is optional --
+                if absent, the server falls back to mime.TypeByExtension(ext of ?path=),
+                then to "application/octet-stream"; the resolved value is stored as
+                the R2 object''s content type. `Content-Length` is optional -- when
+                >= 0 it is propagated to the R2 SDK to avoid chunked transfer-encoding,
+                a negative value becomes 0/unknown. Body size is capped by http.MaxBytesReader
+                only when h.UploadMaxBytes > 0.'
+  "/api/deploy/{deployId}/finalize":
+    post:
+      operationId: postDeployFinalize
+      security:
+      - deployJWT: []
+      responses:
+        '200':
+          description: manifest verified, marker written, alias flipped, index committed.
+            The response is written before the edge purge; flushThenPurge only flushes
+            the ResponseWriter and then purges -- it writes no bytes and no headers.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - url
+                - deployId
+                - mode
+                additionalProperties: false
+                properties:
+                  url:
+                    type: string
+                    description: public URL, rendered from config by substituting
+                      <site> into PublicProductionURLFmt or PublicPreviewURLFmt --
+                      not a constant baked into the binary
+                  deployId:
+                    type: string
+                    description: the {deployId} URL param, which the JWT already pinned
+                  mode:
+                    type: string
+                    enum:
+                    - preview
+                    - production
+                    description: the NORMALISED mode, so an omitted request mode comes
+                      back as "preview"
+                description: written at as an inline map, not a named struct
+        '400':
+          description: |-
+            `bad_request`: two causes, one code: body is not valid JSON -> "invalid json body"; mode is neither ""/preview nor production -> the message is the literal `mode must be "preview" or "production"`
+            `manifest_required`: files is absent or empty; message "files manifest is required and must list at least one path"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: missing/malformed Authorization header
+            `jwt_expired`: deploy-session JWT past exp
+            `missing_jwt`: claims absent from context. Defensive; unreachable on the mounted route.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `jwt_invalid`: any other JWT verify failure
+            `site_unauthorized`: the JWT's site claim has no teams in the snapshot and is not reserved
+            `jwt_wrong_deploy`: {deployId} URL param != the JWT deployId claim
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `site_reserved`: under the site lock, the authoritative registry read shows the site reserved after a delete; message "site name is reserved after a delete; undelete it or wait for the reclaim". No alias is written.
+            `site_locked`: the advisory site lock timed out; message "another operation on this site is in progress; retry shortly"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '410':
+          description: '`site_gone`: under the site lock, the site is absent from
+            the registry (registry.ErrNotFound); message "site was deleted; deploy
+            cannot be finalized". Beats a stale snapshot that still lists the site.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: '`too_large`: body exceeds 8 MiB; message "request body too
+            large"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: |-
+            `missing_index`: files has no root "index.html"; message "deploy has no root index.html; the site cannot be served at /". The `hint` extra is present ONLY when looksLikeFrameworkBuild matches; its text is the static-export guidance at. No R2 marker is written on this path.
+            `verify_failed`: R2 ListObjectsV2 shows a listed file absent under the deploy prefix; message "deploy is missing expected files", `missing` = r2.VerifyError.Missing. NOTE: written by a raw writeJSON, not writeError -- the envelope shape is identical but errCode is NOT stashed on the statusWriter, so the access log carries no errCode for this response. The alias is not written.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: any of the above upstream failures
+            (verify list, registry read, marker put, alias put, pg index, site lock)
+            carried context.Canceled -- the nominal status is replaced by 499"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: any panic, converted by Recoverer"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `registry_read_failed`: the under-lock registry read failed for any other reason; op registry.get.finalize
+            `r2_put_failed`: two ops, one code: the _artemis_meta.json marker put failed or the alias put failed. message "upstream call failed" both times.
+            `pg_write_failed`: the Postgres deploy-index commit failed after 3 attempts with 150ms doubling backoff. The alias is already live at this point -- a partial commit, audited as stage=index.
+            `site_lock_failed`: the site lock failed for any non-timeout reason; op pg.lock.site
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 10-minute uploadRequestTimeout exceeded; bare 504, no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - deploy
+      parameters:
+      - name: deployId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - files
+              additionalProperties: true
+              properties:
+                mode:
+                  type: string
+                  enum:
+                  - preview
+                  - production
+                  description: OPTIONAL despite having no omitempty tag. normalizeMode
+                    lowercases and trims; "" and "preview" both normalise to "preview",
+                    "production" to "production", anything else is a 400. The normalised
+                    value is what appears in the response and in the R2 marker.
+                  default: preview
+                files:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  description: REQUIRED and non-empty despite the `json:"files,omitempty"`
+                    tag -- an empty or absent list is a 400 manifest_required. Paths
+                    are relative to the deploy prefix. The list MUST contain the exact
+                    literal "index.html" at the root; a nested index.html does not
+                    satisfy it. Every listed path must already exist under the deploy
+                    prefix in R2.
+              description: DeployFinalizeRequest,. Decoded with decodeJSON at 8 MiB.
+                Unknown fields ignored.
+  "/api/audit":
+    get:
+      operationId: getAudit
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: authz passed and the store read succeeded
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - id
+                  - occurredAt
+                  - actor
+                  - action
+                  - outcome
+                  properties:
+                    id:
+                      type: integer
+                      description: Go int64 -> JSON number; always present, no omitempty
+                    occurredAt:
+                      type: string
+                      format: date-time
+                      description: Go time.Time -> RFC3339; always present
+                    actor:
+                      type: string
+                      description: always present, may be empty string
+                    action:
+                      type: string
+                      description: always present, may be empty string
+                    site:
+                      type: string
+                      description: 'omitempty: absent when empty'
+                    deployId:
+                      type: string
+                      description: 'omitempty: absent when empty'
+                    outcome:
+                      type: string
+                      description: always present, may be empty string
+                    requestId:
+                      type: string
+                      description: 'omitempty: absent when empty'
+                    detail:
+                      type: object
+                      additionalProperties: true
+                      description: 'Go map[string]any, omitempty: absent when nil/empty'
+                description: AuditRow,. Built with make([]AuditRow,0,n) at so an empty
+                  result serialises as [] and never null.
+        '400':
+          description: |-
+            `invalid_since`: ?since= is not RFC3339
+            `invalid_limit`: ?limit= is non-numeric or negative
+            `invalid_offset`: ?offset= is non-numeric or negative
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent or not exactly "Bearer <token>" with no whitespace in the token
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: caller is not on AuditReadAuthzTeam in
+            the Universe org"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: |-
+            `rate_limited`: the GitHub team probe hit a rate limit
+            `rate_limited`: GH.ValidateToken was rate limited
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the store read failed with a context.Canceled
+            cause and nothing was written yet. Non-standard status; when the request
+            context is already done no body is written at all."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.AuditReadAuthzTeam == "" or h.RepoGH == nil — the gate fails closed
+            `internal_error`: handler panic, from the Recoverer middleware
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`audit_read_failed`: h.Audit.ListAudit returned a non-cancel
+            error; message is the opaque "upstream call failed"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `audit_unavailable`: h.Audit == nil, i.e. the PG-less deploy-only wiring
+            `upstream_unavailable`: the GitHub team probe failed for a non-rate-limit reason
+            `upstream_unavailable`: GH.ValidateToken saw GitHub 5xx
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: the 60s chi middleware.Timeout deadline elapsed. chi writes
+            a bare WriteHeader(504) with NO body and NO error envelope (go-chi/chi/v5
+            middleware/timeout.go).
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - audit
+      x-feature-gate: 'none — mounted unconditionally inside the RequireGitHubBearer
+        group. Runtime dependency instead of a mount gate: h.Audit nil yields 503
+        audit_unavailable. Team gate: h.AuditReadAuthzTeam, env AUDIT_READ_AUTHZ_TEAM,
+        default "staff", probed in the Universe org via h.RepoGH.'
+      parameters:
+      - name: site
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact-match filter, passed through to pg.AuditFilter.Site. No
+          validation.
+      - name: actor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact-match filter. No validation.
+      - name: action
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact-match filter. No validation.
+      - name: since
+        in: query
+        required: false
+        schema:
+          type: string
+        description: RFC3339 timestamp, parsed with time.Parse(time.RFC3339). Unparseable
+          -> 400 invalid_since. Empty/absent -> zero time, no lower bound.
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'strconv.Atoi; must be >= 0 else 400 invalid_limit. 0 or absent
+          is clamped downstream to 100; values above 500 are clamped to 500. Type:
+          integer'
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'strconv.Atoi; must be >= 0 else 400 invalid_offset. Type: integer'
+  "/api/repo":
+    post:
+      operationId: postRepo
+      security:
+      - githubBearer: []
+      responses:
+        '201':
+          description: queued successfully
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - name
+                - owner
+                - visibility
+                - status
+                - requestedBy
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  owner:
+                    type: string
+                    description: server-assigned from h.RepoOrg / GH_REPO_ORG, default
+                      freeCodeCamp-Universe
+                  visibility:
+                    type: string
+                    enum:
+                    - public
+                    - private
+                  description:
+                    type: string
+                    description: omitempty
+                  template:
+                    type: string
+                    description: omitempty
+                  status:
+                    type: string
+                    enum:
+                    - pending
+                    - approved
+                    - active
+                    - rejected
+                    - failed
+                    description: always "pending" on create
+                  url:
+                    type: string
+                    description: omitempty; set only when status==active
+                  error:
+                    type: string
+                    description: omitempty; set only when status==failed
+                  requestedBy:
+                    type: string
+                    description: NOT omitempty — the key is always present; equals
+                      the bearer login here
+                  approver:
+                    type: string
+                    description: omitempty; absent on a pending row
+                  rejectReason:
+                    type: string
+                    description: omitempty
+                  createdAt:
+                    type: string
+                    format: date-time
+                  updatedAt:
+                    type: string
+                    format: date-time
+                description: 'RepoRow, produced by toRepoRow. NOTE: the 201 uses toRepoRow(created)
+                  directly, NOT h.repoRowFor — so it is NEVER redacted and the creator
+                  always sees their own requestedBy, unlike list/get/approve/reject.'
+        '400':
+          description: |-
+            `invalid_name`: name does not match ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$
+            `invalid_visibility`: visibility is non-empty and not public|private
+            `invalid_template`: template is non-empty and fails NameRE
+            `invalid_description`: description exceeds 350 runes
+            `bad_request`: body is absent or not valid JSON; message "invalid json body"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token. pins that the mounted route answers 401 when unauthenticated.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: caller is not on RepoCreateAuthzTeam
+            in the Universe org"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: the feature is disabled, so the route is never mounted; chi's
+            plain-text 404
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '409':
+          description: "`already_exists`: a pending or active request already claims
+            the name, and the stale-claim reconcile did not release it. Reconcile
+            probes GitHub only for an active claim; a pending/approved claim conflicts
+            with no probe."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: "`too_large`: body exceeds 64 KiB"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: |-
+            `rate_limited`: the GitHub team probe hit a rate limit
+            `rate_limited`: GH.ValidateToken rate limited
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the store write failed with context.Canceled"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RepoCreateAuthzTeam == ""
+            `internal_error`: handler panic
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`repo_store_failed`: h.Repos.Create failed for a reason other
+            than ErrAlreadyExists; opaque message "upstream call failed"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `upstream_unavailable`: the GitHub team probe failed non-rate-limit
+            `upstream_unavailable`: GH.ValidateToken saw GitHub 5xx
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; bare header, no envelope
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: 'h.RepoEnabled — h.Repos && h.GitHubApp && h.RepoGH all non-nil,
+        checked at mount time. Repos/GitHubApp are wired only when cfg.Repo.Enabled,
+        i.e. GH_APP_ID + GH_APP_INSTALLATION_ID + GH_APP_PRIVATE_KEY are ALL set.
+        Gate off -> chi 404 with no envelope. Team gate: h.RepoCreateAuthzTeam, env
+        REPO_CREATE_AUTHZ_TEAM, default "staff", probed in the Universe org via h.RepoGH,
+        NOT h.GH.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$"
+                  description: reporequest.NameRE / ValidName,. Must match or 400
+                    invalid_name. An absent name is the empty string and fails the
+                    regex.
+                visibility:
+                  type: string
+                  enum:
+                  - public
+                  - private
+                  default: private
+                  description: optional; empty/absent defaults to private. Any other
+                    value -> 400 invalid_visibility. Enum from.
+                description:
+                  type: string
+                  maxLength: 350
+                  description: optional; measured in runes via utf8.RuneCountInString,
+                    max 350
+                template:
+                  type: string
+                  description: optional; when non-empty must satisfy the same NameRE
+                    as name, else 400 invalid_template. Existence is NOT checked here
+                    — a bad template surfaces later as approved_failed on approve.
+              description: RepoCreateRequest,. Decoded by decodeJSON with a 64 KiB
+                MaxBytesReader. Content-Type is not checked. Unknown fields are ignored
+                (no DisallowUnknownFields). A missing body or malformed JSON is a
+                hard 400 bad_request.
+  "/api/repos":
+    get:
+      operationId: getRepos
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: store read succeeded
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - id
+                  - name
+                  - owner
+                  - visibility
+                  - status
+                  - requestedBy
+                  - createdAt
+                  - updatedAt
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    owner:
+                      type: string
+                    visibility:
+                      type: string
+                      enum:
+                      - public
+                      - private
+                    description:
+                      type: string
+                      description: omitempty
+                    template:
+                      type: string
+                      description: omitempty
+                    status:
+                      type: string
+                      enum:
+                      - pending
+                      - approved
+                      - active
+                      - rejected
+                      - failed
+                    url:
+                      type: string
+                      description: omitempty
+                    error:
+                      type: string
+                      description: omitempty
+                    requestedBy:
+                      type: string
+                      description: NOT omitempty — key always present, but blanked
+                        to "" for a caller not on AuditReadAuthzTeam
+                    approver:
+                      type: string
+                      description: omitempty — so it DISAPPEARS entirely when redacted,
+                        unlike requestedBy
+                    rejectReason:
+                      type: string
+                      description: omitempty
+                    createdAt:
+                      type: string
+                      format: date-time
+                    updatedAt:
+                      type: string
+                      format: date-time
+                description: RepoRow,. Built with make([]RepoRow,0,n) at so an empty
+                  result is [] and never null. No pagination, no envelope — a bare
+                  array.
+        '400':
+          description: "`invalid_status`: ?status= is not one of pending|approved|active|rejected|failed|all"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: feature disabled, route unmounted
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '429':
+          description: "`rate_limited`: GH.ValidateToken rate limited"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the store read failed with context.Canceled"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: handler panic"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`repo_store_failed`: h.Repos.List failed; opaque message "upstream
+            call failed"'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GH.ValidateToken saw GitHub 5xx"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repos
+      x-feature-gate: 'h.RepoEnabled — same GH_APP_ID + GH_APP_INSTALLATION_ID + GH_APP_PRIVATE_KEY
+        condition as POST /api/repo. NO team gate: any valid GitHub bearer may list.
+        Actor-field visibility is a soft gate on AuditReadAuthzTeam probed once per
+        request.'
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: One of pending|approved|active|rejected|failed|all. Absent or
+          empty defaults to "pending". Anything else -> 400 invalid_status. Filtering
+          is exact string equality.
+      - name: mine
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Truthy ONLY for the exact strings "1" or "true"; any other value,
+          including "yes"/"TRUE", is false. When true, keeps only rows whose RequestedBy
+          equals the bearer login.
+  "/api/repo/templates":
+    get:
+      operationId: getRepoTemplates
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: always on the handler's own paths — both the success path and
+            the upstream-failure path, which logs repo.templates.failed and returns
+            an empty list so the CLI degrades to free-text template entry
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - templates
+                additionalProperties: false
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      type: string
+                    description: NOT omitempty; a nil slice from the client is coerced
+                      to [] and the error path writes an explicit []string{}, so the
+                      key is always present and never null
+                description: RepoTemplatesResponse,. The ONLY status this handler
+                  can produce — it is fail-soft by design.
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: feature disabled, route unmounted
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '429':
+          description: "`rate_limited`: GH.ValidateToken rate limited"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: handler panic"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GH.ValidateToken saw GitHub 5xx"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: h.RepoEnabled. NO team gate — open to any GitHub bearer. Registered
+        BEFORE /repo/{id} in the chi tree; chi's static-over-param precedence keeps
+        the literal "templates" from matching {id}.
+  "/api/repo/{id}":
+    get:
+      operationId: getRepo
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: the id resolved
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - name
+                - owner
+                - visibility
+                - status
+                - requestedBy
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  owner:
+                    type: string
+                  visibility:
+                    type: string
+                    enum:
+                    - public
+                    - private
+                  description:
+                    type: string
+                    description: omitempty
+                  template:
+                    type: string
+                    description: omitempty
+                  status:
+                    type: string
+                    enum:
+                    - pending
+                    - approved
+                    - active
+                    - rejected
+                    - failed
+                  url:
+                    type: string
+                    description: omitempty
+                  error:
+                    type: string
+                    description: omitempty
+                  requestedBy:
+                    type: string
+                    description: NOT omitempty — always present, blanked to "" for
+                      a non-audit-team caller
+                  approver:
+                    type: string
+                    description: omitempty — absent when redacted
+                  rejectReason:
+                    type: string
+                    description: omitempty
+                  createdAt:
+                    type: string
+                    format: date-time
+                  updatedAt:
+                    type: string
+                    format: date-time
+                description: RepoRow, via toRepoRow then inline redaction at. {id}
+                  is the opaque store id; no format validation, an unknown id is simply
+                  404.
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: |-
+            `not_found`: h.Repos.Get returned reporequest.ErrNotFound; message "repo request not found"
+            feature disabled, route unmounted — plain-text chi 404, NOT the not_found envelope
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GH.ValidateToken rate limited"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the store read failed with context.Canceled"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: handler panic"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: "`repo_store_failed`: h.Repos.Get failed for a non-ErrNotFound
+            reason"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GH.ValidateToken saw GitHub 5xx"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: h.RepoEnabled. NO team gate — open to any GitHub bearer. Actor
+        fields are redacted for callers not on AuditReadAuthzTeam.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: deleteRepo
+      security:
+      - githubBearer: []
+      responses:
+        '204':
+          description: the row was found and deleted; written with a bare w.WriteHeader(http.StatusNoContent),
+            NOT via writeJSON, so no Content-Type is set and the body is empty. Deleting
+            a row releases the repo-name claim. Note the handler does a Get first
+            purely to name the row in the log and audit entry.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: caller is not on RepoApproveAuthzTeam
+            in the Universe org"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: |-
+            `not_found`: the preflight Get returned reporequest.ErrNotFound, or the Delete itself raced to ErrNotFound. Same code and message on both paths.
+            feature disabled, route unmounted — plain-text chi 404, NOT the not_found envelope
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: |-
+            `rate_limited`: the GitHub team probe hit a rate limit
+            `rate_limited`: GH.ValidateToken rate limited
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the Get or Delete failed with context.Canceled"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RepoApproveAuthzTeam == ""
+            `internal_error`: handler panic
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: "`repo_store_failed`: the preflight Get or the Delete failed
+            for a non-ErrNotFound reason"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `upstream_unavailable`: the GitHub team probe failed non-rate-limit
+            `upstream_unavailable`: GH.ValidateToken saw GitHub 5xx
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: 'h.RepoEnabled. Team gate: h.RepoApproveAuthzTeam, env REPO_APPROVE_AUTHZ_TEAM,
+        default "none".'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/repo/{id}/approve":
+    post:
+      operationId: postRepoApprove
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: outcome ok or outcome approved_failed. Also covers the stranded-approved
+            resume, where a prior attempt created the repo and a retry reconciles
+            to ok instead of 409.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - outcome
+                - request
+                additionalProperties: false
+                properties:
+                  outcome:
+                    type: string
+                    enum:
+                    - ok
+                    - approved_failed
+                    description: ok = repo created, request.status active; approved_failed
+                      = approval recorded but GitHub creation failed, request.status
+                      failed
+                  request:
+                    type: object
+                    required:
+                    - id
+                    - name
+                    - owner
+                    - visibility
+                    - status
+                    - requestedBy
+                    - createdAt
+                    - updatedAt
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      owner:
+                        type: string
+                      visibility:
+                        type: string
+                        enum:
+                        - public
+                        - private
+                      description:
+                        type: string
+                        description: omitempty
+                      template:
+                        type: string
+                        description: omitempty
+                      status:
+                        type: string
+                        enum:
+                        - pending
+                        - approved
+                        - active
+                        - rejected
+                        - failed
+                        description: active on outcome ok, failed on outcome approved_failed
+                      url:
+                        type: string
+                        description: omitempty; the created repo URL, present on outcome
+                          ok
+                      error:
+                        type: string
+                        description: omitempty; present on approved_failed. Verbatim
+                          githubapp.UserFacingError/RepoExistsError text when curated,
+                          otherwise the sanitized literal "repository creation failed"
+                          — raw transport errors never reach the client
+                      requestedBy:
+                        type: string
+                        description: NOT omitempty — always present, blanked to ""
+                          when the approver is not on AuditReadAuthzTeam
+                      approver:
+                        type: string
+                        description: omitempty — absent when redacted
+                      rejectReason:
+                        type: string
+                        description: omitempty
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+                description: RepoApproveResponse,. Both the ok and the approved_failed
+                  paths are 200 — a GitHub creation failure is a recorded outcome,
+                  not an HTTP error. Request is built by h.repoRowFor, so actor fields
+                  ARE redacted for an approver who is not also on AuditReadAuthzTeam.
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: '`user_unauthorized`: caller is not on RepoApproveAuthzTeam
+            in the Universe org. Being on "staff" is not enough.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: |-
+            `not_found`: h.Repos.Approve returned reporequest.ErrNotFound
+            feature disabled, route unmounted
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`already_resolved`: the CAS pending->approved was rejected
+            AND the current status is not `approved`, i.e. genuinely resolved by another
+            admin. A row stranded in `approved` does NOT 409; it resumes."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: |-
+            `rate_limited`: the GitHub team probe hit a rate limit
+            `rate_limited`: GH.ValidateToken rate limited
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: any of the four store calls failed
+            with context.Canceled. Note CreateRepo and the durable MarkActive/MarkFailed
+            run on context.WithoutCancel so a client disconnect cannot strand the
+            row."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RepoApproveAuthzTeam == ""
+            `internal_error`: handler panic
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`repo_store_failed`: a store call failed: Get during the not-pending
+            recheck, Approve, MarkFailed or MarkActive. All share this one code with
+            the opaque message "upstream call failed".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `repo_create_retryable`: ONLY on the resume path (row already `approved`) when GitHub returned a transient error; the row is deliberately left `approved` for a later retry and NO audit row is written
+            `upstream_unavailable`: the GitHub team probe failed non-rate-limit
+            `upstream_unavailable`: GH.ValidateToken saw GitHub 5xx
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: 'h.RepoEnabled. Team gate: h.RepoApproveAuthzTeam, env REPO_APPROVE_AUTHZ_TEAM,
+        default "none", probed in the Universe org via h.RepoGH.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/repo/{id}/reject":
+    post:
+      operationId: postRepoReject
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: the CAS pending->rejected succeeded
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - name
+                - owner
+                - visibility
+                - status
+                - requestedBy
+                - createdAt
+                - updatedAt
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  owner:
+                    type: string
+                  visibility:
+                    type: string
+                    enum:
+                    - public
+                    - private
+                  description:
+                    type: string
+                    description: omitempty
+                  template:
+                    type: string
+                    description: omitempty
+                  status:
+                    type: string
+                    enum:
+                    - pending
+                    - approved
+                    - active
+                    - rejected
+                    - failed
+                    description: always "rejected" here
+                  url:
+                    type: string
+                    description: omitempty
+                  error:
+                    type: string
+                    description: omitempty
+                  requestedBy:
+                    type: string
+                    description: NOT omitempty — always present, blanked to "" when
+                      redacted
+                  approver:
+                    type: string
+                    description: omitempty — the rejecting admin's login; absent when
+                      redacted
+                  rejectReason:
+                    type: string
+                    description: omitempty — echoes the submitted reason, so it is
+                      ABSENT when the reason was empty
+                  createdAt:
+                    type: string
+                    format: date-time
+                  updatedAt:
+                    type: string
+                    format: date-time
+                description: RepoRow, via h.repoRowFor — actor fields ARE redacted
+                  for an approver not also on AuditReadAuthzTeam. Note this route
+                  returns a BARE RepoRow, unlike approve which wraps it in RepoApproveResponse.
+        '400':
+          description: |-
+            `bad_request`: a non-empty body that is not valid JSON; message "invalid json body". An absent body is NOT an error.
+            `invalid_reason`: reason exceeds 350 runes
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent/malformed
+            `unauthenticated`: GH.ValidateToken rejected the token
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: caller is not on RepoApproveAuthzTeam
+            in the Universe org"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: |-
+            `not_found`: h.Repos.Reject returned reporequest.ErrNotFound
+            feature disabled, route unmounted
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`already_resolved`: h.Repos.Reject returned reporequest.ErrNotPending
+            — resolved by another admin. Unlike approve there is NO resume path."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: "`too_large`: body exceeds 64 KiB"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: |-
+            `rate_limited`: the GitHub team probe hit a rate limit
+            `rate_limited`: GH.ValidateToken rate limited
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: the store write failed with context.Canceled"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RepoApproveAuthzTeam == ""
+            `internal_error`: handler panic
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: "`repo_store_failed`: h.Repos.Reject failed for any other reason"
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `upstream_unavailable`: the GitHub team probe failed non-rate-limit
+            `upstream_unavailable`: GH.ValidateToken saw GitHub 5xx
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi middleware.Timeout elapsed; no body
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - repo
+      x-feature-gate: 'h.RepoEnabled. Team gate: h.RepoApproveAuthzTeam, env REPO_APPROVE_AUTHZ_TEAM,
+        default "none".'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 350
+                  description: optional; measured in runes via utf8.RuneCountInString,
+                    max 350
+              description: RepoRejectRequest,. The WHOLE BODY IS OPTIONAL — decodeJSONOptional
+                treats io.EOF as success, so an absent/empty body means reason "".
+                A non-empty but malformed body is still a hard 400 bad_request and
+                leaves state untouched. 64 KiB MaxBytesReader.
+  "/api/site/{site}/deploys":
+    get:
+      operationId: getSiteDeploys
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: 'Listing succeeded. An audit-store failure is fail-soft: it
+            logs and returns rows without actor.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: array
+                description: 'Top-level JSON array, never null: the slice is initialised
+                  non-nil at so an empty site yields []. One row per distinct first
+                  path segment under the site deploy prefix.'
+                items:
+                  type: object
+                  required:
+                  - deployId
+                  properties:
+                    deployId:
+                      type: string
+                    actor:
+                      type: string
+                      description: GitHub login joined from the audit store; the key
+                        is OMITTED entirely when the join has no entry for this deploy
+                  additionalProperties: false
+        '400':
+          description: "`bad_request`: Not reachable on this route from the handler;
+            listed nowhere for GET deploys."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Authorization header absent or not exactly `Bearer <token>`.
+            `unauthenticated`: GitHub rejects the token, or validation fails for any unclassified reason.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site absent from the registry snapshot and not reserved.
+            `user_unauthorized`: Caller is on none of the site's authorized teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_reserved`: Site name is held in the post-delete reservation
+            grace window."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                properties:
+                  error:
+                    type: object
+                    required:
+                    - code
+                    - message
+                    - reservedUntil
+                    properties:
+                      code:
+                        enum:
+                        - site_reserved
+                      message:
+                        type: string
+                      reservedUntil:
+                        type: string
+                        format: date-time
+        '429':
+          description: "`rate_limited`: GitHub API rate limit hit during token validation
+            or during the per-site team probe."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: R2 list failed with context.Canceled.
+            If the request context is still live a 499 envelope is written; if the
+            request context is already done nothing is written and only the access
+            log records 499."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered by the Recoverer middleware."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_list_failed`: R2 ListPrefix over the site deploy prefix failed. Message is the opaque "upstream call failed".
+            `registry_read_failed`: Not reachable here: this route never calls requireWritableSite outside denyUnregisteredSite, which only fences on ErrReserved.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub API 5xx during token validation
+            or during the team probe."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: chi middleware.Timeout deadline of 60s elapsed; a bare header,
+            no JSON body.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/site/{site}/deploys/{deployId}":
+    delete:
+      operationId: deleteSiteDeploys
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Tombstone row recorded and the deploy prefix moved to <TrashPrefixBase><siteDirname>/<deployId>/.
+            The move runs on a context detached from the request, so a client disconnect
+            still yields 200.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - site
+                - deployId
+                - status
+                - moved
+                properties:
+                  site:
+                    type: string
+                  deployId:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - tombstoned
+                  moved:
+                    type: integer
+                    description: count of R2 objects moved from the live prefix into
+                      the trash prefix
+                additionalProperties: false
+        '400':
+          description: "`bad_request`: {deployId} does not match ^\\d{8}-\\d{6}-[A-Za-z0-9-]{1,64}$."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected or unvalidatable.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered / no authorized teams.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `deploy_aliased`: The deploy id equals the current body of the production alias, or of the preview alias. Modes are checked in that order, so production wins when both point at it.
+            `site_reserved`: Two paths: the pre-lock authz read and the in-lock re-read of the registry, which catches a stale snapshot.
+            `site_locked`: Advisory site lock could not be taken before the lock timeout.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '410':
+          description: '`site_gone`: In-lock registry read returned ErrNotFound; message
+            is "site was deleted; its deploys cannot be tombstoned".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: An R2/PG call returned context.Canceled
+            inside writeUpstreamError."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_get_failed`: Reading the production or preview alias failed with a non-NotFound R2 error.
+            `tombstone_record_failed`: Recording the tombstone row in Postgres failed. Byte sizing failure is tolerated first: PrefixBytes error degrades to bytes=0.
+            `r2_move_failed`: MovePrefix from the deploy prefix to the trash prefix failed.
+            `registry_read_failed`: In-lock registry read failed with neither ErrReserved nor ErrNotFound.
+            `site_lock_failed`: Lock acquisition failed for a reason other than lock timeout.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `unavailable`: h.Tombstones is nil, i.e. the tombstone store is not wired; message "tombstone store not configured". This is a runtime-dependency check, not a route mount gate.
+            `upstream_unavailable`: GitHub API unavailable.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployId
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/site/{site}/deploys/{deployId}/restore":
+    post:
+      operationId: postSiteDeploysRestore
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: 'Two internal outcomes share this exact body and status: outcome=success
+            and outcome=idempotent. The wire response does not distinguish them; only
+            the audit/log outcome field does.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - site
+                - deployId
+                - status
+                - moved
+                - bytes
+                properties:
+                  site:
+                    type: string
+                  deployId:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                    - restored
+                  moved:
+                    type: integer
+                    description: objects moved out of trash; 0 on the idempotent path
+                      where the deploy was already live
+                  bytes:
+                    type: integer
+                    description: post-move byte count of the live prefix; degrades
+                      to 0 when PrefixBytes fails
+                additionalProperties: false
+        '400':
+          description: "`bad_request`: {deployId} fails the deploy-id pattern."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `site_reserved`: Site name reserved after a delete: pre-lock or in-lock.
+            `site_locked`: Site lock timed out.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '410':
+          description: |-
+            `already_purged`: Two branches. (a) MovePrefix moved nothing and the live prefix is empty: message "no bytes to restore; the deploy was already hard-purged". (b) The trash store reports ErrNotFound and the live prefix is also absent: message "tombstone is gone; deploy was already hard-purged".
+            `site_gone`: In-lock registry read returned ErrNotFound; message "site was deleted; deploy cannot be restored".
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: Upstream call returned context.Canceled."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_move_failed`: MovePrefix from the trash prefix back to the live deploy prefix failed.
+            `r2_has_prefix_failed`: After a zero-object move, the HasPrefix probe of the live prefix failed.
+            `restore_failed`: Trash.RestoreDeploy failed with an error other than registry.ErrNotFound.
+            `registry_read_failed`: In-lock registry read failed for a reason other than reserved/not-found.
+            `site_lock_failed`: Lock failure that is not a lock timeout.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `unavailable`: h.Trash is nil; message "trash store not configured".
+            `upstream_unavailable`: GitHub API unavailable.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deployId
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/site/{site}/trash":
+    get:
+      operationId: getSiteTrash
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Tombstone read succeeded.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: array
+                description: 'Top-level JSON array, never null: made non-nil with
+                  make(...,0,len) at. One row per tombstone for the site.'
+                items:
+                  type: object
+                  required:
+                  - deployId
+                  - trashedAt
+                  - expiresAt
+                  - bytes
+                  properties:
+                    deployId:
+                      type: string
+                      description: gc.Tombstone.ID
+                    trashedAt:
+                      type: string
+                      format: date-time
+                      description: RFC3339 UTC, e.g. 2026-04-20T14:15:22Z
+                    expiresAt:
+                      type: string
+                      format: date-time
+                      description: trashedAt + TrashRecovery, RFC3339 UTC; TrashRecovery
+                        defaults to 168h when unset or non-positive
+                    bytes:
+                      type: integer
+                      description: gc.Tombstone.Bytes, int64
+                  additionalProperties: false
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_reserved`: Site name reserved after a delete, caught
+            by the authz path."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                properties:
+                  error:
+                    type: object
+                    required:
+                    - code
+                    - message
+                    - reservedUntil
+                    properties:
+                      code:
+                        enum:
+                        - site_reserved
+                      message:
+                        type: string
+                      reservedUntil:
+                        type: string
+                        format: date-time
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: The tombstone read returned context.Canceled."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`pg_read_failed`: Trash.TombstonesForSite failed. Message
+            is the opaque "upstream call failed".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `unavailable`: h.Trash is nil; message "trash store not configured".
+            `upstream_unavailable`: GitHub API unavailable.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/site/{site}/alias/{mode}":
+    get:
+      operationId: getSiteAlias
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Alias object exists and its trimmed body is non-empty.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - site
+                - mode
+                - deployId
+                - url
+                properties:
+                  site:
+                    type: string
+                    description: echo of the {site} path param
+                  mode:
+                    type: string
+                    enum:
+                    - preview
+                    - production
+                    description: lower-cased, trimmed echo of {mode}
+                  deployId:
+                    type: string
+                    description: trimmed alias object body
+                  url:
+                    type: string
+                    description: public URL for the mode, from PublicProductionURLFmt
+                      / PublicPreviewURLFmt
+                additionalProperties: false
+        '400':
+          description: '`bad_request`: {mode} is neither "preview" nor "production"
+            after trim+lowercase; message "mode must be preview or production". NOTE:
+            this check runs BEFORE requireSiteAuthz, so a bad mode on an unregistered
+            site returns 400, not 403.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: "`no_alias`: Two branches, same code: the alias key does not
+            exist in R2 or the object exists but its body trims to empty."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_reserved`: Site name reserved after a delete."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - error
+                properties:
+                  error:
+                    type: object
+                    required:
+                    - code
+                    - message
+                    - reservedUntil
+                    properties:
+                      code:
+                        enum:
+                        - site_reserved
+                      message:
+                        type: string
+                      reservedUntil:
+                        type: string
+                        format: date-time
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: GetAlias returned context.Canceled."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: "`r2_get_failed`: R2 GetAlias failed with a non-NotFound error."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub API unavailable."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: mode
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - production
+          - preview
+  "/api/site/{site}/promote":
+    post:
+      operationId: postSitePromote
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Production alias written and, when an index writer is wired,
+            the Postgres alias row committed. The response is flushed before the edge
+            purge fires.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - url
+                - deployId
+                properties:
+                  url:
+                    type: string
+                    description: production public URL
+                  deployId:
+                    type: string
+                    description: the id written to the production alias - either the
+                      supplied deployId or the resolved preview alias body
+                additionalProperties: false
+        '400':
+          description: '`bad_request`: Two branches. (a) Body present but not valid
+            JSON: message "invalid json body". (b) deployId non-empty and not a valid
+            artemis deploy id: message "deployId is not a valid artemis deploy id".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `alias_drift`: expectedCurrent is non-empty and does not equal the trimmed current production alias. Checked BEFORE preview resolution and before the index probe.
+            `site_reserved`: Site name reserved: pre-lock authz or the in-lock registry re-read that defeats a stale snapshot.
+            `site_locked`: Site lock timed out.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '410':
+          description: '`site_gone`: In-lock registry read returned ErrNotFound; message
+            "site was deleted; its alias cannot be written".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: "`too_large`: Request body exceeds 64 KiB."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: |-
+            `no_preview`: Legacy path only (deployId omitted). Either the preview alias key does not exist or its body trims to empty.
+            `missing_index`: The resolved deploy prefix has no root index.html; message "target deploy has no root index.html; it cannot be served at /". Applies to both the direct-write and the legacy preview path.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: An R2/PG call returned context.Canceled."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_get_failed`: The CAS read of the production alias failed with a non-NotFound error, or the preview alias read failed with a non-NotFound error.
+            `r2_head_failed`: The HasObject probe for the deploy's root index.html failed.
+            `r2_put_failed`: Writing the production alias object failed.
+            `pg_write_failed`: The alias write landed in R2 but the Postgres index write failed after retries. An audit failure row is recorded first.
+            `registry_read_failed`: In-lock registry read failed for a reason other than reserved/not-found.
+            `site_lock_failed`: Lock failure that is not a lock timeout.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub API unavailable."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: 'OPTIONAL body. Decoded with decodeJSONOptional, which
+                tolerates io.EOF, so a zero-length body is valid and keeps legacy
+                bare-promote semantics. Body cap 64 KiB. Unknown keys are ignored
+                - the decoder does not set DisallowUnknownFields. Struct: SitePromoteRequest.'
+              required: []
+              properties:
+                deployId:
+                  type: string
+                  description: Optional. Trimmed. When non-empty must match ^\d{8}-\d{6}-[A-Za-z0-9-]{1,64}$
+                    else 400 bad_request. When set, the preview alias is never read
+                    and this id is written straight to production.
+                expectedCurrent:
+                  type: string
+                  description: Optional CAS guard. Trimmed but NOT pattern-validated.
+                    When non-empty, the current production alias is read and must
+                    equal it, else 409 alias_drift. An empty string skips the CAS
+                    entirely.
+              additionalProperties: true
+  "/api/site/{site}/rollback":
+    post:
+      operationId: postSiteRollback
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Production alias rewritten to `to` and, when an index writer
+            is wired, the Postgres alias row committed. Response flushed before the
+            edge purge.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - url
+                - deployId
+                properties:
+                  url:
+                    type: string
+                    description: production public URL
+                  deployId:
+                    type: string
+                    description: echo of the request `to` value
+                additionalProperties: false
+        '400':
+          description: '`bad_request`: Three branches. (a) Body absent, empty, or
+            not valid JSON: "invalid json body". (b) `to` missing or blank: "to is
+            required". (c) `to` fails the deploy-id pattern: "to is not a valid artemis
+            deploy id".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: Missing or malformed Authorization header.
+            `unauthenticated`: GitHub token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: |-
+            `site_unauthorized`: Site not registered.
+            `user_unauthorized`: Caller on none of the site's teams.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `alias_drift`: expectedCurrent non-empty and unequal to the current production alias. Unlike promote, this check runs AFTER the target-exists and index probes, so deploy_missing / missing_index win over alias_drift here.
+            `site_reserved`: Site name reserved: pre-lock authz or in-lock registry re-read.
+            `site_locked`: Site lock timed out.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '410':
+          description: '`site_gone`: In-lock registry read returned ErrNotFound; message
+            "site was deleted; its alias cannot be written".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: "`too_large`: Request body exceeds 64 KiB."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: |-
+            `deploy_missing`: HasPrefix over the target deploy prefix reports no objects; message "target deploy no longer exists in r2".
+            `missing_index`: The target deploy prefix has no root index.html; message "target deploy has no root index.html; it cannot be served at /".
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub rate limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: An R2/PG call returned context.Canceled."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '500':
+          description: "`internal_error`: Panic recovered."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_list_failed`: HasPrefix over the target deploy prefix failed.
+            `r2_head_failed`: HasObject probe for the target's root index.html failed.
+            `r2_get_failed`: The CAS read of the production alias failed with a non-NotFound error.
+            `r2_put_failed`: Writing the production alias object failed.
+            `pg_write_failed`: R2 alias write succeeded but the Postgres index write failed after retries; an audit failure row is recorded first.
+            `registry_read_failed`: In-lock registry read failed for a reason other than reserved/not-found.
+            `site_lock_failed`: Lock failure that is not a lock timeout.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub API unavailable."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '504':
+          description: 60s chi timeout elapsed; bare header.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+      tags:
+      - site
+      parameters:
+      - name: site
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: 'REQUIRED body. Decoded with decodeJSON, which does NOT
+                tolerate EOF, so an absent or empty body is 400 bad_request "invalid
+                json body". Body cap 64 KiB. Unknown keys ignored. Struct: SiteRollbackRequest.'
+              required:
+              - to
+              properties:
+                to:
+                  type: string
+                  description: Required target deploy id. Trimmed; empty -> 400 "to
+                    is required"; must match ^\d{8}-\d{6}-[A-Za-z0-9-]{1,64}$ else
+                    400 "to is not a valid artemis deploy id".
+                expectedCurrent:
+                  type: string
+                  description: Optional CAS guard. Trimmed but NOT pattern-validated.
+                    Non-empty -> current production alias must equal it, else 409
+                    alias_drift. Empty skips the CAS.
+              additionalProperties: true
+  "/api/sites":
+    get:
+      operationId: getSites
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: 'Registry read succeeded. Always a JSON array, never null:
+            rows is make([]SiteRow,0,...) at. createdBy is blanked for every row unless
+            h.AuditReadAuthzTeam is set, h.RepoGH is non-nil, and the RepoGH team
+            probe returns ok with no error — a probe error fails closed to redaction.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - slug
+                  - teams
+                  - createdAt
+                  - updatedAt
+                  - createdBy
+                  - state
+                  additionalProperties: false
+                  properties:
+                    slug:
+                      type: string
+                    teams:
+                      type: array
+                      nullable: true
+                      items:
+                        type: string
+                      description: copied straight from registry.Site.Teams with no
+                        nil-guard, so a nil slice encodes as null
+                    createdAt:
+                      type: string
+                      description: Go time.Time default marshal = RFC3339 with nanoseconds
+                        when present
+                    updatedAt:
+                      type: string
+                    createdBy:
+                      type: string
+                      description: forced to "" (present, not omitted) when callerSeesActors
+                        is false; no omitempty tag
+                    state:
+                      type: string
+                      enum:
+                      - active
+                      - reserved
+                      description: empty State from the store defaults to "active",
+                    reservedUntil:
+                      type: string
+                      description: omitempty; set only when s.IsReserved && !s.ReservedUntil.IsZero,
+        '400':
+          description: '`invalid_state`: ?state is a non-empty value other than "active"
+            or "reserved".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed "Authorization: Bearer <tok>" header.
+            `unauthenticated`: GH ValidateToken rejected the token, or failed for a reason that is neither rate-limit nor unavailable.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub API rate-limited the token validation."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: h.Registry.Sites returned an error
+            wrapping context.Canceled AND r.Context.Err==nil. When the request context
+            is itself already done, no bytes are written and only the access-log status
+            is set to 499."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: "`internal_error`: Handler panicked; Recoverer converts it."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: '`registry_read_failed`: h.Registry.Sites returned a non-context.Canceled
+            error. Message is the opaque "upstream call failed" from writeUpstreamError.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub API unavailable during token
+            validation."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - sites
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Absent or empty string = list active sites only. Accepted values
+          are exactly "active" (registry.StateActive) and "reserved" (registry.StateReserved);
+          anything else -> 400 invalid_state. Rows are filtered by s.IsReserved !=
+          (state=="reserved"), so ?state=reserved lists ONLY held names and the default
+          lists ONLY active ones. Ordering note: the registry read runs BEFORE the
+          state validation, so a 502 registry_read_failed pre-empts the 400 on an
+          invalid state.'
+  "/api/site/register":
+    post:
+      operationId: postSiteRegister
+      security:
+      - githubBearer: []
+      responses:
+        '201':
+          description: Registry.Register succeeded. createdBy is the authenticated
+            login and is NEVER redacted here — this is the one SiteRow endpoint that
+            does not call callerSeesActors writes toSiteRow(site) directly).
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - slug
+                - teams
+                - createdAt
+                - updatedAt
+                - createdBy
+                - state
+                additionalProperties: false
+                properties:
+                  slug:
+                    type: string
+                  teams:
+                    type: array
+                    nullable: true
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                  updatedAt:
+                    type: string
+                  createdBy:
+                    type: string
+                  state:
+                    type: string
+                    enum:
+                    - active
+                    - reserved
+                  reservedUntil:
+                    type: string
+                description: SiteRegisterResponse is a type alias of SiteRow — identical
+                  shape to the GET /api/sites element.
+        '400':
+          description: |-
+            `invalid_slug`: req.Slug fails slugRe. message: "slug must be 1-63 chars, lowercase letter first, then [a-z0-9-]".
+            `invalid_team`: Any team slug fails teamSlugRe. message: "team slugs must be 1-39 chars matching [a-z0-9][a-z0-9_-]*".
+            `bad_request`: Body is not decodable JSON. message: "invalid json body".
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed Authorization header.
+            `unauthenticated`: Token rejected by GitHub.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: '`user_unauthorized`: Caller is not on h.RegistryAuthzTeam
+            per h.GH.AuthorizeForSite. message: "caller is not on the registry-authz
+            team". Authz runs BEFORE the body decode, so all 400/413 codes are reachable
+            only by an authorized caller.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `site_reserved`: Registry.Register returned registry.ErrReserved. Plain writeError — unlike PATCH, this 409 carries NO reservedUntil extra.
+            `already_exists`: Registry.Register returned registry.ErrAlreadyExists.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: '`too_large`: Body exceeds 64 KiB. message: "request body too
+            large".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: The registry-authz GitHub probe was rate-limited,
+            or token validation was."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: The Registry.Register error wraps
+            context.Canceled and r.Context.Err==nil."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RegistryAuthzTeam is "". message: "RegistryAuthzTeam not set".
+            `internal_error`: Panic recovered.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: "`registry_write_failed`: Registry.Register failed for any
+            other reason."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: '`upstream_unavailable`: The registry-authz GitHub probe failed
+            for any non-rate-limit reason, or token validation hit an unavailable
+            GitHub. message: "could not probe team membership" for the handler-level
+            case.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - slug
+              properties:
+                slug:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,62}$"
+                  description: slugRe,. Missing == empty string == fails the regex,
+                    so absence surfaces as 400 invalid_slug, not a distinct code.
+                teams:
+                  type: array
+                  items:
+                    type: string
+                    pattern: "^[a-z0-9][a-z0-9_-]{0,38}$"
+                  description: 'teamSlugRe,. Optional: absent or empty array defaults
+                    to [h.RegistryAuthzTeam].'
+              description: 'SiteRegisterRequest,. Decoded with encoding/json default
+                semantics: unknown fields ignored, body capped at 64 KiB.'
+  "/api/site/{slug}":
+    patch:
+      operationId: patchSite
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: UpdateTeams succeeded inside the site lock.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - slug
+                - teams
+                - createdAt
+                - updatedAt
+                - createdBy
+                - state
+                additionalProperties: false
+                properties:
+                  slug:
+                    type: string
+                  teams:
+                    type: array
+                    nullable: true
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                  updatedAt:
+                    type: string
+                  createdBy:
+                    type: string
+                    description: blanked when callerSeesActors is false,
+                  state:
+                    type: string
+                    enum:
+                    - active
+                    - reserved
+                  reservedUntil:
+                    type: string
+                description: SiteRow,
+        '400':
+          description: |-
+            `invalid_slug`: The {slug} path param fails slugRe.
+            `invalid_team`: Two distinct messages under one code: empty/absent teams -> "teams must contain at least one slug; use DELETE to remove a site"; a malformed slug -> "team slugs must be 1-39 chars matching [a-z0-9][a-z0-9_-]*".
+            `bad_request`: Undecodable JSON body.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed Authorization header.
+            `unauthenticated`: Token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: Caller not on h.RegistryAuthzTeam."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: '`not_found`: UpdateTeams returned registry.ErrNotFound. message:
+            "site is not registered".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: |-
+            `site_reserved`: requireWritableSite reported the row is reserved; writeFenceError adds the reservedUntil extra. This is the ONLY writeFenceError branch reachable here — the 410 site_gone and 502 registry_read_failed branches of writeFenceError are guarded out by the errors.Is(beforeErr, ErrReserved) test at.
+            `site_locked`: The per-site Postgres advisory lock timed out. message: "another operation on this site is in progress; retry shortly".
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '413':
+          description: "`too_large`: Body over 64 KiB."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub probe rate-limited or token validation
+            rate-limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: A writeUpstreamError path saw context.Canceled
+            with r.Context.Err==nil."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RegistryAuthzTeam is "".
+            `internal_error`: Panic recovered.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `site_lock_failed`: The site lock failed for a non-timeout reason.
+            `registry_write_failed`: UpdateTeams failed for any other reason.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub team probe failed or token
+            validation hit an unavailable GitHub."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - site
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - teams
+              properties:
+                teams:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    pattern: "^[a-z0-9][a-z0-9_-]{0,38}$"
+              description: SiteUpdateRequest,. Replaces the whole teams list; there
+                is no partial merge. 64 KiB cap.
+    delete:
+      operationId: deleteSite
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: 'An orphaned alias: R2 served the name (or the probe was unreadable)
+            but Reservations.Reserve returned registry.ErrNotFound, so there is no
+            row to hold. The aliases are still deleted.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - slug
+                - status
+                - reserved
+                additionalProperties: false
+                properties:
+                  slug:
+                    type: string
+                  status:
+                    enum:
+                    - unpublished
+                  reserved:
+                    enum:
+                    - false
+                  aliasProbe:
+                    enum:
+                    - unreadable
+                    description: present only when a GetAlias probe errored
+        '204':
+          description: 'Normal delete: both R2 alias objects removed and the name
+            reserved for h.ReservationGrace. Also the legacy path when h.Reservations
+            == nil, which only deletes the registry row. Raw w.WriteHeader — no body
+            and no Content-Type header on this response.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+        '400':
+          description: |-
+            `invalid_slug`: {slug} fails slugRe.
+            `purge_retired`: ?purge present with a true or unparsable value. No alias is deleted and no reservation is made. message points the caller at POST /api/site/{slug}/release.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed Authorization header.
+            `unauthenticated`: Token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: Caller not on h.RegistryAuthzTeam."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: "`not_found`: Reserve (or, on the legacy Reservations==nil
+            path, Registry.Delete) returned registry.ErrNotFound and nothing was served
+            / the probe was readable."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_locked`: Site advisory lock timed out."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub probe or token validation rate-limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: An R2/registry error wrapping context.Canceled
+            with r.Context.Err==nil. The edge purge still runs on the detached opCtx."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RegistryAuthzTeam is "".
+            `internal_error`: Panic recovered.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_get_failed`: A GetAlias probe errored AND the site still has a registry row — the delete is refused before any alias is removed.
+            `r2_delete_failed`: DeleteAlias failed for production or preview. Whatever was already deleted is still edge-purged.
+            `registry_write_failed`: Reserve failed for a non-ErrNotFound reason.
+            `site_lock_failed`: Site lock failed for a non-timeout reason.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: "`upstream_unavailable`: GitHub probe failed or GitHub unavailable
+            at token validation."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - site
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: purge
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Retired and refused. requestsPurge reads every ?purge value:
+          an unparsable value (strconv.ParseBool error) OR a true value refuses the
+          call with 400 purge_retired and performs no delete. Only a parsable false
+          value ("false","0","F"...) lets the delete proceed as ordinary. Absent =
+          ordinary delete. Any other query param is ignored. Type: string (boolean-ish)'
+  "/api/site/{slug}/undelete":
+    post:
+      operationId: postSiteUndelete
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: Reservation read, both alias pins restored in R2 (and in the
+            deploy index when h.Index != nil), and Undelete succeeded.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - slug
+                - prevProduction
+                - prevPreview
+                additionalProperties: false
+                properties:
+                  slug:
+                    type: string
+                    description: string(res.Slug) from the Undelete result, not the
+                      path param
+                  prevProduction:
+                    type: string
+                    description: deploy id the production alias pointed at when the
+                      delete reserved the name; "" when none was captured — always
+                      present, never omitted
+                  prevPreview:
+                    type: string
+        '400':
+          description: "`invalid_slug`: {slug} fails slugRe."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed Authorization header; pinned for this route by.
+            `unauthenticated`: Token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: "`user_unauthorized`: Caller not on h.RegistryAuthzTeam."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: "`not_found`: Stage read / undelete / restore_index produced
+            registry.ErrNotFound — notably a reservation whose deadline has passed."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_locked`: Site advisory lock timed out — the lock is
+            shared with SiteRelease."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: GitHub probe or token validation rate-limited."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: An R2/registry error wrapping context.Canceled
+            with r.Context.Err==nil."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RegistryAuthzTeam is "".
+            `internal_error`: Panic recovered.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `r2_put_failed`: Stage restore_alias: PutAlias failed while re-pinning production or preview; the row stays reserved.
+            `registry_write_failed`: Stages read / undelete / restore_index failed for a non-ErrNotFound reason.
+            `site_lock_failed`: Site lock failed for a non-timeout reason.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `unavailable`: h.Registry does not implement ReservationReverser. message: "reservation store not configured".
+            `upstream_unavailable`: GitHub probe failed or GitHub unavailable at token validation.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - site
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+  "/api/site/{slug}/release":
+    post:
+      operationId: postSiteRelease
+      security:
+      - githubBearer: []
+      responses:
+        '200':
+          description: The row was reserved, ExpireReservation disarmed undelete,
+            the whole-site tombstone landed (when h.Tombstones != nil), the prefix
+            moved into trash, and ReleaseReservationNow freed the name — in that order.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - slug
+                - status
+                - moved
+                additionalProperties: false
+                properties:
+                  slug:
+                    type: string
+                  status:
+                    enum:
+                    - released
+                  moved:
+                    type: integer
+                    description: object count returned by R2.MovePrefix(<dirname>/
+                      -> <TrashPrefixBase><dirname>/),
+        '400':
+          description: "`invalid_slug`: {slug} fails slugRe."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: |-
+            `missing_bearer`: No/malformed Authorization header; pinned for this route by.
+            `unauthenticated`: Token rejected.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '403':
+          description: '`user_unauthorized`: Caller is not on h.RepoApproveAuthzTeam.
+            Probed with h.RepoGH — the Universe-org GitHub client, NOT h.GH used by
+            the register/update/delete routes. message: "caller is not on the required
+            team".'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: '`not_found`: Two paths, same code and message ("site is not
+            a reserved name"): the slug is active or absent, i.e. requireWritableSite
+            did not return registry.ErrReserved; or ReleaseReservationNow returned
+            registry.ErrNotFound after the bytes already moved.'
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '409':
+          description: "`site_locked`: Site advisory lock timed out — same lock SiteUndelete
+            takes."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '429':
+          description: "`rate_limited`: The RepoGH team probe was rate-limited, or
+            token validation was."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '499':
+          description: "`client_closed_request`: A registry/R2 error wrapping context.Canceled
+            with r.Context.Err==nil. Note the handler runs on a detached 10-minute
+            context."
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '500':
+          description: |-
+            `misconfigured`: h.RepoApproveAuthzTeam is "". message: "repo authz team not set".
+            `internal_error`: Panic recovered.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '502':
+          description: |-
+            `registry_read_failed`: requireWritableSite failed with an error that is neither ErrReserved nor ErrNotFound.
+            `registry_write_failed`: ExpireReservation failed or ReleaseReservationNow failed non-ErrNotFound.
+            `tombstone_record_failed`: h.Tombstones is non-nil and RecordSiteTombstone failed. No bytes have moved at that point.
+            `r2_move_failed`: MovePrefix into <TrashPrefixBase, default "_trash/">/<dirname>/ failed. The name stays reserved but undelete is already disarmed.
+            `site_lock_failed`: Site lock failed for a non-timeout reason.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '503':
+          description: |-
+            `unavailable`: h.NameReleaser is nil. message: "reservation store not configured".
+            `upstream_unavailable`: The RepoGH team probe failed for a non-rate-limit reason, or GitHub was unavailable at token validation.
+          headers:
+            X-Request-ID:
+              "$ref": "#/components/headers/X-Request-ID"
+            X-Artemis-Version:
+              "$ref": "#/components/headers/X-Artemis-Version"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      tags:
+      - site
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+components:
+  securitySchemes:
+    githubBearer:
+      type: http
+      scheme: bearer
+      description: A GitHub token; identity is GitHub team membership.
+    deployJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A deploy-session JWT minted by POST /api/deploy/init, scoped to
+        one deployId.
+  headers:
+    X-Request-ID:
+      description: Per-request id; echoes the inbound header when present.
+      schema:
+        type: string
+    X-Artemis-Version:
+      description: The build version of the server that answered.
+      schema:
+        type: string
+  schemas:
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          additionalProperties: true
+          description: 'Some codes add sibling fields: `missing` (array of strings)
+            on 422 missing files, `reservedUntil` (string) on 409 site_reserved, `hint`
+            (string) on 422 missing_index.'
