@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -64,6 +65,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("migrate: read %s: %w", name, err)
 		}
 		if isNoTxMigration(string(body)) {
+			if next := pendingTransactionalAfter(ctx, conn, names, name); next != "" {
+				slog.WarnContext(ctx, "migrate.notx.deferred_ahead_of", "version", name, "next", next)
+			}
 			continue
 		}
 		if err := applyMigration(ctx, conn, name, string(body)); err != nil {
@@ -71,6 +75,53 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	return nil
+}
+
+func pendingTransactionalAfter(ctx context.Context, conn *pgxpool.Conn, names []string, after string) string {
+	past := false
+	for _, n := range names {
+		if n == after {
+			past = true
+			continue
+		}
+		if !past {
+			continue
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + n)
+		if err != nil || isNoTxMigration(string(body)) {
+			continue
+		}
+		if applied, err := migrationApplied(ctx, conn, n); err == nil && !applied {
+			return n
+		}
+	}
+	return ""
+}
+
+var indexDDL = regexp.MustCompile(`(?i)\b(?:CREATE|DROP)\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+func noTxIndexHazards(names []string, read func(string) (string, error)) ([]string, error) {
+	type owned struct{ index, file string }
+	var built []owned
+	var hazards []string
+	for _, name := range names {
+		body, err := read(name)
+		if err != nil {
+			return nil, fmt.Errorf("migrate: read %s: %w", name, err)
+		}
+		if isNoTxMigration(body) {
+			for _, m := range indexDDL.FindAllStringSubmatch(body, -1) {
+				built = append(built, owned{index: m[1], file: name})
+			}
+			continue
+		}
+		for _, o := range built {
+			if regexp.MustCompile(`\b` + regexp.QuoteMeta(o.index) + `\b`).MatchString(body) {
+				hazards = append(hazards, fmt.Sprintf("%s references %s, which no-transaction %s creates or drops", name, o.index, o.file))
+			}
+		}
+	}
+	return hazards, nil
 }
 
 func MigrateConcurrent(ctx context.Context, pool *pgxpool.Pool) error {
