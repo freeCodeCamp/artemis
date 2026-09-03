@@ -21,8 +21,37 @@ func TestNoTxIndexHazards_FlagsALaterTransactionalReference(t *testing.T) {
 
 	hazards, err := noTxIndexHazards(names, read)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"0003_uses.sql references t_idx_b, which no-transaction 0002_index.sql creates or drops"}, hazards,
-		"only a transactional file AFTER the no-tx file is a hazard; 0001 (before) and 0004 (no-tx itself) are not")
+	require.Len(t, hazards, 1, "only a transactional file AFTER the no-tx file is a hazard; 0001 (before) and 0004 (no-tx itself) are not")
+	assert.Contains(t, hazards[0], "0003_uses.sql")
+	assert.Contains(t, hazards[0], "t_idx_b")
+	assert.Contains(t, hazards[0], "0002_index.sql")
+}
+
+func TestIndexNames_ReadsRealDDLForms(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, []string{"audit_log_idx"}, indexNames(`DROP INDEX CONCURRENTLY IF EXISTS public.audit_log_idx;`), "schema qualifier stripped")
+	assert.Equal(t, []string{"Idx"}, indexNames(`CREATE INDEX CONCURRENTLY "Idx" ON t (id);`), "quoted identifier kept verbatim")
+	assert.Equal(t, []string{"audit log idx"}, indexNames(`DROP INDEX CONCURRENTLY IF EXISTS "audit log idx";`))
+	assert.Empty(t, indexNames(`CREATE INDEX ON audit_log (occurred_at);`), "an unnamed index records nothing")
+	assert.Equal(t, []string{"a_idx", "b_idx"}, indexNames(`DROP INDEX CONCURRENTLY IF EXISTS a_idx, b_idx;`))
+	assert.Equal(t, []string{"foo_idx"}, indexNames(`CREATE UNIQUE INDEX CONCURRENTLY Foo_Idx ON t (id);`), "unquoted names fold to lower case")
+	assert.Equal(t, []string{"x"}, indexNames(`REINDEX INDEX CONCURRENTLY x;`))
+	assert.Equal(t, []string{"old_idx"}, indexNames(`ALTER INDEX old_idx RENAME TO new_idx;`))
+}
+
+func TestNoTxIndexHazards_IgnoresCommentsAndFoldsCase(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		"0001_idx.sql": "-- migrate:no-transaction\n-- DROP INDEX CONCURRENTLY legacy_idx was here\nCREATE INDEX CONCURRENTLY Foo_Idx ON t (id);",
+		"0002_a.sql":   "-- replaces foo_idx and legacy_idx\nCREATE TABLE u (id int);",
+		"0003_b.sql":   "ALTER TABLE t ADD CONSTRAINT t_pk PRIMARY KEY USING INDEX FOO_IDX;",
+		"0004_c.sql":   "CREATE TABLE v (legacy_idx int);",
+	}
+	names := []string{"0001_idx.sql", "0002_a.sql", "0003_b.sql", "0004_c.sql"}
+	hazards, err := noTxIndexHazards(names, func(n string) (string, error) { return files[n], nil })
+	require.NoError(t, err)
+	require.Len(t, hazards, 1, "a comment mention is not a reference; a commented-out DROP owns nothing; an unquoted name matches case-insensitively")
+	assert.Contains(t, hazards[0], "0003_b.sql")
 }
 
 func TestMigrations_NoTxIndexHazardIsCaughtAtBuild(t *testing.T) {

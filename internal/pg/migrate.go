@@ -88,20 +88,53 @@ func pendingTransactionalAfter(ctx context.Context, conn *pgxpool.Conn, names []
 			continue
 		}
 		body, err := migrationsFS.ReadFile("migrations/" + n)
-		if err != nil || isNoTxMigration(string(body)) {
+		if err != nil {
+			return ""
+		}
+		if isNoTxMigration(string(body)) {
 			continue
 		}
-		if applied, err := migrationApplied(ctx, conn, n); err == nil && !applied {
+		applied, err := migrationApplied(ctx, conn, n)
+		if err != nil {
+			return ""
+		}
+		if !applied {
 			return n
 		}
 	}
 	return ""
 }
 
-var indexDDL = regexp.MustCompile(`(?i)\b(?:CREATE|DROP)\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)`)
+var (
+	indexDDL      = regexp.MustCompile(`(?i)\b(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX|ALTER\s+INDEX|REINDEX\s+(?:CONCURRENTLY\s+)?INDEX)\s+(?:CONCURRENTLY\s+)?(?:IF\s+(?:NOT\s+)?EXISTS\s+)?((?:(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*))(?:\s*,\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*))*)`)
+	indexKeywords = map[string]bool{"on": true, "if": true, "exists": true, "concurrently": true, "unique": true}
+)
+
+func indexNames(stmt string) []string {
+	var names []string
+	for _, m := range indexDDL.FindAllStringSubmatch(stmt, -1) {
+		for _, raw := range strings.Split(m[1], ",") {
+			name := strings.TrimSpace(raw)
+			if i := strings.LastIndex(name, "."); i >= 0 && !strings.HasPrefix(name, `"`) {
+				name = name[i+1:]
+			}
+			if strings.HasPrefix(name, `"`) {
+				name = strings.Trim(name, `"`)
+			} else {
+				name = strings.ToLower(name)
+			}
+			if name == "" || indexKeywords[name] {
+				continue
+			}
+			names = append(names, name)
+		}
+	}
+	return names
+}
 
 func noTxIndexHazards(names []string, read func(string) (string, error)) ([]string, error) {
 	type owned struct{ index, file string }
+	seen := map[owned]bool{}
 	var built []owned
 	var hazards []string
 	for _, name := range names {
@@ -109,14 +142,20 @@ func noTxIndexHazards(names []string, read func(string) (string, error)) ([]stri
 		if err != nil {
 			return nil, fmt.Errorf("migrate: read %s: %w", name, err)
 		}
+		sql := strings.Join(splitStatements(body), ";\n")
 		if isNoTxMigration(body) {
-			for _, m := range indexDDL.FindAllStringSubmatch(body, -1) {
-				built = append(built, owned{index: m[1], file: name})
+			for _, idx := range indexNames(sql) {
+				o := owned{index: idx, file: name}
+				if !seen[o] {
+					seen[o] = true
+					built = append(built, o)
+				}
 			}
 			continue
 		}
+		lower := strings.ToLower(sql)
 		for _, o := range built {
-			if regexp.MustCompile(`\b` + regexp.QuoteMeta(o.index) + `\b`).MatchString(body) {
+			if regexp.MustCompile(`\b` + regexp.QuoteMeta(strings.ToLower(o.index)) + `\b`).MatchString(lower) {
 				hazards = append(hazards, fmt.Sprintf("%s references %s, which no-transaction %s creates or drops", name, o.index, o.file))
 			}
 		}

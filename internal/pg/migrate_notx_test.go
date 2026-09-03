@@ -16,4 +16,6 @@ func TestIsNoTxMigration_ScansPastAHeaderComment(t *testing.T) {
 		"a directive after the first statement is not a directive")
 	assert.False(t, isNoTxMigration("-- plain comment\nCREATE TABLE t (id int);"))
 	assert.False(t, isNoTxMigration(""))
+	assert.False(t, isNoTxMigration("/* block header */\n-- migrate:no-transaction\nSELECT 1;"),
+		"a block comment stops the scan; only -- comments may precede the directive")
 }
