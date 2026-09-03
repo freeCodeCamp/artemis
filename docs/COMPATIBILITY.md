@@ -736,6 +736,20 @@ The exposure is the duration of that one upload, not the remaining permit.
 new deploy id. A CI pipeline that retries a whole deploy step should re-run `init`, not reuse the
 previous permit.
 
+## 34 — a deploy-session JWT without `exp` is rejected with `403 jwt_invalid`
+
+**Release:** unreleased.
+
+**Old:** the verifier checked the signature, the algorithm and the issuer. A token that carried no
+`exp` claim passed every check and verified forever.
+
+**New:** the verifier requires `exp`. A token without it answers `403 jwt_invalid` with the message
+"invalid deploy-session jwt" on every deploy-session route. An expired token still answers `401
+jwt_expired`.
+
+**Action:** none for a client. artemis mints every deploy-session token itself and always sets `exp`,
+so only a hand-built token is affected.
+
 ## 33 — an expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row
 
 **Release:** unreleased.

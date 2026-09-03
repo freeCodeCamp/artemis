@@ -99,7 +99,7 @@ func (s *DeploySessionSigner) Sign(login string, site sitekey.Slug, deployID str
 // (401) from other failures.
 func (s *DeploySessionSigner) Verify(token string) (DeploySessionClaims, error) {
 	var claims DeploySessionClaims
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}))
+	parser := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
 	_, err := parser.ParseWithClaims(token, &claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("auth: unexpected signing method %v", t.Header["alg"])

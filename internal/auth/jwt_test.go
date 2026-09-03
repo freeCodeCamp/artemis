@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -145,4 +146,24 @@ func flip(b byte) string {
 		return "B"
 	}
 	return "A"
+}
+
+func TestVerify_RequiresExp(t *testing.T) {
+	s := newSigner(t)
+	claims := DeploySessionClaims{
+		Site:     "www",
+		DeployID: "d-1",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:   jwtIssuer,
+			Subject:  "alice",
+			IssuedAt: jwt.NewNumericDate(time.Now()),
+		},
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.key)
+	require.NoError(t, err)
+
+	_, err = s.Verify(tok)
+	require.Error(t, err, "a token with no exp must not verify")
+	assert.ErrorIs(t, err, jwt.ErrTokenRequiredClaimMissing)
+	assert.False(t, IsExpired(err), "missing exp is a 403 validation failure, not an expired token")
 }
