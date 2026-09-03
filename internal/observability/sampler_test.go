@@ -39,3 +39,9 @@ func TestSampleRate_ForceSamplesDestructiveNotProbe(t *testing.T) {
 	assert.Equal(t, 0.0, sampleRate("GET /healthz", 0.2), "probe dropped")
 	assert.Equal(t, 0.2, sampleRate("GET /api/sites", 0.2), "normal at base rate")
 }
+
+func TestSampler_NamesReleaseAndReject(t *testing.T) {
+	assert.Equal(t, 1.0, sampleRate("POST /api/site/www/release", 0.2), "release frees a name for anyone to take; force-sampled")
+	assert.Equal(t, 1.0, sampleRate("POST /api/repo/42/reject", 0.2), "reject closes a request for good; force-sampled")
+	assert.Equal(t, 0.2, sampleRate("POST /api/site/www/undelete", 0.2), "undelete restores; base rate")
+}

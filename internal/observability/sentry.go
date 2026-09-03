@@ -159,6 +159,8 @@ var destructiveMatchers = []struct {
 	{"POST", regexp.MustCompile(`^/api/site/[^/]+/deploys/[^/]+/restore$`)},
 	{"POST", regexp.MustCompile(`^/api/deploy/[^/]+/finalize$`)},
 	{"DELETE", regexp.MustCompile(`^/api/repo/[^/]+$`)},
+	{"POST", regexp.MustCompile(`^/api/site/[^/]+/release$`)},
+	{"POST", regexp.MustCompile(`^/api/repo/[^/]+/reject$`)},
 }
 
 func isDestructive(spanName string) bool {
