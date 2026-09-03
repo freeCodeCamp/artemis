@@ -383,3 +383,20 @@ func TestSiteLifecycleDef(t *testing.T) {
 	assert.Equal(t, gcRunBudget, lifecycle.ExecutionTimeout)
 	require.NotNil(t, lifecycle.Handler)
 }
+
+func TestWithCheckIn_ReportsErrorOnPanic(t *testing.T) {
+	var statuses []sentry.CheckInStatus
+	orig := captureCheckIn
+	captureCheckIn = func(c *sentry.CheckIn, _ *sentry.MonitorConfig) *sentry.EventID {
+		statuses = append(statuses, c.Status)
+		return nil
+	}
+	t.Cleanup(func() { captureCheckIn = orig })
+
+	wrapped := withCheckIn("slug", "0 4 * * *", func(context.Context, map[string]any) error {
+		panic("boom")
+	})
+	require.Panics(t, func() { _ = wrapped(context.Background(), nil) }, "the panic must still reach the adapter's handler above")
+	assert.Equal(t, []sentry.CheckInStatus{sentry.CheckInStatusInProgress, sentry.CheckInStatusError}, statuses,
+		"a panic must close the monitor as error, not leave it in-progress until Sentry times it out")
+}

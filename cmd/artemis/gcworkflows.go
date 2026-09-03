@@ -42,21 +42,23 @@ func withCheckIn(slug, cron string, fn worker.Handler) worker.Handler {
 			Status:      sentry.CheckInStatusInProgress,
 		}, cfg)
 		start := time.Now()
+		status := sentry.CheckInStatusError
+		defer func() {
+			var cid sentry.EventID
+			if id != nil {
+				cid = *id
+			}
+			captureCheckIn(&sentry.CheckIn{
+				ID:          cid,
+				MonitorSlug: slug,
+				Status:      status,
+				Duration:    time.Since(start),
+			}, cfg)
+		}()
 		err := fn(ctx, input)
-		status := sentry.CheckInStatusOK
-		if err != nil {
-			status = sentry.CheckInStatusError
+		if err == nil {
+			status = sentry.CheckInStatusOK
 		}
-		var cid sentry.EventID
-		if id != nil {
-			cid = *id
-		}
-		captureCheckIn(&sentry.CheckIn{
-			ID:          cid,
-			MonitorSlug: slug,
-			Status:      status,
-			Duration:    time.Since(start),
-		}, cfg)
 		return err
 	}
 }
