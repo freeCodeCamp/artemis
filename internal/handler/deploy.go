@@ -242,13 +242,8 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		var verr *r2.VerifyError
 		if errors.As(err, &verr) {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-				"error": map[string]any{
-					"code":    "verify_failed",
-					"message": "deploy is missing expected files",
-					"missing": verr.Missing,
-				},
-			})
+			writeErrorDetail(w, http.StatusUnprocessableEntity, "verify_failed",
+				"deploy is missing expected files", map[string]any{"missing": verr.Missing})
 			return
 		}
 		writeUpstreamError(w, r, http.StatusBadGateway, "r2_list_failed", "r2.list.verify", err)

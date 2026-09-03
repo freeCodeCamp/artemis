@@ -54,15 +54,9 @@ func (h *Handlers) SiteDeployDelete(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 			if strings.TrimSpace(cur) == deployID {
-				writeJSON(w, http.StatusConflict, map[string]any{
-					"error": map[string]string{
-						"code":    "deploy_aliased",
-						"message": "deploy is the target of a live alias; promote or roll back before deleting",
-					},
-					"site":     site,
-					"deployId": deployID,
-					"alias":    mode,
-				})
+				writeErrorWith(w, http.StatusConflict, "deploy_aliased",
+					"deploy is the target of a live alias; promote or roll back before deleting",
+					map[string]any{"site": site, "deployId": deployID, "alias": mode})
 				return nil
 			}
 		}

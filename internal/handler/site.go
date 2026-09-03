@@ -107,14 +107,9 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			}
 			current = strings.TrimSpace(current)
 			if current != req.ExpectedCurrent {
-				writeJSON(w, http.StatusConflict, map[string]any{
-					"error": map[string]string{
-						"code":    "alias_drift",
-						"message": "production alias has moved since expectedCurrent was read",
-					},
-					"site":    site,
-					"current": current,
-				})
+				writeErrorWith(w, http.StatusConflict, "alias_drift",
+					"production alias has moved since expectedCurrent was read",
+					map[string]any{"site": site, "current": current})
 				return errAliasWriteHandled
 			}
 		}
@@ -267,14 +262,9 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			}
 			current = strings.TrimSpace(current)
 			if current != req.ExpectedCurrent {
-				writeJSON(w, http.StatusConflict, map[string]any{
-					"error": map[string]string{
-						"code":    "alias_drift",
-						"message": "production alias has moved since expectedCurrent was read",
-					},
-					"site":    site,
-					"current": current,
-				})
+				writeErrorWith(w, http.StatusConflict, "alias_drift",
+					"production alias has moved since expectedCurrent was read",
+					map[string]any{"site": site, "current": current})
 				return errAliasWriteHandled
 			}
 		}

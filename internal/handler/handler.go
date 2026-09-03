@@ -336,6 +336,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func writeErrorWith(w http.ResponseWriter, status int, code, message string, siblings map[string]any) {
+	if sw, ok := w.(*statusWriter); ok {
+		sw.errCode = code
+	}
+	body := map[string]any{"error": map[string]string{"code": code, "message": message}}
+	for k, v := range siblings {
+		body[k] = v
+	}
+	writeJSON(w, status, body)
+}
+
 func writeErrorDetail(w http.ResponseWriter, status int, code, message string, extra map[string]any) {
 	if sw, ok := w.(*statusWriter); ok {
 		sw.errCode = code
