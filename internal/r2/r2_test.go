@@ -46,9 +46,10 @@ type fakeS3 struct {
 	// Aws-sdk-go-v2 sends "chunked" when ContentLength is unknown.
 	lastPutTransferEncoding string
 
-	pageSize           int
-	deleteObjectsCalls int
-	lastDeleteBatch    int
+	pageSize             int
+	truncateWithoutToken bool
+	deleteObjectsCalls   int
+	lastDeleteBatch      int
 
 	listCalls int
 	hangList  bool
@@ -217,6 +218,7 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 	f.listCalls++
 	failList := f.failList
 	hangList := f.hangList
+	truncateWithoutToken := f.truncateWithoutToken
 	f.mu.Unlock()
 	if hangList {
 		<-r.Context().Done()
@@ -295,7 +297,7 @@ func (f *fakeS3) listV2(w http.ResponseWriter, r *http.Request) {
 		IsTruncated: truncated,
 		Contents:    page,
 	}
-	if truncated && len(page) > 0 {
+	if truncated && len(page) > 0 && !truncateWithoutToken {
 		res.NextContinuationToken = page[len(page)-1].Key
 	}
 	for _, cp := range common {
@@ -1144,4 +1146,26 @@ func TestMovePrefix_Paginates(t *testing.T) {
 	dst, err := c.HasPrefix(context.Background(), "_trash/s/d/")
 	require.NoError(t, err)
 	assert.True(t, dst)
+}
+
+func TestListPrefix_StopsWhenATruncatedPageHasNoToken(t *testing.T) {
+	f := newFakeS3(t, "b")
+	f.put("b", "www/a", []byte("1"))
+	f.put("b", "www/b", []byte("2"))
+	f.put("b", "www/c", []byte("3"))
+	f.mu.Lock()
+	f.pageSize = 1
+	f.truncateWithoutToken = true
+	f.mu.Unlock()
+	c := newClient(t, f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := c.ListPrefix(ctx, "www/")
+
+	require.ErrorIs(t, err, ErrTruncatedWithoutToken, "a truncated page with no token is a malformed listing, not a partial one")
+	f.mu.Lock()
+	calls := f.listCalls
+	f.mu.Unlock()
+	assert.Equal(t, 1, calls, "the loop must stop on the first such page instead of re-reading it until the deadline")
 }

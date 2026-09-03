@@ -201,6 +201,18 @@ func (c *Client) HasObject(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+var ErrTruncatedWithoutToken = errors.New("r2: truncated page without a continuation token")
+
+func nextListPage(page *s3.ListObjectsV2Output) (*string, error) {
+	if page.IsTruncated == nil || !*page.IsTruncated {
+		return nil, nil
+	}
+	if page.NextContinuationToken == nil || *page.NextContinuationToken == "" {
+		return nil, ErrTruncatedWithoutToken
+	}
+	return page.NextContinuationToken, nil
+}
+
 // ListPrefix returns all keys under the given prefix.
 func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error) {
 	var out []string
@@ -219,10 +231,12 @@ func (c *Client) ListPrefix(ctx context.Context, prefix string) ([]string, error
 				out = append(out, *obj.Key)
 			}
 		}
-		if page.IsTruncated == nil || !*page.IsTruncated {
+		if token, err = nextListPage(page); err != nil {
+			return nil, fmt.Errorf("r2 list %s: %w", prefix, err)
+		}
+		if token == nil {
 			break
 		}
-		token = page.NextContinuationToken
 	}
 	return out, nil
 }
@@ -244,10 +258,12 @@ func (c *Client) PrefixBytes(ctx context.Context, prefix string) (int64, error) 
 				total += *obj.Size
 			}
 		}
-		if page.IsTruncated == nil || !*page.IsTruncated {
+		if token, err = nextListPage(page); err != nil {
+			return 0, fmt.Errorf("r2 prefix-bytes %s: %w", prefix, err)
+		}
+		if token == nil {
 			break
 		}
-		token = page.NextContinuationToken
 	}
 	return total, nil
 }
@@ -291,10 +307,12 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 				return deleted, err
 			}
 		}
-		if page.IsTruncated == nil || !*page.IsTruncated {
+		if token, err = nextListPage(page); err != nil {
+			return deleted, fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err)
+		}
+		if token == nil {
 			break
 		}
-		token = page.NextContinuationToken
 	}
 	return deleted, nil
 }
@@ -365,10 +383,12 @@ func (c *Client) MovePrefix(ctx context.Context, srcPrefix, dstPrefix string) (i
 			return int(moved.Load()), err
 		}
 
-		if page.IsTruncated == nil || !*page.IsTruncated {
+		if token, err = nextListPage(page); err != nil {
+			return int(moved.Load()), fmt.Errorf("r2 moveprefix list %s: %w", srcPrefix, err)
+		}
+		if token == nil {
 			break
 		}
-		token = page.NextContinuationToken
 	}
 	return int(moved.Load()), nil
 }
@@ -409,10 +429,12 @@ func (c *Client) ListSites(ctx context.Context) ([]string, error) {
 			}
 			sites = append(sites, site)
 		}
-		if page.IsTruncated == nil || !*page.IsTruncated {
+		if token, err = nextListPage(page); err != nil {
+			return nil, fmt.Errorf("r2 listsites: %w", err)
+		}
+		if token == nil {
 			break
 		}
-		token = page.NextContinuationToken
 	}
 	return sites, nil
 }
