@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"time"
 
@@ -67,7 +66,10 @@ func (r *Repo) EnqueueSiteLifecycle(ctx context.Context, events []SiteLifecycleE
 	})
 }
 
-const claimTTL = 5 * time.Minute
+const (
+	claimTTL          = 5 * time.Minute
+	relayRetryBackoff = time.Minute
+)
 
 func (r *Repo) claimBatch(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	var events []OutboxEvent
@@ -116,13 +118,12 @@ func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEve
 	var pubErr error
 	for i, e := range events {
 		if err := publish(e); err != nil {
-			pubErr = fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
 			held := make([]int64, 0, len(events)-i)
 			for _, rest := range events[i:] {
 				held = append(held, rest.ID)
 			}
+			pubErr = fmt.Errorf("relay: publish id=%d topic=%s (%d claims retry in %s): %w", e.ID, e.Topic, len(held), relayRetryBackoff, err)
 			pubErr = errors.Join(pubErr, r.releaseClaims(ctx, held))
-			slog.WarnContext(ctx, "relay.publish.failed", "id", e.ID, "topic", e.Topic, "released", len(held), "err", err)
 			break
 		}
 		doneIDs = append(doneIDs, e.ID)
@@ -142,7 +143,8 @@ func (r *Repo) releaseClaims(ctx context.Context, ids []int64) error {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if _, err := r.pool.Exec(releaseCtx,
-		`UPDATE outbox SET claimed_at = NULL, claim_expires_at = NULL WHERE id = ANY($1) AND published_at IS NULL`, ids); err != nil {
+		`UPDATE outbox SET claimed_at = NULL, claim_expires_at = now() + make_interval(secs => $2)
+		 WHERE id = ANY($1) AND published_at IS NULL`, ids, relayRetryBackoff.Seconds()); err != nil {
 		return fmt.Errorf("pg outbox release claims: %w", err)
 	}
 	return nil

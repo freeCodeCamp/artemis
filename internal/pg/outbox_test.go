@@ -145,11 +145,23 @@ func TestRelayBatch_AFailedPublishDoesNotFreezeTheRest(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 1, n, "the first event is published before the failure")
 
+	var maxWait time.Duration
+	require.NoError(t, repo.pool.QueryRow(ctx,
+		`SELECT coalesce(max(claim_expires_at - now()), interval '0') FROM outbox WHERE published_at IS NULL`).Scan(&maxWait))
+	assert.LessOrEqual(t, maxWait, relayRetryBackoff, "the failed event and the one behind it back off for a minute, not the 5-minute claim")
+	assert.Positive(t, maxWait, "they are not freed at once: a dead publisher must not be retried every relay tick")
+
 	var published int
 	retry := func(OutboxEvent) error { published++; return nil }
 	n, err = repo.RelayBatch(ctx, 10, retry, time.Now())
 	require.NoError(t, err)
-	assert.Equal(t, 2, n, "the failed event and the one behind it must be claimable again at once, not after the 5-minute claim")
+	assert.Equal(t, 0, n, "inside the backoff nothing is re-claimed")
+
+	_, err = repo.pool.Exec(ctx, `UPDATE outbox SET claim_expires_at = now() - interval '1 second' WHERE published_at IS NULL`)
+	require.NoError(t, err)
+	n, err = repo.RelayBatch(ctx, 10, retry, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 2, n, "after the backoff both rows publish in id order")
 	assert.Equal(t, 2, published)
 	assert.Empty(t, fetchUnpublished(ctx, t, repo, 10))
 }
