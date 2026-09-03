@@ -28,7 +28,7 @@ services:
       retries: 30
 
   hatchet-lite:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.88.6
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.91.2
     depends_on:
       hatchet-postgres:
         condition: service_healthy
