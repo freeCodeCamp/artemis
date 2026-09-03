@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -113,9 +114,15 @@ func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEve
 
 	var doneIDs []int64
 	var pubErr error
-	for _, e := range events {
+	for i, e := range events {
 		if err := publish(e); err != nil {
 			pubErr = fmt.Errorf("relay: publish id=%d topic=%s: %w", e.ID, e.Topic, err)
+			held := make([]int64, 0, len(events)-i)
+			for _, rest := range events[i:] {
+				held = append(held, rest.ID)
+			}
+			pubErr = errors.Join(pubErr, r.releaseClaims(ctx, held))
+			slog.WarnContext(ctx, "relay.publish.failed", "id", e.ID, "topic", e.Topic, "released", len(held), "err", err)
 			break
 		}
 		doneIDs = append(doneIDs, e.ID)
@@ -129,6 +136,16 @@ func (r *Repo) RelayBatch(ctx context.Context, limit int, publish func(OutboxEve
 		return len(doneIDs), errors.Join(pubErr, err)
 	}
 	return len(doneIDs), pubErr
+}
+
+func (r *Repo) releaseClaims(ctx context.Context, ids []int64) error {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if _, err := r.pool.Exec(releaseCtx,
+		`UPDATE outbox SET claimed_at = NULL, claim_expires_at = NULL WHERE id = ANY($1) AND published_at IS NULL`, ids); err != nil {
+		return fmt.Errorf("pg outbox release claims: %w", err)
+	}
+	return nil
 }
 
 func (r *Repo) MarkPublished(ctx context.Context, ids []int64, at time.Time) error {

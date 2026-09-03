@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func fetchUnpublished(ctx context.Context, t *testing.T, repo *Repo, limit int) []OutboxEvent {
@@ -122,4 +124,32 @@ func TestOutbox_EnqueueSiteChanged(t *testing.T) {
 func TestTopicSiteLifecycleIsTheWireLiteral(t *testing.T) {
 	assert.Equal(t, "site.lifecycle", TopicSiteLifecycle,
 		"outbox rows already enqueued carry this literal; a rename leaves them with no consumer")
+}
+
+func TestRelayBatch_AFailedPublishDoesNotFreezeTheRest(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	for _, site := range []sitekey.Dirname{"a", "b", "c"} {
+		require.NoError(t, repo.EnqueueSiteChanged(ctx, site))
+	}
+
+	calls := 0
+	failSecond := func(OutboxEvent) error {
+		calls++
+		if calls == 2 {
+			return errors.New("grpc hiccup")
+		}
+		return nil
+	}
+	n, err := repo.RelayBatch(ctx, 10, failSecond, time.Now())
+	require.Error(t, err)
+	assert.Equal(t, 1, n, "the first event is published before the failure")
+
+	var published int
+	retry := func(OutboxEvent) error { published++; return nil }
+	n, err = repo.RelayBatch(ctx, 10, retry, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 2, n, "the failed event and the one behind it must be claimable again at once, not after the 5-minute claim")
+	assert.Equal(t, 2, published)
+	assert.Empty(t, fetchUnpublished(ctx, t, repo, 10))
 }
