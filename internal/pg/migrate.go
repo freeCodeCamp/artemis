@@ -175,7 +175,12 @@ func isNoTxMigration(body string) bool {
 		if t == "" {
 			continue
 		}
-		return strings.EqualFold(t, noTxDirective)
+		if strings.EqualFold(t, noTxDirective) {
+			return true
+		}
+		if !strings.HasPrefix(t, "--") {
+			return false
+		}
 	}
 	return false
 }
