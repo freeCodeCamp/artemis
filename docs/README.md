@@ -191,7 +191,7 @@ The `drift-detect` cron sends an event as soon as it finds a single reclaimable 
 
 The two configured rules above fire on state transitions only. A Monitor built from this table still needs its own re-notification policy for any signal that can stay in one failed state across many runs, such as a cron that fails silently every night. The exact policy is an operator decision; the fact to carry forward is that "an alert rule exists" does not by itself mean "a repeating failure keeps notifying."
 
-Deferred: a DLQ-depth gauge — Hatchet v0.88.6 exposes queue depth only via a deprecated API; dead-letter events are already covered by the per-failure Issues above.
+Deferred: a DLQ-depth gauge — the Hatchet SDK exposes queue depth through `features.MetricsClient.GetQueueMetrics`, and nothing in artemis polls it yet; dead-letter events are already covered by the per-failure Issues above.
 
 ### Who-did-what dashboard (operator setup)
 

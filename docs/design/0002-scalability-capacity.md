@@ -154,7 +154,7 @@ o11y is **Sentry-only** as of v1.4.0 (the Prometheus `/metrics` leg was removed 
 | GC pass volume + blast-cap | `gc.site.done` / `gc.site.capped` logs (numeric attrs queryable)           |
 | reclaim progress           | `gc.tombstone-purge.done` log (`bytes`, `purged`)                          |
 
-Deferred (no live signal today): per-workflow **queue backlog** and **dead-letter depth** as gauges — Hatchet v0.88.6 exposes queue depth only via a deprecated API. Dead-letter _events_ are covered by the per-failure Issues above; a depth gauge is a future effort gated on the Hatchet SDK migration.
+Deferred (no live signal today): per-workflow **queue backlog** and **dead-letter depth** as gauges — the Hatchet SDK exposes tenant queue depth through `features.MetricsClient.GetQueueMetrics` (`sdks/go/features/metrics.go`), and nothing in artemis polls it yet. Dead-letter _events_ are covered by the per-failure Issues above; a depth gauge is a future effort gated on the Hatchet SDK migration.
 
 ## 10. Reproducing
 
