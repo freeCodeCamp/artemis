@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -516,7 +517,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("GH_APP_INSTALLATION_ID must be digits only, got %q", c.Repo.App.InstallationID)
 		}
 	}
-	if c.Sentry.TracesSampleRate < 0 || c.Sentry.TracesSampleRate > 1 {
+	if math.IsNaN(c.Sentry.TracesSampleRate) || c.Sentry.TracesSampleRate < 0 || c.Sentry.TracesSampleRate > 1 {
 		return fmt.Errorf("invalid SENTRY_TRACES_SAMPLE_RATE %v: must be in [0,1]", c.Sentry.TracesSampleRate)
 	}
 	if c.Cleanup.Grace < c.JWT.TTL {

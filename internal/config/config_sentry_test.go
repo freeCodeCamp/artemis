@@ -56,7 +56,7 @@ func TestLoad_SentryRateRejectsNonNumeric(t *testing.T) {
 }
 
 func TestLoad_SentryRateRejectsOutOfRange(t *testing.T) {
-	for _, v := range []string{"-0.1", "1.5"} {
+	for _, v := range []string{"-0.1", "1.5", "NaN"} {
 		t.Run(v, func(t *testing.T) {
 			setRequiredForSentry(t)
 			t.Setenv("SENTRY_TRACES_SAMPLE_RATE", v)

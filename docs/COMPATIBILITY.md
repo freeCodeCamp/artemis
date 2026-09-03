@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 33, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 35, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -55,6 +55,8 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
 | 32 | An upload into a finalized deploy answers `409`, not `200` | unreleased | API callers and CI pipelines |
 | 33 | An expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row | unreleased | Audit readers and operators |
+| 34 | A deploy-session JWT without `exp` is rejected with `403 jwt_invalid` | unreleased | Nobody in practice; hand-built tokens only |
+| 35 | `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing | unreleased | Operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -782,3 +784,17 @@ Observable to a caller:
 reclaim without audit rows. Proof: `cmd/artemis/reservationsweep.go`, `cmd/artemis/reclaim.go`,
 `internal/pg/reservation.go` (`ClaimReclaim`, `ReleaseReservationAudited`),
 `internal/pg/migrations/0011_reclaim_claim.sql`.
+
+## 35 — `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing
+
+**Release:** unreleased.
+
+**Old:** the range gate at boot was `rate < 0 || rate > 1`. Both comparisons are false for NaN, and
+`strconv.ParseFloat` accepts `NaN` and `nan`, so the value passed the gate and reached the Sentry SDK.
+The SDK then sampled no transaction and reported no error.
+
+**New:** the gate checks `math.IsNaN` first, on the same error path. `Load()` fails with
+`invalid SENTRY_TRACES_SAMPLE_RATE NaN: must be in [0,1]` and the pod does not start.
+
+**Action:** none unless the variable is literally `NaN`. Unset it for the default, or set a number in
+`[0,1]`. Source: `internal/config/config.go:520`.
