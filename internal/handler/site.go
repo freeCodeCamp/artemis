@@ -168,7 +168,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
-		h.flushThenPurge(commitCtx, w, site, &touched)
+		h.purgeTouched(commitCtx, site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(site), deployID)
@@ -178,7 +178,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 		"url":      h.publicURL(site, "production"),
 		"deployId": deployID,
 	})
-	h.flushThenPurge(commitCtx, w, site, &touched)
+	h.purgeTouched(commitCtx, site, &touched)
 }
 
 // SiteRollbackRequest is the body of /api/site/{site}/rollback.
@@ -291,7 +291,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
-		h.flushThenPurge(commitCtx, w, site, &touched)
+		h.purgeTouched(commitCtx, site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(site), req.To)
@@ -301,7 +301,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 		"url":      h.publicURL(site, "production"),
 		"deployId": req.To,
 	})
-	h.flushThenPurge(commitCtx, w, site, &touched)
+	h.purgeTouched(commitCtx, site, &touched)
 }
 
 // SiteDeploys implements GET /api/site/{site}/deploys — lists past

@@ -426,18 +426,12 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		return nil
 	})
 	if wrote {
-		if err := http.NewResponseController(w).Flush(); err != nil {
-			slog.WarnContext(opCtx, "site.delete.flush_failed", "site", slug, "err", err)
-		}
-		h.purgeEdge(opCtx, slug, touched.modes)
+		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
-		if err := http.NewResponseController(w).Flush(); err != nil {
-			slog.WarnContext(opCtx, "site.delete.flush_failed", "site", slug, "err", err)
-		}
-		h.purgeEdge(opCtx, slug, touched.modes)
+		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
@@ -452,13 +446,13 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 			slog.Bool("orphan", orphanObserved), slog.Bool("aliasProbeUnreadable", probeUnreadable))
 		h.auditFromScope(r.Context(), "site.delete", "success", detail)
 		writeJSON(w, http.StatusOK, body)
-		h.flushThenPurge(opCtx, w, slug, &touched)
+		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	h.logAction(r.Context(), "site.delete", "success")
 	h.auditFromScope(r.Context(), "site.delete", "success", nil)
 	w.WriteHeader(http.StatusNoContent)
-	h.flushThenPurge(opCtx, w, slug, &touched)
+	h.purgeTouched(opCtx, slug, &touched)
 }
 
 // SiteUndelete implements POST /api/site/{slug}/undelete — returns a
@@ -506,7 +500,7 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 	})
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
-		h.flushThenPurge(opCtx, w, slug, &touched)
+		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	if undeleteErr != nil {
@@ -514,11 +508,11 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		h.auditFromScope(r.Context(), "site.undelete", "failure", map[string]any{"stage": undeleteStage})
 		if undeleteStage == "restore_alias" {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias-undelete", undeleteErr)
-			h.flushThenPurge(opCtx, w, slug, &touched)
+			h.purgeTouched(opCtx, slug, &touched)
 			return
 		}
 		writeRegistryDeleteError(w, r, undeleteErr)
-		h.flushThenPurge(opCtx, w, slug, &touched)
+		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
@@ -529,7 +523,7 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		"prevProduction": res.PrevProduction,
 		"prevPreview":    res.PrevPreview,
 	})
-	h.flushThenPurge(opCtx, w, slug, &touched)
+	h.purgeTouched(opCtx, slug, &touched)
 }
 
 func (h *Handlers) restoreAliasPins(ctx context.Context, t *aliasTouch, slug sitekey.Slug, held registry.Reservation) (string, error) {

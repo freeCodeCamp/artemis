@@ -2,8 +2,6 @@ package handler
 
 import (
 	"context"
-	"log/slog"
-	"net/http"
 
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
@@ -37,12 +35,6 @@ func (h *Handlers) deleteAliasTouched(ctx context.Context, t *aliasTouch, site s
 	return nil
 }
 
-func (h *Handlers) flushThenPurge(ctx context.Context, w http.ResponseWriter, site sitekey.Slug, t *aliasTouch) {
-	if len(t.modes) == 0 {
-		return
-	}
-	if err := http.NewResponseController(w).Flush(); err != nil {
-		slog.WarnContext(ctx, "edge.purge.flush_failed", "site", site, "err", err)
-	}
+func (h *Handlers) purgeTouched(ctx context.Context, site sitekey.Slug, t *aliasTouch) {
 	h.purgeEdge(ctx, site, t.modes)
 }

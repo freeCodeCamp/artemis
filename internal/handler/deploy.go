@@ -316,7 +316,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
-		h.flushThenPurge(commitCtx, w, claims.Site, &touched)
+		h.purgeTouched(commitCtx, claims.Site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
@@ -328,7 +328,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		"deployId": deployID,
 		"mode":     mode,
 	})
-	h.flushThenPurge(commitCtx, w, claims.Site, &touched)
+	h.purgeTouched(commitCtx, claims.Site, &touched)
 }
 
 const indexCommitAttempts = 3

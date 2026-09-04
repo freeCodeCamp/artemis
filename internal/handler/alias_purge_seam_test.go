@@ -238,40 +238,33 @@ func TestSiteUndelete_PurgesWhatWasRestoredWhenTheSecondPinFails(t *testing.T) {
 
 var errAliasRestore = errors.New("r2 put outage")
 
-type responseAwarePurger struct {
-	calls    [][]string
-	sawBody  []bool
-	recorder *httptest.ResponseRecorder
-}
-
-func (p *responseAwarePurger) PurgeHosts(_ context.Context, hosts []string) error {
-	p.calls = append(p.calls, hosts)
-	p.sawBody = append(p.sawBody, p.recorder.Body.Len() > 0)
-	return nil
-}
-
-func TestSitePromote_AnswersTheCallerBeforeWaitingOnCloudflare(t *testing.T) {
+func TestSitePromote_PurgesAfterTheAliasWriteWithoutFlushing(t *testing.T) {
+	logs := captureAccessLog(t)
 	store := newFakeR2()
 	store.aliases["www/preview"] = "20260420-141522-abc1234"
 	store.objects["www/deploys/20260420-141522-abc1234/index.html"] = []byte("hi")
 	h, _ := newTestHandlers(t, authedGH(), standardSites(), store)
 	h.Audit = &fakeAudit{}
-	rec := httptest.NewRecorder()
-	purger := &responseAwarePurger{recorder: rec}
+	purger := &fakePurger{}
 	h.EdgePurge = purger
 
 	r := chi.NewRouter()
-	r.Post("/api/site/{site}/promote", RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.SitePromote))).ServeHTTP)
-	req := httptest.NewRequest(http.MethodPost, "/api/site/www/promote", nil)
+	r.Post("/api/site/{site}/promote", RequestID(AccessLog(h.RequireGitHubBearer(http.HandlerFunc(h.SitePromote)))).ServeHTTP)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/site/www/promote", nil)
+	require.NoError(t, err)
 	for k, v := range bearerTok() {
 		req.Header.Set(k, v)
 	}
-	r.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-	require.Len(t, purger.calls, 1)
-	assert.True(t, purger.sawBody[0],
-		"a purge spends up to a 20s budget on an external API; making the staffer wait for it before the "+
-			"response is a stall on the hottest paths, and the error paths in this same file already "+
-			"write, flush, then purge")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Len(t, purger.calls, 1, "the purge runs once, after the alias write commits")
+	assert.Equal(t, 0, logs.countMessage("edge.purge.flush_failed"),
+		"the access-log writer cannot flush; a flush attempt only adds a WARN per alias write")
+	assert.Empty(t, resp.TransferEncoding,
+		"a flush before the purge would force chunked encoding; the body is complete before any purge starts")
 }
