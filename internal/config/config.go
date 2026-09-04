@@ -32,7 +32,6 @@ const defaultGitHubAPIBase = "https://api.github.com"
 type Config struct {
 	Port                 int
 	R2                   R2Config
-	EdgeCache            EdgeCacheConfig
 	GitHub               GitHubConfig
 	JWT                  JWTConfig
 	Aliases              AliasConfig
@@ -111,11 +110,6 @@ type GitHubConfig struct {
 type JWTConfig struct {
 	SigningKey string
 	TTL        time.Duration
-}
-
-type EdgeCacheConfig struct {
-	ZoneID   string
-	APIToken string
 }
 
 // AliasConfig holds R2 alias key formats. The literal `<site>` token is
@@ -380,9 +374,6 @@ func Load() (*Config, error) {
 	cfg.Repo.App.AppID = os.Getenv("GH_APP_ID")
 	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
 	cfg.Repo.App.PrivateKeyPEM = os.Getenv("GH_APP_PRIVATE_KEY")
-
-	cfg.EdgeCache.ZoneID = os.Getenv("CLOUDFLARE_ZONE_ID")
-	cfg.EdgeCache.APIToken = os.Getenv("CLOUDFLARE_API_TOKEN")
 
 	cfg.Sentry.DSN = os.Getenv("SENTRY_DSN")
 	cfg.Sentry.Environment = os.Getenv("ENVIRONMENT")

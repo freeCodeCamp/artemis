@@ -256,7 +256,6 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		string(claims.Site), deployID, mode, time.Now().UTC().Format(time.RFC3339))
 
 	var deployBytes int64
-	var touched aliasTouch
 	commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancelCommit()
 	auditFinalizeFailure := func(stage string) {
@@ -292,7 +291,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			deployBytes = 0
 		}
 		if err := telemetry.WithSpan(commitCtx, "r2.put.alias.finalize", func(ctx context.Context) error {
-			return h.putAliasTouched(ctx, &touched, claims.Site, mode, deployID)
+			return h.R2.PutAlias(ctx, h.aliasKey(claims.Site, mode), deployID)
 		}); err != nil {
 			auditFinalizeFailure("alias")
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
@@ -316,7 +315,6 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(lockErr, errAliasWriteHandled) {
 			writeLockError(w, r, lockErr)
 		}
-		h.purgeTouched(commitCtx, claims.Site, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(claims.Site), deployID)
@@ -328,7 +326,6 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 		"deployId": deployID,
 		"mode":     mode,
 	})
-	h.purgeTouched(commitCtx, claims.Site, &touched)
 }
 
 const indexCommitAttempts = 3

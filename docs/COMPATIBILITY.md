@@ -50,7 +50,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | v1.10.2 | API callers |
 | 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | v1.10.2 | API callers |
 | 28 | `DELETE` refuses a registered site whose alias it cannot read | v1.10.2 | API callers |
-| 29 | Every alias write purges the Cloudflare edge for the host it moved | unreleased | API callers and operators |
+| 29 | Every alias write purges the Cloudflare edge for the host it moved | withdrawn | Nobody; never released |
 | 30 | An abandoned pending deploy is swept nightly, not only on the next site event | unreleased | API callers and operators |
 | 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
 | 32 | An upload into a finalized deploy answers `409`, not `200` | unreleased | API callers and CI pipelines |
@@ -415,7 +415,7 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 **New:** a `DELETE` first removes both alias objects, then flips the registry row to `reserved` with an expiry of `SITE_RESERVATION_GRACE` (default 72h). The site is dark as soon as the aliases are gone — subject to the 15-second serve-cache TTL — and the name is held for the grace period rather than freed.
 
-**Delete is not instant for assets.** The HTML goes dark inside the 15-second serve cache. Cloudflare caches non-HTML assets for up to 4h (`max-age=14400`), so an asset URL can still answer from an edge after the site is dark. The window self-heals and is accepted; no purge call is made. A caller that must prove a site is gone should check the HTML, not an asset.
+**Delete is not instant for assets.** The HTML goes dark inside the 15-second serve cache. Cloudflare caches non-HTML assets for up to 4h (`max-age=14400`), so an asset URL can still answer from an edge after the site is dark. The window self-heals and is accepted; no purge call is made. A caller that must prove a site is gone should check the HTML, not an asset. Since infra `ef71932d` (2026-09-02) the serve plane sends `Cache-Control: public, max-age=0, must-revalidate`, so the edge revalidates every request and the asset window is the 15-second serve cache only; see entry 29.
 
 **The ordering is the safety property and it is pinned by a test.** Aliases are removed *before* the registry state flips, inside the per-site advisory lock. If alias removal fails the operation ABORTS: the site stays registered and published, which is visible and retryable. No ordering produces deregistered-and-still-serving, which is the failure the whole design exists to prevent. `TestSiteDelete_AliasFailureAbortsAndLeavesTheSiteRegistered` fails if the two steps are transposed.
 
@@ -649,35 +649,20 @@ still closed.
 
 ## 29 — every alias write purges the Cloudflare edge for the host it moved
 
-**Release:** unreleased. Commits `4aed372` (takedown) and this wave's alias-purge seam.
+**Release:** withdrawn before release. Commits `4aed372` (takedown) and the alias-purge seam were removed on 2026-09-04.
 
-**Old:** artemis wrote the R2 alias object and stopped there. The serve plane read the new object
-within its 15s lookup cache, but Cloudflare kept answering from its edge. artemis sets no
-`Cache-Control` on an uploaded object (`internal/r2/r2.go`), and Cloudflare injects a default
-Browser Cache TTL of 4 hours whenever the origin sends none. So a deploy, a promote, a rollback, an
-undelete and a delete all left the previous content serving for up to 4 hours. A takedown removed
-the alias and the site kept serving.
+**What it was:** each alias mutation (finalize, promote, rollback, delete, undelete) purged the site's
+public host from the Cloudflare edge before answering, gated on `CLOUDFLARE_ZONE_ID` and
+`CLOUDFLARE_API_TOKEN`.
 
-**New:** each of the five alias mutations records the mode it wrote and purges that site's public
-host from the Cloudflare edge before answering. The purge is best-effort by design: the alias write
-already committed under the site lock, so failing the request would report a rollback that did not
-happen. A failure logs `edge.purge.failed` at ERROR and raises a Sentry event; the response is
-unchanged.
+**Why it went:** the serve plane closed the gap first. Caddy sends
+`Cache-Control: public, max-age=0, must-revalidate` on every served object (infra `ef71932d`,
+2026-09-02), so the edge revalidates each request against the origin and answers `REVALIDATED`, and
+the browser revalidates too. A promote, rollback or takedown is visible on the next request. A purge
+added nothing, and a Cloudflare outage would have held every alias write for up to 15 s.
 
-The caller waits for the purge. One attempt is capped at 15 s (`internal/cloudflare/purge.go`)
-inside a 20 s budget (`internal/handler/edgepurge.go`), so a Cloudflare outage adds up to 15 s to
-an alias write; the CLI's own request budget is 30 s.
-
-Two limits stated plainly rather than discovered later. First, purging is **off** unless
-`CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` are both set; with either missing artemis logs
-`edge.purge.disabled` at boot and behaves exactly as the old version did. Second, a purge clears
-Cloudflare's edge and **not** a visitor's own browser cache — Cloudflare's documentation is explicit
-that already-fetched assets keep serving until their own TTL expires. Shortening that requires a
-`Cache-Control` header from the serve plane, which artemis does not own.
-
-**Action:** operators must provision both credentials; the token needs `Zone.Cache Purge` and
-nothing else. API callers need no change, but a deploy or promote is now visible at the edge
-immediately instead of after the CDN TTL.
+**Action:** none. The two `CLOUDFLARE_*` variables are not read; drop them from any envelope that
+carries them.
 
 ## 30 — an abandoned pending deploy is swept nightly, not only on the next site event
 

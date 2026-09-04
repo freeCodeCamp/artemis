@@ -368,7 +368,6 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 	}
 
 	var wrote, servedOrphan, orphanObserved, probeUnreadable bool
-	var touched aliasTouch
 	lockErr := h.withSiteLock(opCtx, dirname, func(opCtx context.Context) error {
 		var served bool
 		var headErr error
@@ -403,7 +402,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 			}
 		}
 		for _, mode := range modes {
-			if err := h.deleteAliasTouched(opCtx, &touched, slug, mode); err != nil {
+			if err := h.R2.DeleteAlias(opCtx, h.aliasKey(slug, mode)); err != nil {
 				auditDeleteFailure("unpublish")
 				writeUpstreamError(w, r, http.StatusBadGateway, "r2_delete_failed", "r2.delete.alias", err)
 				wrote = true
@@ -426,12 +425,10 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 		return nil
 	})
 	if wrote {
-		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
-		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
@@ -446,13 +443,11 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 			slog.Bool("orphan", orphanObserved), slog.Bool("aliasProbeUnreadable", probeUnreadable))
 		h.auditFromScope(r.Context(), "site.delete", "success", detail)
 		writeJSON(w, http.StatusOK, body)
-		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	h.logAction(r.Context(), "site.delete", "success")
 	h.auditFromScope(r.Context(), "site.delete", "success", nil)
 	w.WriteHeader(http.StatusNoContent)
-	h.purgeTouched(opCtx, slug, &touched)
 }
 
 // SiteUndelete implements POST /api/site/{slug}/undelete — returns a
@@ -477,7 +472,6 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 	// before it frees the name. An undelete landing inside that window
 	// would return an emptied site to service.
 	var res registry.Reservation
-	var touched aliasTouch
 	opCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), aliasCommitTimeout)
 	defer cancel()
 	var undeleteErr error
@@ -488,7 +482,7 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 			undeleteErr, undeleteStage = err, "read"
 			return nil
 		}
-		if stage, err := h.restoreAliasPins(opCtx, &touched, slug, held); err != nil {
+		if stage, err := h.restoreAliasPins(opCtx, slug, held); err != nil {
 			undeleteErr, undeleteStage = err, stage
 			return nil
 		}
@@ -500,7 +494,6 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 	})
 	if lockErr != nil {
 		writeLockError(w, r, lockErr)
-		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	if undeleteErr != nil {
@@ -508,11 +501,9 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		h.auditFromScope(r.Context(), "site.undelete", "failure", map[string]any{"stage": undeleteStage})
 		if undeleteStage == "restore_alias" {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias-undelete", undeleteErr)
-			h.purgeTouched(opCtx, slug, &touched)
 			return
 		}
 		writeRegistryDeleteError(w, r, undeleteErr)
-		h.purgeTouched(opCtx, slug, &touched)
 		return
 	}
 	telemetry.FromContext(r.Context()).SetResource(string(slug), "")
@@ -523,10 +514,9 @@ func (h *Handlers) SiteUndelete(w http.ResponseWriter, r *http.Request) {
 		"prevProduction": res.PrevProduction,
 		"prevPreview":    res.PrevPreview,
 	})
-	h.purgeTouched(opCtx, slug, &touched)
 }
 
-func (h *Handlers) restoreAliasPins(ctx context.Context, t *aliasTouch, slug sitekey.Slug, held registry.Reservation) (string, error) {
+func (h *Handlers) restoreAliasPins(ctx context.Context, slug sitekey.Slug, held registry.Reservation) (string, error) {
 	pins := []struct {
 		mode     string
 		deployID string
@@ -539,7 +529,7 @@ func (h *Handlers) restoreAliasPins(ctx context.Context, t *aliasTouch, slug sit
 		if pin.deployID == "" {
 			continue
 		}
-		if err := h.putAliasTouched(ctx, t, slug, pin.mode, pin.deployID); err != nil {
+		if err := h.R2.PutAlias(ctx, h.aliasKey(slug, pin.mode), pin.deployID); err != nil {
 			return "restore_alias", fmt.Errorf("undelete restore %s alias %s: %w", pin.mode, slug, err)
 		}
 		if h.Index == nil {
