@@ -4870,7 +4870,7 @@ paths:
             failed".
 
             `r2_delete_failed`: The service could not remove the production alias or the preview alias.
-            It holds no name. It purges the edge cache for each alias it removed. Message "upstream call
+            It holds no name. Message "upstream call
             failed".
 
             `registry_write_failed`: The name hold failed. The site is already unpublished, and a retry
