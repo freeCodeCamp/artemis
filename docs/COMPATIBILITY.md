@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.9.1` (tagged 2026-08-21), the release running in production on 2026-08-21, plus entries 9 to 35, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 35, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -30,26 +30,26 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 6 | `promote`, `rollback` and `finalize` commit on a detached context | v1.6.4 | API callers |
 | 7 | GC audit rows key on the registry slug, not the storage dirname | v1.9.0 | Audit-trail readers |
 | 8 | `CLEANUP_BLAST_CAP` gains a default, and an explicit `0` inverts | v1.8.0 | Operators |
-| 9 | A purge whose registry row is already absent returns `200`, not `404` | unreleased | API callers |
-| 10 | A purge can now fail with `r2_verify_failed` or `r2_move_incomplete` | unreleased | API callers |
-| 11 | `audit_log.outcome` gains `failure`, and a failed purge is recorded | unreleased | Audit-trail readers |
-| 12 | `PATCH /api/site/{slug}` commits on a detached context | unreleased | API callers |
-| 13 | A lock-release failure no longer fails the request it followed | unreleased | API callers |
-| 14 | `finalize` retries its index write and audits a partial commit | unreleased | API callers and audit-trail readers |
-| 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
-| 16 | Background Sentry issues re-bucket by error class | unreleased | Sentry and alert-rule readers |
-| 17 | Alias and deploy key formats are validated at boot, not at first use | unreleased | Operators |
-| 18 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | unreleased | Sentry and alert-rule readers |
-| 19 | `DELETE /api/site/{slug}` takes the site dark and reserves its name | unreleased | API callers |
-| 20 | `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new | unreleased | API callers |
-| 21 | A large prefix move finishes in one call | unreleased | API callers and operators |
-| 22 | `DELETE` on an orphaned alias answers `200`, not `404` | unreleased | API callers |
-| 23 | An orphaned alias is a new `drift-detect` verdict | unreleased | Sentry and alert-rule readers |
-| 24 | `POST /api/site/{slug}/release` is new — approver-gated early reclaim | unreleased | API callers and operators |
-| 25 | A reserved site answers `409 site_reserved` on every authenticated site endpoint, not `403` | unreleased | API callers and CI pipelines |
-| 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | unreleased | API callers |
-| 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | unreleased | API callers |
-| 28 | `DELETE` refuses a registered site whose alias it cannot read | unreleased | API callers |
+| 9 | A purge whose registry row is already absent returns `200`, not `404` | v1.10.0 | API callers |
+| 10 | A purge can now fail with `r2_verify_failed` or `r2_move_incomplete` | v1.10.0 | API callers |
+| 11 | `audit_log.outcome` gains `failure`, and a failed purge is recorded | v1.10.0 | Audit-trail readers |
+| 12 | `PATCH /api/site/{slug}` commits on a detached context | v1.10.0 | API callers |
+| 13 | A lock-release failure no longer fails the request it followed | v1.10.0 | API callers |
+| 14 | `finalize` retries its index write and audits a partial commit | v1.10.0 | API callers and audit-trail readers |
+| 15 | `GET /readyz` with R2 unreachable returns `200` degraded, not `503` | v1.10.0 | Operators and probe readers |
+| 16 | Background Sentry issues re-bucket by error class | v1.10.0 | Sentry and alert-rule readers |
+| 17 | Alias and deploy key formats are validated at boot, not at first use | v1.10.0 | Operators |
+| 18 | DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient | v1.10.0 | Sentry and alert-rule readers |
+| 19 | `DELETE /api/site/{slug}` takes the site dark and reserves its name | v1.10.0 | API callers |
+| 20 | `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new | v1.10.0 | API callers |
+| 21 | A large prefix move finishes in one call | v1.10.0 | API callers and operators |
+| 22 | `DELETE` on an orphaned alias answers `200`, not `404` | v1.10.0 | API callers |
+| 23 | An orphaned alias is a new `drift-detect` verdict | v1.10.0 | Sentry and alert-rule readers |
+| 24 | `POST /api/site/{slug}/release` is new — approver-gated early reclaim | v1.10.0 | API callers and operators |
+| 25 | A reserved site answers `409 site_reserved` on every authenticated site endpoint, not `403` | v1.10.0 | API callers and CI pipelines |
+| 26 | `GET /api/sites` omits reserved names unless `?state=reserved` | v1.10.2 | API callers |
+| 27 | Restoring a deploy whose bytes are gone answers `410`, not `200` | v1.10.2 | API callers |
+| 28 | `DELETE` refuses a registered site whose alias it cannot read | v1.10.2 | API callers |
 | 29 | Every alias write purges the Cloudflare edge for the host it moved | unreleased | API callers and operators |
 | 30 | An abandoned pending deploy is swept nightly, not only on the next site event | unreleased | API callers and operators |
 | 31 | `drift-detect` alerts on one reclaimable deploy, not 25 | unreleased | Sentry and alert-rule readers |
@@ -234,7 +234,7 @@ The validation message tracks the flip. `v1.6.0` reads `must be non-negative int
 
 ## 9 — A purge whose registry row is already absent returns `200`, not `404`
 
-**Release:** unreleased. Commit `ff32268`.
+**Release:** v1.10.0. Commit `b201e6a` (#46).
 
 **Old:** `DELETE /api/site/{slug}?purge=true` ran `RecordSiteTombstone` (then named `RecordSitePurge`), then `MovePrefix`, then `Registry.Delete`. An absent registry row made the last call return `ErrNotFound`, and the handler answered `404` — *after* the destructive work had already landed. It also skipped the audit write, so the destruction left no `audit_log` row at all.
 
@@ -250,7 +250,7 @@ An orphaned site has no registry row by definition, so this was the normal path 
 
 ## 10 — A purge can now fail with `r2_verify_failed` or `r2_move_incomplete`
 
-**Release:** unreleased. Commit `ff32268`.
+**Release:** v1.10.0. Commit `b201e6a` (#46).
 
 **Old:** `MovePrefix` copies and deletes one object at a time inside a 10-minute `destructiveMoveTimeout` (`internal/handler/deploy_delete.go:17`), which caps a purge at roughly 215 objects. Measured on production: `languagegames` moved 218 of 799 and stopped; `prd-with-scaffolding` moved 214 of 906. Because the alias objects sort after `deploys/`, a stalled move never reached them and **the site kept serving**.
 
@@ -268,7 +268,7 @@ After the bulk move the handler probes `HasPrefix(<dirname>/)`. A probe error an
 
 ## 11 — `audit_log.outcome` gains `failure`, and a failed purge is recorded
 
-**Release:** unreleased. Commit `ff32268`.
+**Release:** v1.10.0. Commit `b201e6a` (#46).
 
 **Old:** a purge wrote one audit row, and only when the whole sequence succeeded.
 
@@ -282,7 +282,7 @@ A purge refused before it reaches R2 — by the site lock, or by a missing tombs
 
 ## 12 — `PATCH /api/site/{slug}` commits on a detached context
 
-**Release:** unreleased. Commit `ff32268`. This completes entry 6.
+**Release:** v1.10.0. Commit `b201e6a` (#46). This completes entry 6.
 
 **Old:** `SiteUpdate` was the only handler that took the per-site advisory lock on `r.Context()`. The `GetSite` read and the `UpdateTeams` write inside the lock ran on it too. A client disconnecting between the two cancelled the operation with the lock held.
 
@@ -294,7 +294,7 @@ A purge refused before it reaches R2 — by the site lock, or by a missing tombs
 
 ## 13 — A lock-release failure no longer fails the request it followed
 
-**Release:** unreleased. Commits `469ce44`, `9202659`.
+**Release:** v1.10.0. Commits `469ce44`, `9202659`.
 
 **Old:** the deferred unlock inside `lockSession.WithSiteLock` overwrote the named return whenever `pg_advisory_unlock` failed — `if err == nil { err = fmt.Errorf("site unlock %s: %w", …) }`. Seven endpoints read that error as "the work failed" before checking whether their own closure had already succeeded, so committed work could answer `502 site_lock_failed` with no audit row: `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}?purge=true`, `DELETE /api/site/{site}/deploys/{id}`, `POST …/deploys/{id}/restore`, `POST …/promote`, `POST …/rollback` and `POST /api/deploy/{id}/finalize`. On the first four the closure had already written its own JSON body, so the response carried **two concatenated JSON objects**. On promote, rollback and finalize the alias was already in R2 and Caddy was already serving the new deploy while the caller was told `502`.
 
@@ -310,7 +310,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 ## 14 — `finalize` retries its index write and audits a partial commit
 
-**Release:** unreleased. Commit `9e81645`.
+**Release:** v1.10.0. Commit `9e81645`.
 
 **Old:** `DeployFinalize` wrote the R2 marker, published the alias, then wrote the Postgres row once. A fault on that last leg answered `502 pg_write_failed` and wrote **no audit row at all**, leaving a marked and published deploy with no index row — the `reindex` class `drift-detect` reports and only `artemis reconcile --apply` repairs. `promote` and `rollback` had the identical R2-then-Postgres window, and nothing reconciles R2 aliases against the `aliases` table.
 
@@ -324,7 +324,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 ## 15 — `GET /readyz` with R2 unreachable returns `200` degraded, not `503`
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **Old:** an R2 probe failure returned `503` with `{"code":"r2_unreachable"}` and logged `readyz.probe.unavailable` at Error, tagged `op=r2.has_prefix`. Kubernetes removed the pod from the Service after three consecutive failures.
 
@@ -338,7 +338,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 ## 16 — Background Sentry issues re-bucket by error class, and transient escalation is first-occurrence
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **This is an operational change, not an API one.** No status code, error code, validation rule, stored value or cancellation guarantee moves. The audience is the operator reading Sentry, not the API caller.
 
@@ -360,7 +360,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 ## 17 — Alias and deploy key formats are validated at boot, not at first use
 
-**Release:** unreleased. Commits `46344c0`, `b22ce44`.
+**Release:** v1.10.0. Commits `46344c0`, `b22ce44`.
 
 **Old:** `Config.validate()` checked only that `DEPLOY_PREFIX_FORMAT` carried both a `<site>` and a `<ts>`/`<sha>` token. The stricter structural rules lived in `cmd/artemis/gcwire.go` `aliasTails`, which runs only when GC wiring runs — and GC wiring is gated on Postgres being configured. A deploy-only instance with no `DATABASE_URL` therefore booted with a malformed key format and failed later, at the first operation that rendered a key, or never.
 
@@ -379,7 +379,7 @@ Production's format is `<site>.freecode.camp/deploys/<ts>-<sha>/` with aliases `
 
 ## 18 — DNS faults split into three error classes, and a non-NXDOMAIN resolver fault is now transient
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **This is an operational change, not an API one.** Like entry 16 it moves no status code, error code, validation rule, stored value or cancellation guarantee. The audience is the operator reading Sentry.
 
@@ -407,7 +407,7 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 ## 19 — `DELETE /api/site/{slug}` takes the site dark and reserves its name
 
-**Release:** unreleased. Commit `TBD`. Implements steps 1-4 of `docs/design/0006-unpublish-is-not-reclaim.md`.
+**Release:** v1.10.0. Commit `bd2bcd0`. Implements steps 1-4 of `docs/design/0006-unpublish-is-not-reclaim.md`.
 
 **This is the headline behaviour change of the release.**
 
@@ -439,7 +439,7 @@ The trade is symmetric and deliberate: a **sustained** resolver outage now pages
 
 ## 20 — `?purge=true` is retired; `POST /api/site/{slug}/undelete` is new
 
-**Release:** unreleased. Completes `docs/design/0006-unpublish-is-not-reclaim.md`, steps 5-7.
+**Release:** v1.10.0. Completes `docs/design/0006-unpublish-is-not-reclaim.md`, steps 5-7.
 
 **`?purge=true` no longer reclaims.** Once a delete unpublishes and reserves, the flag would have meant "skip the grace period and destroy the bytes now" — the one irreversible action in this design, sharing a URL and a permission with the safe form. A query parameter that silently escalates an operation from reversible to final cannot be read from a route table, and the two forms need different authorization: `REGISTRY_AUTHZ_TEAM` may delete, only `REPO_APPROVE_AUTHZ_TEAM` may release early. The flag is now **refused**: any true-ish value (`true`, `1`, `TRUE`, `t`, `yes`, `on`, or a bare `?purge`) answers `400 purge_retired` and performs no delete at all. Ignoring it was tried first and was worse — a `204` satisfies a caller who meant "make it dark" while lying to the caller who meant "reclaim the bytes", and only the second runs storage accounting and takedown compliance. Refusing lies to neither. An explicit `?purge=false` is an ordinary delete.
 
@@ -468,7 +468,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 ## 21 — a large prefix move finishes in one call
 
-**Release:** unreleased. Commit `d24258b`.
+**Release:** v1.10.0. Commit `d24258b`.
 
 **Old:** `MovePrefix` copied and deleted one object at a time, serially, at roughly 0.36 objects per second. Inside the 10-minute `destructiveMoveTimeout` that is a ceiling near 215 objects. Measured on production: site `languagegames` moved 218 of 799 objects and `prd-with-scaffolding` 214 of 906. `DELETE /api/site/{site}/deploys/{deployId}` on a large deploy answered `502 r2_move_incomplete`, and the only way to finish was to repeat the call four or five times. The operation was idempotent and re-listed its source, so repeating worked — but nothing repeated it. The one caller that knew to repeat was a human reading a runbook.
 
@@ -482,7 +482,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 ## 22 — `DELETE` on an orphaned alias answers `200`, not `404`
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **An orphaned alias is a name the serve plane answers with no registry row behind it** — the state entry 19 describes as the old defect, and the state entry 23's new `drift-detect` verdict reports. Seven were live on 2026-08-22.
 
@@ -498,7 +498,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 ## 23 — an orphaned alias is a new `drift-detect` verdict
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **This is an operational change, not an API one.** The audience is the operator reading Sentry.
 
@@ -512,7 +512,7 @@ An origin-prefix move is only safe because the reservation has expired and the r
 
 ## 24 — `POST /api/site/{slug}/release` is new — approver-gated early reclaim
 
-**Release:** unreleased. Implements ADR 0006 step 7b, the last open step.
+**Release:** v1.10.0. Implements ADR 0006 step 7b, the last open step.
 
 **Old:** nothing freed a reserved name before its grace period expired. `?purge=true` had been the
 operator's remedy and entry 20 retires it, so between entry 20 and this entry there was no path at
@@ -553,7 +553,7 @@ it. Operators handling a takedown should use it instead of a manual database wri
 
 ## 25 — a reserved site answers `409 site_reserved` on every authenticated site endpoint
 
-**Release:** unreleased.
+**Release:** v1.10.0.
 
 **Old:** at v1.9.1 a name had no reserved state. A slug that was not in the registry failed
 authorization and every authenticated site endpoint answered `403 site_unauthorized`.
@@ -585,7 +585,7 @@ deadline.
 
 ## 26 — `GET /api/sites` omits reserved names unless `?state=reserved`
 
-**Release:** unreleased.
+**Release:** v1.10.2.
 
 **Old:** at v1.9.1 a `DELETE` removed the `sites` row, so a deleted site left the list immediately.
 With entry 19 the row survives as `state='reserved'`, and the list returned it like any other site.
@@ -608,7 +608,7 @@ than silently returning the active list.
 
 ## 27 — restoring a deploy whose bytes are gone answers `410`, not `200`
 
-**Release:** unreleased.
+**Release:** v1.10.2.
 
 **Old:** `POST /api/site/{slug}/deploys/{deployId}/restore` answered
 `200 {"status":"restored","moved":0,"bytes":0}` whenever the tombstone row existed but the objects
@@ -625,7 +625,7 @@ reported as a successful restore.
 
 ## 28 — `DELETE` refuses a registered site whose alias it cannot read
 
-**Release:** unreleased.
+**Release:** v1.10.2.
 
 **Old:** the delete probed each alias with a HEAD, ignored a probe failure, and deleted the object
 anyway. Entry 19's reservation then recorded `prev_production` from the `aliases` table.
@@ -663,6 +663,10 @@ host from the Cloudflare edge before answering. The purge is best-effort by desi
 already committed under the site lock, so failing the request would report a rollback that did not
 happen. A failure logs `edge.purge.failed` at ERROR and raises a Sentry event; the response is
 unchanged.
+
+The caller waits for the purge. One attempt is capped at 15 s (`internal/cloudflare/purge.go`)
+inside a 20 s budget (`internal/handler/edgepurge.go`), so a Cloudflare outage adds up to 15 s to
+an alias write; the CLI's own request budget is 30 s.
 
 Two limits stated plainly rather than discovered later. First, purging is **off** unless
 `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` are both set; with either missing artemis logs
@@ -738,20 +742,6 @@ The exposure is the duration of that one upload, not the remaining permit.
 new deploy id. A CI pipeline that retries a whole deploy step should re-run `init`, not reuse the
 previous permit.
 
-## 34 — a deploy-session JWT without `exp` is rejected with `403 jwt_invalid`
-
-**Release:** unreleased.
-
-**Old:** the verifier checked the signature, the algorithm and the issuer. A token that carried no
-`exp` claim passed every check and verified forever.
-
-**New:** the verifier requires `exp`. A token without it answers `403 jwt_invalid` with the message
-"invalid deploy-session jwt" on every deploy-session route. An expired token still answers `401
-jwt_expired`.
-
-**Action:** none for a client. artemis mints every deploy-session token itself and always sets `exp`,
-so only a hand-built token is affected.
-
 ## 33 — an expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row
 
 **Release:** unreleased.
@@ -784,6 +774,20 @@ Observable to a caller:
 reclaim without audit rows. Proof: `cmd/artemis/reservationsweep.go`, `cmd/artemis/reclaim.go`,
 `internal/pg/reservation.go` (`ClaimReclaim`, `ReleaseReservationAudited`),
 `internal/pg/migrations/0011_reclaim_claim.sql`.
+
+## 34 — a deploy-session JWT without `exp` is rejected with `403 jwt_invalid`
+
+**Release:** unreleased.
+
+**Old:** the verifier checked the signature, the algorithm and the issuer. A token that carried no
+`exp` claim passed every check and verified forever.
+
+**New:** the verifier requires `exp`. A token without it answers `403 jwt_invalid` with the message
+"invalid deploy-session jwt" on every deploy-session route. An expired token still answers `401
+jwt_expired`.
+
+**Action:** none for a client. artemis mints every deploy-session token itself and always sets `exp`,
+so only a hand-built token is affected.
 
 ## 35 — `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing
 
