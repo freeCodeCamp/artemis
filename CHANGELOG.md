@@ -2,6 +2,47 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.11.0](https://github.com/freeCodeCamp/artemis/compare/v1.10.2...v1.11.0) (2026-09-04)
+
+
+### Features
+
+* **drift:** audit the reclaim ledger nightly ([3bdd256](https://github.com/freeCodeCamp/artemis/commit/3bdd25636ae14bbad77a9b79eaa2f492f6b46f62))
+* **gc:** reclaim a site per site.lifecycle run ([260bd75](https://github.com/freeCodeCamp/artemis/commit/260bd7518104040ac06550e6e28b773492d5939b))
+* **gc:** state the retry policy, 12h claim TTL ([e40c967](https://github.com/freeCodeCamp/artemis/commit/e40c967556218650eeccc0297e792734f2e1b8c3))
+* **server:** add X-Artemis-Version header ([35a9391](https://github.com/freeCodeCamp/artemis/commit/35a93919be5ac26aed48b9d193f4de4e2c123c5c))
+* **site:** purge the CDN edge on takedown ([4aed372](https://github.com/freeCodeCamp/artemis/commit/4aed372a8a420efc76360bac1697f8ecdb44533a))
+
+
+### Bug Fixes
+
+* **auth:** require exp on deploy-session jwt ([5539cce](https://github.com/freeCodeCamp/artemis/commit/5539ccec12c0ad9671beca79fcce6f5d1d04fdfb))
+* **config:** reject NaN sentry sample rate ([f35a364](https://github.com/freeCodeCamp/artemis/commit/f35a3642c083b97a1ac22f6fa7064344c8262cf4))
+* **deploy:** fence a finalized deploy against its permit ([575c6bb](https://github.com/freeCodeCamp/artemis/commit/575c6bb4908ac01ae653965636bae24b947b99d3))
+* **deploy:** fence an upload into a reserved prefix ([6c082d9](https://github.com/freeCodeCamp/artemis/commit/6c082d9ba73a89710e04dd8d82ab1917514d6b6b))
+* **deploy:** wire the fence off the valkey handle ([0423bc2](https://github.com/freeCodeCamp/artemis/commit/0423bc2eb67190077f416ce118ced4f9e3cf9f4a))
+* **deps:** bump hatchet to v0.91.2 (GO-2026-6309) ([aa9ae50](https://github.com/freeCodeCamp/artemis/commit/aa9ae500a5afedfdc28f14d958758079e8cfa9b6))
+* **drift:** print the ledger in drift-report ([0359458](https://github.com/freeCodeCamp/artemis/commit/03594589ced636572ac8bf9a2f3a831634e3401f))
+* **gc:** alert on one reclaimable deploy ([e3e69c1](https://github.com/freeCodeCamp/artemis/commit/e3e69c19ebc3f0bca3f67521053ad6679c3dae75))
+* **gc:** defer the terminal cron check-in ([d4f203f](https://github.com/freeCodeCamp/artemis/commit/d4f203f6956b09f5e285896d1164908629b92a18))
+* **gc:** sweep abandoned pending deploys nightly ([c9a4e97](https://github.com/freeCodeCamp/artemis/commit/c9a4e97acac5bee64db08a3eca6b5ae75fc6b1a1))
+* **handler:** drop the inert flush before the purge ([25c2a20](https://github.com/freeCodeCamp/artemis/commit/25c2a20a5c390922daf7fd85326cad4096ca3274))
+* **handler:** record errCode on four bodies ([abf6f01](https://github.com/freeCodeCamp/artemis/commit/abf6f01f4197a0d5a123a3858db4f1cb4a1ec472))
+* **observability:** sample release and reject ([4a7bb42](https://github.com/freeCodeCamp/artemis/commit/4a7bb42ac0e0e3627076fdf30d6f70ebb8b1fd68))
+* **pg:** back off after a failed publish ([d2eba02](https://github.com/freeCodeCamp/artemis/commit/d2eba020dc8d7b8c57a1f981890d48ff06c552ae))
+* **pg:** catch a no-tx index order hazard at build ([7159f0a](https://github.com/freeCodeCamp/artemis/commit/7159f0a6bec96667a039bd77ddf47ebaa638b255))
+* **pg:** harden the no-tx index hazard scan ([0065222](https://github.com/freeCodeCamp/artemis/commit/0065222cf2d2e09c9744da176d465bc12d6b095d))
+* **pg:** leave updated_at alone on a reclaim claim ([e434d12](https://github.com/freeCodeCamp/artemis/commit/e434d12011eaccc4042e76ebcdab6156ff5f9745))
+* **pg:** read the no-tx directive past a header ([0a79573](https://github.com/freeCodeCamp/artemis/commit/0a795733326a6f35e01da01f224ead3d5be28d3d))
+* **pg:** release the claim after a failed publish ([3df30de](https://github.com/freeCodeCamp/artemis/commit/3df30de493171bb45523153eb0029bb714b67e0f))
+* **r2:** stop on a truncated page without token ([362e20c](https://github.com/freeCodeCamp/artemis/commit/362e20cd2d838dc7716920558d018b4b2a804450))
+* **site:** purge the edge on every alias write ([7e46811](https://github.com/freeCodeCamp/artemis/commit/7e46811d306cccdba44d85b56febe99023fe794b))
+
+
+### Reverts
+
+* **deploy:** drop the per-file upload fence ([e11e663](https://github.com/freeCodeCamp/artemis/commit/e11e6637fd4be075460e00b0f32503d49af6a3e9))
+
 ## [1.10.2](https://github.com/freeCodeCamp/artemis/compare/v1.10.1...v1.10.2) (2026-08-27)
 
 
