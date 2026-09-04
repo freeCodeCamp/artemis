@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 35, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 36, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -57,6 +57,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 33 | An expired reservation is reclaimed by a `site.lifecycle` run that writes a `site.reclaim` audit row | unreleased | Audit readers and operators |
 | 34 | A deploy-session JWT without `exp` is rejected with `403 jwt_invalid` | unreleased | Nobody in practice; hand-built tokens only |
 | 35 | `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing | unreleased | Operators |
+| 36 | A failed outbox publish retries after 60 s, not 5 minutes, and the rest of the batch is not held | unreleased | Operators and alert-rule readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -751,7 +752,8 @@ Observable to a caller:
   reclaim in flight, or one that failed and that the nightly sweep has not re-emitted yet (the claim TTL is 12 hours, so the sweep after the failure re-emits it). `POST /api/site/{slug}/undelete`
   refuses such a row with the same `404` it answers for an expired reservation.
 - A reclaim that fails is retried once per night, so a site that keeps failing is N nights late,
-  as before. A claim older than two days is a stuck reclaim; nothing alerts on it yet.
+  as before. A claim older than the 30-minute run budget is a stuck reclaim: `drift-detect` logs
+  `drift.ledger` at ERROR and raises a Sentry event (`docs/design/0004-drift-detection-and-alerting.md`).
 
 **Action:** an audit consumer that keys on `site.release` alone now misses nightly reclaims; add
 `site.reclaim`. An operator who releases artemis around 03:00 UTC should release outside
@@ -786,4 +788,17 @@ The SDK then sampled no transaction and reported no error.
 `invalid SENTRY_TRACES_SAMPLE_RATE NaN: must be in [0,1]` and the pod does not start.
 
 **Action:** none unless the variable is literally `NaN`. Unset it for the default, or set a number in
-`[0,1]`. Source: `internal/config/config.go:520`.
+`[0,1]`. Source: `internal/config/config.go:511`.
+
+## 36 — a failed outbox publish retries after 60 s, not 5 minutes, and the rest of the batch is not held
+
+**Release:** unreleased. Commits `d2eba02` (backoff), `3df30de` (batch scope).
+
+**Old:** the relay stamped a 5-minute claim on up to 100 rows before any publish and stopped at the
+first error, so one gRPC fault froze the whole batch for 5 minutes with no log line.
+
+**New:** a failed publish releases its row with a 60-second backoff (`internal/pg/outbox.go`,
+`relayRetryBackoff`) and logs the failure; the other rows in the batch publish as normal.
+
+**Action:** none for a caller. An alert rule that assumed a 5-minute silence after a relay fault
+now sees a retry within a minute.
