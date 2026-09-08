@@ -33,7 +33,10 @@ jobs:
 
       - name: formatting (gofumpt + goimports)
         run: |
-          out=$(go run mvdan.cc/gofumpt@v0.11.0 -l . ; go run golang.org/x/tools/cmd/goimports@v0.49.0 -l .)
+          set -euo pipefail
+          fumpt=$(go run mvdan.cc/gofumpt@v0.11.0 -l .)
+          imports=$(go run golang.org/x/tools/cmd/goimports@v0.49.0 -l .)
+          out=$(printf '%s\n%s' "$fumpt" "$imports" | grep -v '^$' || true)
           if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run just fmt"; exit 1; fi
 
       - name: quarantine check (expired or malformed quarantines)

@@ -195,7 +195,9 @@ fmt:
 fmtcheck:
     #!/usr/bin/env bash
     set -euo pipefail
-    out=$({{go}} run {{gofumpt}} -l . ; {{go}} run {{goimports}} -l .)
+    fumpt=$({{go}} run {{gofumpt}} -l .)
+    imports=$({{go}} run {{goimports}} -l .)
+    out=$(printf '%s\n%s' "$fumpt" "$imports" | grep -v '^$' || true)
     if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run 'just fmt'"; exit 1; fi
 
 # Boot artemis locally — expects .env (loaded by direnv)
