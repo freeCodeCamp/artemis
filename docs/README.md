@@ -70,25 +70,26 @@ just fmt && just lint
 
 `just openapi` runs the two tests in `internal/server/openapi_test.go`, which is what CI runs too:
 
-- `TestOpenAPI_DocumentIsValid` loads the document and runs `openapi3.Validate`, so a malformed
-  document fails rather than being served as truth.
-- `TestOpenAPI_NamesExactlyTheMountedRoutes` walks the chi router and requires the spec's
-  `method + path` set to equal the mounted set. Adding a route without documenting it fails, and so
-  does documenting a route that is not mounted.
+- `TestOpenAPI_DocumentIsValid` loads the document and runs `openapi3.Validate`, so a malformed document fails rather than being served as truth.
+- `TestOpenAPI_NamesExactlyTheMountedRoutes` walks the chi router and requires the spec's `method + path` set to equal the mounted set. Adding a route without documenting it fails, and so does documenting a route that is not mounted.
 
-**What is not checked, and why it matters.** Request and response shapes, and every `description`,
-are written from the handlers by hand. Nothing compares them to the code. In 1.11.0 four `200`
-descriptions still told callers the service purged the Cloudflare edge cache for four days after
-commit `4eb4c80` removed that behaviour; only a human reading the prose caught it. So a shape or
-wording change belongs in the same commit as the code it describes, and a reviewer has to read it.
+**What is not checked, and why it matters.** Request and response shapes, and every `description`, are written from the handlers by hand. Nothing compares them to the code. In 1.11.0 four `200` descriptions still told callers the service purged the Cloudflare edge cache for four days after commit `4eb4c80` removed that behaviour; only a human reading the prose caught it. So a shape or wording change belongs in the same commit as the code it describes, and a reviewer has to read it.
 
-To view it, open `docs/api/openapi.yaml` in any OpenAPI viewer — the document is self-contained and
-has no external `$ref`. There is deliberately no viewer or spec-linter recipe here: the repo carries
-no Node toolchain, and adding one for rendering alone would cost more than it returns.
+To view it, open `docs/api/openapi.yaml` in any OpenAPI viewer — the document is self-contained and has no external `$ref`. There is deliberately no viewer or spec-linter recipe here: the repo carries no Node toolchain, and adding one for rendering alone would cost more than it returns.
 
 ## Configuration (env-driven)
 
 Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on the first bad var).
+
+> **Reload the shell after you edit `.env`.** `.envrc` ends at `dotenv_if_exists .env`, and direnv re-evaluates only at an interactive shell prompt. A non-interactive caller — a `just` run from an editor, a CI step, an agent tool — keeps the values its shell exported at start. Run `direnv reload` in the shell you will run from.
+>
+> To confirm which value a process will actually see, compare the file against the environment. This prints one word and no secret:
+>
+> ```sh
+> [ "$(grep '^R2_ACCESS_KEY_ID=' .env | cut -d= -f2)" = "$R2_ACCESS_KEY_ID" ] && echo match || echo STALE
+> ```
+>
+> A stale key surfaces as R2 `401 Unauthorized` in the integration suite, because the suite reads the environment and not the file. Rotating the credential does not fix it.
 
 **Core / R2 / server**
 
@@ -117,27 +118,27 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 **Deploy-session JWT + R2 key layout**
 
-| Variable                      | Default                      | Description                                                            |
-| ----------------------------- | ---------------------------- | ---------------------------------------------------------------------- |
-| `JWT_SIGNING_KEY`             | _(required)_                 | ≥32-byte random; mounted from k8s Secret                               |
-| `JWT_TTL_SECONDS`             | `900`                        | Deploy-session JWT TTL, seconds (15 min)                               |
-| `ALIAS_PRODUCTION_KEY_FORMAT` | `<site>/production`          | R2 alias key for production env                                        |
-| `ALIAS_PREVIEW_KEY_FORMAT`    | `<site>/preview`             | R2 alias key for preview env                                           |
-| `DEPLOY_PREFIX_FORMAT`        | `<site>/deploys/<ts>-<sha>/` | R2 prefix per immutable deploy; must contain `<site>` and `<ts>-<sha>` |
-| `PUBLIC_URL_PRODUCTION_FORMAT` | `https://<site>.freecode.camp` | URL returned to the CLI on a production finalize; must contain `<site>` or boot fails |
-| `PUBLIC_URL_PREVIEW_FORMAT`   | `https://<site>.preview.freecode.camp` | URL returned to the CLI on a preview finalize; must contain `<site>` or boot fails |
+| Variable                       | Default                                | Description                                                                           |
+| ------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------- |
+| `JWT_SIGNING_KEY`              | _(required)_                           | ≥32-byte random; mounted from k8s Secret                                              |
+| `JWT_TTL_SECONDS`              | `900`                                  | Deploy-session JWT TTL, seconds (15 min)                                              |
+| `ALIAS_PRODUCTION_KEY_FORMAT`  | `<site>/production`                    | R2 alias key for production env                                                       |
+| `ALIAS_PREVIEW_KEY_FORMAT`     | `<site>/preview`                       | R2 alias key for preview env                                                          |
+| `DEPLOY_PREFIX_FORMAT`         | `<site>/deploys/<ts>-<sha>/`           | R2 prefix per immutable deploy; must contain `<site>` and `<ts>-<sha>`                |
+| `PUBLIC_URL_PRODUCTION_FORMAT` | `https://<site>.freecode.camp`         | URL returned to the CLI on a production finalize; must contain `<site>` or boot fails |
+| `PUBLIC_URL_PREVIEW_FORMAT`    | `https://<site>.preview.freecode.camp` | URL returned to the CLI on a preview finalize; must contain `<site>` or boot fails    |
 
 **Repo-creation (Apollo-11, feature-gated)**
 
-| Variable                  | Default                      | Description                                                                            |
-| ------------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
-| `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)        |
-| `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                        |
+| Variable                  | Default                      | Description                                                                                        |
+| ------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| `GH_REPO_ORG`             | `freeCodeCamp-Universe`      | Org repos are created in + whose teams gate repo authz (distinct from `GH_ORG`)                    |
+| `REPO_CREATE_AUTHZ_TEAM`  | `staff`                      | GH team gating `POST /api/repo`                                                                    |
 | `REPO_APPROVE_AUTHZ_TEAM` | `none`                       | GH team gating repo approve/reject/delete and site release; placeholder — production must override |
-| `AUDIT_READ_AUTHZ_TEAM`   | `staff`                      | GH team (in `GH_REPO_ORG`) gating `GET /api/audit`; probed via the Universe-org client |
-| `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                               |
-| `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                   |
-| `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                                 |
+| `AUDIT_READ_AUTHZ_TEAM`   | `staff`                      | GH team (in `GH_REPO_ORG`) gating `GET /api/audit`; probed via the Universe-org client             |
+| `GH_APP_ID`               | _(empty → repo feature off)_ | Apollo-11 GitHub App id (numeric string)                                                           |
+| `GH_APP_INSTALLATION_ID`  | _(empty)_                    | App installation id (numeric string)                                                               |
+| `GH_APP_PRIVATE_KEY`      | _(empty)_                    | App private key PEM (PKCS#1 or PKCS#8)                                                             |
 
 `GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY` are all-or-none: set all three to enable the `/api/repo*` self-service repo-creation feature, or set none. The two ids must be digit-only strings — `validate()` rejects a malformed value at boot. A YAML int sealed in sops renders as scientific notation through Helm `quote`, so seal both ids as strings.
 
@@ -152,22 +153,22 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 **Postgres + retention GC + Hatchet** (feature-gated on `DATABASE_URL`; see [local ADR 0001](design/0001-durable-execution-model.md))
 
-| Variable                  | Default                   | Description                                                                                  |
-| ------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`            | _(empty → GC off)_        | artemis-owned Postgres DSN; empty runs deploy-only mode (no GC, no repo-creation queue)      |
-| `PG_CONNECT_RETRY_WINDOW` | `45s`                     | Boot-time retry window for the initial Postgres connect (Go duration; `0` disables retry)    |
-| `BACKFILL_ON_BOOT`        | `false`                   | One-shot: scan R2, backfill the Postgres deploy index, then exit (requires `DATABASE_URL`)   |
-| `HATCHET_CLIENT_TOKEN`    | _(empty)_                 | Hatchet engine auth token                                                                    |
-| `HATCHET_ADDR`            | _(empty → workflows off)_ | Hatchet gRPC address; empty leaves GC wired but workflow scheduling + outbox relay unstarted |
-| `SITE_RESERVATION_GRACE`  | `72h`                     | How long a deleted site's name is held before the nightly sweep frees it (positive duration) |
-| `CLEANUP_RETENTION_DAYS`  | `7`                       | Days before a superseded deploy becomes GC-eligible                                          |
-| `CLEANUP_RECENT_KEEP`     | `3`                       | Newest N deploys per site kept regardless of age (rollback floor)                            |
-| `CLEANUP_GRACE`           | `72h`                     | Minimum deploy age before GC; must be ≥ `JWT_TTL_SECONDS` and ≥ the 15s serve-cache TTL      |
-| `CLEANUP_BLAST_CAP`       | `10`                      | Max deploys reclaimed per sweep, oldest first; `0` refuses every destructive repair          |
-| `CLEANUP_TRASH_PREFIX`    | `_trash/`                 | R2 prefix soft-deleted (tombstoned) objects move to before hard purge                        |
-| `CLEANUP_RECOVERY_DAYS`   | `7`                       | Days a tombstone survives before the purge pass hard-deletes it                              |
-| `CLEANUP_OUTBOX_RETENTION_DAYS` | `30`                | Days a **published** outbox row is kept; unpublished rows are never purged, at any age       |
-| `CLEANUP_DRY_RUN`         | `false`                   | Plan-only GC: compute + log the delete set, execute nothing                                  |
+| Variable                        | Default                   | Description                                                                                  |
+| ------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                  | _(empty → GC off)_        | artemis-owned Postgres DSN; empty runs deploy-only mode (no GC, no repo-creation queue)      |
+| `PG_CONNECT_RETRY_WINDOW`       | `45s`                     | Boot-time retry window for the initial Postgres connect (Go duration; `0` disables retry)    |
+| `BACKFILL_ON_BOOT`              | `false`                   | One-shot: scan R2, backfill the Postgres deploy index, then exit (requires `DATABASE_URL`)   |
+| `HATCHET_CLIENT_TOKEN`          | _(empty)_                 | Hatchet engine auth token                                                                    |
+| `HATCHET_ADDR`                  | _(empty → workflows off)_ | Hatchet gRPC address; empty leaves GC wired but workflow scheduling + outbox relay unstarted |
+| `SITE_RESERVATION_GRACE`        | `72h`                     | How long a deleted site's name is held before the nightly sweep frees it (positive duration) |
+| `CLEANUP_RETENTION_DAYS`        | `7`                       | Days before a superseded deploy becomes GC-eligible                                          |
+| `CLEANUP_RECENT_KEEP`           | `3`                       | Newest N deploys per site kept regardless of age (rollback floor)                            |
+| `CLEANUP_GRACE`                 | `72h`                     | Minimum deploy age before GC; must be ≥ `JWT_TTL_SECONDS` and ≥ the 15s serve-cache TTL      |
+| `CLEANUP_BLAST_CAP`             | `10`                      | Max deploys reclaimed per sweep, oldest first; `0` refuses every destructive repair          |
+| `CLEANUP_TRASH_PREFIX`          | `_trash/`                 | R2 prefix soft-deleted (tombstoned) objects move to before hard purge                        |
+| `CLEANUP_RECOVERY_DAYS`         | `7`                       | Days a tombstone survives before the purge pass hard-deletes it                              |
+| `CLEANUP_OUTBOX_RETENTION_DAYS` | `30`                      | Days a **published** outbox row is kept; unpublished rows are never purged, at any age       |
+| `CLEANUP_DRY_RUN`               | `false`                   | Plan-only GC: compute + log the delete set, execute nothing                                  |
 
 The three boolean variables above — `SENTRY_DEBUG`, `BACKFILL_ON_BOOT` and `CLEANUP_DRY_RUN` — are parsed with `strconv.ParseBool`. Accepted: `1`, `t`, `T`, `TRUE`, `true`, `True`, `0`, `f`, `F`, `FALSE`, `false`, `False`. Any other non-empty value **refuses the boot** with a named error. It is not silently read as false, because a `CLEANUP_DRY_RUN=yes` typed for safety would otherwise arm a destructive sweep.
 
@@ -203,14 +204,14 @@ Cron check-ins exist for `drift-detect` (`0 4 * * *`) and `tombstone-purge` (`0 
 
 Sentry's 2026 model splits **Monitors** (what to watch) from **Alerts** (who to notify) — both must exist to page. The table below is a recommendation: create a Monitor (dataset → query → threshold) plus an Alert route (Slack / PagerDuty) for each row. None of it exists in the live project today; read every row as a to-do, not as a description of current state.
 
-| Signal                    | Monitor dataset | Condition                                                                                |
-| ------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
-| upstream faults           | Issues          | new issue where `op` in (`r2.*`, `valkey.*`, `github.*`)                                 |
+| Signal                    | Monitor dataset | Condition                                                                                                |
+| ------------------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| upstream faults           | Issues          | new issue where `op` in (`r2.*`, `valkey.*`, `github.*`)                                                 |
 | workflow / relay failures | Issues          | new issue where `op` in (`gc.site.run`, `tombstone.purge`, `relay.run`, `drift.sweep`, `outbox.backlog`) |
-| audit write failure       | Issues          | new issue `op=audit.record`                                                              |
-| dangerous drift           | Issues          | new issue where `op` in (`drift.aliased_missing`, `drift.unreadable`, `drift.selfcheck`) |
-| cron missed / failed      | Crons           | `tombstone-purge` / `drift-detect` missed or errored                                     |
-| HTTP error rate / latency | Spans           | 5xx rate or p99 on `POST /api/*` transactions                                            |
+| audit write failure       | Issues          | new issue `op=audit.record`                                                                              |
+| dangerous drift           | Issues          | new issue where `op` in (`drift.aliased_missing`, `drift.unreadable`, `drift.selfcheck`)                 |
+| cron missed / failed      | Crons           | `tombstone-purge` / `drift-detect` missed or errored                                                     |
+| HTTP error rate / latency | Spans           | 5xx rate or p99 on `POST /api/*` transactions                                                            |
 
 `outbox.backlog` belongs on the relay row rather than a row of its own: it fires when the relay reports success while draining nothing (`cmd/artemis/gcworkflows.go:129-141`), which is a relay failure the `relay.run` row cannot see. `r2.ping` needs no new row — the `r2.*` glob on the upstream-faults row already matches it — but it does need weighting. Since a readyz R2 fault returns `200` degraded and keeps the pod in the Service (`internal/handler/readyz.go:66-75`), `op:r2.ping` is now the only signal that R2 is unreachable; it must not be deprioritised as a duplicate of a probe failure.
 
