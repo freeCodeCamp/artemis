@@ -167,7 +167,7 @@ flake-hatchet n="3":
     case "{{n}}" in ''|*[!0-9]*) echo "n must be a positive integer, got '{{n}}'"; exit 2;; esac
     HATCHET_COUNT={{n}} just hatchet-integration
 
-# go vet under every build tag CI vets
+# go vet under every build tag CI vets; golangci-lint untagged only
 lint:
     {{go}} vet {{pkg}}
     {{go}} vet -tags=load {{pkg}}
