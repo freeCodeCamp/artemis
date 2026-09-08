@@ -131,7 +131,7 @@ flake test n="20" pkg="./internal/...":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{n}}" in ''|*[!0-9]*) echo "n must be a positive integer, got '{{n}}'"; exit 2;; esac
-    log=$(mktemp -t artemis-flake)
+    log=$(mktemp "${TMPDIR:-/tmp}/artemis-flake.XXXXXX")
     echo "running {{test}} x{{n}} in one binary; log=$log"
     set +e
     env -u ARTEMIS_LIFECYCLE_OK ARTEMIS_RUN_QUARANTINED=1 \
@@ -205,7 +205,7 @@ fmtcheck:
     out=$(printf '%s\n%s' "$fumpt" "$imports" | grep -v '^$' || true)
     if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run 'just fmt'"; exit 1; fi
 
-# Every gate the CI build-test job runs, in its order
+# Every gate the CI Build & Test job runs, in its order
 ci: tidycheck fmtcheck quarantine-check lint staticcheck vulncheck covgate
 
 # Boot artemis locally — expects .env (loaded by direnv)
