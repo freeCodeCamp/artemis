@@ -49,6 +49,9 @@ jobs:
           go vet -tags=e2e ./...
           go vet -tags=integration ./...
 
+      - name: golangci-lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 run ./...
+
       - name: staticcheck (all build tags)
         run: |
           set -euo pipefail

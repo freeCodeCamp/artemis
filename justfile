@@ -9,6 +9,7 @@ export GOTOOLCHAIN := env_var_or_default("GOTOOLCHAIN", `awk '/^go /{n=split($2,
 goflags := env_var_or_default("GOFLAGS", "")
 pkg := "./..."
 staticcheck := "honnef.co/go/tools/cmd/staticcheck@v0.8.1"
+golangcilint := "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2"
 govulncheck := "golang.org/x/vuln/cmd/govulncheck@v1.7.0"
 gofumpt := "mvdan.cc/gofumpt@v0.11.0"
 goimports := "golang.org/x/tools/cmd/goimports@v0.49.0"
@@ -172,6 +173,7 @@ lint:
     {{go}} vet -tags=load {{pkg}}
     {{go}} vet -tags=e2e {{pkg}}
     {{go}} vet -tags=integration {{pkg}}
+    {{go}} run {{golangcilint}} run {{pkg}}
 
 # staticcheck under every build tag; version pinned, no go.mod entry
 staticcheck:
