@@ -191,6 +191,10 @@ fmt:
     {{go}} run {{gofumpt}} -w .
     {{go}} run {{goimports}} -w .
 
+# Validate docs/api/openapi.yaml and check it against the mounted routes
+openapi:
+    {{go}} test ./internal/server/ -run OpenAPI -v
+
 # CI's formatting gate: prints every unformatted file and fails on any
 fmtcheck:
     #!/usr/bin/env bash

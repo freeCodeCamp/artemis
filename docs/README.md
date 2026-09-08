@@ -59,6 +59,33 @@ Auth headers (`/api/*` except `/healthz`, `/readyz`):
 
 These routes have a team gate beyond the base GitHub-bearer check: `POST /api/site/register`, `PATCH /api/site/{slug}`, `DELETE /api/site/{slug}` (`REGISTRY_AUTHZ_TEAM`); `POST /api/repo` (`REPO_CREATE_AUTHZ_TEAM`); `POST /api/repo/{id}/approve`, `POST /api/repo/{id}/reject`, `DELETE /api/repo/{id}`, `POST /api/site/{slug}/release` (`REPO_APPROVE_AUTHZ_TEAM`); `GET /api/audit` (`AUDIT_READ_AUTHZ_TEAM` — the only team-gated read, because the trail is cross-tenant). All other `/api/*` reads are open to any authenticated GitHub bearer.
 
+### Using the spec
+
+`docs/api/openapi.yaml` is the contract; the table above is a reading aid. Two commands cover it.
+
+```sh
+just openapi        # validate the document and check it against the router
+just fmt && just lint
+```
+
+`just openapi` runs the two tests in `internal/server/openapi_test.go`, which is what CI runs too:
+
+- `TestOpenAPI_DocumentIsValid` loads the document and runs `openapi3.Validate`, so a malformed
+  document fails rather than being served as truth.
+- `TestOpenAPI_NamesExactlyTheMountedRoutes` walks the chi router and requires the spec's
+  `method + path` set to equal the mounted set. Adding a route without documenting it fails, and so
+  does documenting a route that is not mounted.
+
+**What is not checked, and why it matters.** Request and response shapes, and every `description`,
+are written from the handlers by hand. Nothing compares them to the code. In 1.11.0 four `200`
+descriptions still told callers the service purged the Cloudflare edge cache for four days after
+commit `4eb4c80` removed that behaviour; only a human reading the prose caught it. So a shape or
+wording change belongs in the same commit as the code it describes, and a reviewer has to read it.
+
+To view it, open `docs/api/openapi.yaml` in any OpenAPI viewer — the document is self-contained and
+has no external `$ref`. There is deliberately no viewer or spec-linter recipe here: the repo carries
+no Node toolchain, and adding one for rendering alone would cost more than it returns.
+
 ## Configuration (env-driven)
 
 Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on the first bad var).
