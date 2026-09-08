@@ -36,8 +36,7 @@ test:
 # CI's coverage gate: statement coverage, every package, per .testcoverage.yml
 covgate:
     {{go}} test -race -shuffle=on -coverprofile=coverage.out {{pkg}}
-    {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml \
-        --threshold-file=70 --threshold-package=80 --threshold-total=80
+    {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml
 
 # go test with coverage profile + html report (unit only)
 cover:
@@ -112,7 +111,7 @@ hatchet-integration:
     cd test/integration/hatchet
     compose="docker compose -f compose.hatchet.yaml"
     tenant="707d0855-80ab-4e1f-a156-f1c4546cbf52"
-    trap "$compose down -v" EXIT
+    trap 'docker compose -f compose.hatchet.yaml down -v' EXIT
     $compose up -d --wait
     token=$($compose exec -T hatchet-lite /hatchet-admin token create --config /config --tenant-id "$tenant" | tr -d '\r\n')
     if [ -z "$token" ]; then
@@ -132,23 +131,25 @@ flake test n="20" pkg="./internal/...":
     #!/usr/bin/env bash
     set -euo pipefail
     case "{{n}}" in ''|*[!0-9]*) echo "n must be a positive integer, got '{{n}}'"; exit 2;; esac
-    echo "running {{test}} x{{n}} in one binary"
+    log=$(mktemp -t artemis-flake)
+    echo "running {{test}} x{{n}} in one binary; log=$log"
     set +e
-    ARTEMIS_RUN_QUARANTINED=1 {{go}} test -race -tags=integration -count={{n}} -run '{{test}}' -timeout=30m {{pkg}} > /tmp/flake.log 2>&1
+    env -u ARTEMIS_LIFECYCLE_OK ARTEMIS_RUN_QUARANTINED=1 \
+        {{go}} test -race -tags=integration -count={{n}} -run '{{test}}' -timeout=30m {{pkg}} > "$log" 2>&1
     code=$?
     set -e
-    ran=$(grep -cE '^(\s*)--- (PASS|FAIL|SKIP): ' /tmp/flake.log || true)
+    ran=$(grep -cE '^(\s*)--- (PASS|FAIL|SKIP): ' "$log" || true)
     if [ "$ran" -eq 0 ]; then
         echo "NO TESTS RAN — '{{test}}' matched nothing in {{pkg}}. This is not a pass."
-        tail -5 /tmp/flake.log
+        tail -5 "$log"
         exit 2
     fi
-    fails=$(grep -cE '^\s*--- FAIL' /tmp/flake.log || true)
+    fails=$(grep -cE '^\s*--- FAIL' "$log" || true)
     if [ "$code" -eq 0 ]; then
         echo "PASS — {{n}} iterations, ${ran} test results, 0 failures"
     else
-        echo "FAIL — {{n}} iterations, ${ran} test results, ${fails} failures; see /tmp/flake.log"
-        grep -E '^\s*--- FAIL|Error:|Messages:' /tmp/flake.log | head -20
+        echo "FAIL — {{n}} iterations, ${ran} test results, ${fails} failures; see $log"
+        grep -E '^\s*--- FAIL|Error:|Messages:' "$log" | head -20
         exit 1
     fi
 
@@ -204,6 +205,9 @@ fmtcheck:
     out=$(printf '%s\n%s' "$fumpt" "$imports" | grep -v '^$' || true)
     if [ -n "$out" ]; then printf '%s\n' "$out"; echo "unformatted Go: run 'just fmt'"; exit 1; fi
 
+# Every gate the CI build-test job runs, in its order
+ci: tidycheck fmtcheck quarantine-check lint staticcheck vulncheck covgate
+
 # Boot artemis locally — expects .env (loaded by direnv)
 run:
     {{go}} run ./cmd/artemis
@@ -248,6 +252,10 @@ image:
 # go mod tidy
 tidy:
     {{go}} mod tidy
+
+# CI's tidy gate: fails on go.mod/go.sum drift, rewrites nothing
+tidycheck:
+    {{go}} mod tidy -diff
 
 # remove build artifacts
 clean:

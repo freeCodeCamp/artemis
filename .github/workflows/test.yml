@@ -74,8 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           go run github.com/vladopajic/go-test-coverage/v2@v2.19.0 \
-            --config=.testcoverage.yml \
-            --threshold-file=70 --threshold-package=80 --threshold-total=80
+            --config=.testcoverage.yml
 
   tagged-suites:
     name: Tagged suites (docker)
@@ -99,7 +98,7 @@ jobs:
           cd test/integration/hatchet
           compose="docker compose -f compose.hatchet.yaml"
           tenant="707d0855-80ab-4e1f-a156-f1c4546cbf52"
-          trap "$compose down -v" EXIT
+          trap 'docker compose -f compose.hatchet.yaml down -v' EXIT
           $compose up -d --wait
           token=$($compose exec -T hatchet-lite /hatchet-admin token create \
             --config /config --tenant-id "$tenant" | tr -d '\r\n')
