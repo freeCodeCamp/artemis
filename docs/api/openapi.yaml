@@ -605,8 +605,7 @@ paths:
       responses:
         '200':
           description: The service checked every listed file, then moved the alias to this deploy. The
-            site now serves this deploy in the given mode. The service sends this body before it clears
-            the edge cache; the purge adds no headers and no data.
+            site now serves this deploy in the given mode.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'
@@ -3568,8 +3567,7 @@ paths:
       responses:
         '200':
           description: The production alias now points at the promoted deploy. The body carries the production
-            URL and the deploy id. The service sends the response before the edge cache purge for the
-            site starts.
+            URL and the deploy id.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'
@@ -3820,8 +3818,7 @@ paths:
       responses:
         '200':
           description: The service moved the production alias to the `to` deploy. The site now serves
-            that deploy in production. The service sends this body before it clears the edge cache. The
-            purge adds no headers and no data.
+            that deploy in production.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'
@@ -4934,8 +4931,7 @@ paths:
         '200':
           description: The service returned the reserved name to the active state. Before that, it restored
             each alias pointer that the delete captured, in storage and in the alias records. The body
-            carries `slug`, `prevProduction`, and `prevPreview`. The service sends this body, then it
-            clears the edge cache for the restored hostnames.
+            carries `slug`, `prevProduction`, and `prevPreview`.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'
