@@ -10,21 +10,17 @@ import (
 	"time"
 )
 
-// TestResponseCacheControl locks the present-day no-Cache-Control
-// contract on both preview and production URLs.
+// TestResponseCacheControl locks the serve-plane Cache-Control contract on
+// both preview and production URLs.
 //
-// End-to-end path: artemis `PutObject` (internal/r2/r2.go:80-97) sets
-// `ContentType` only — never `CacheControl`. Caddy `file_server` reads
-// the R2 object via the `r2_alias` plugin (configured by the operator's
-// reverse-proxy chart) and synthesizes no Cache-Control. CF zone-default
-// does not add one to HTML. Result: `curl -I https://<site>.<root>/`
-// shows no `cache-control` response header today.
+// The serve plane sends `public, max-age=0, must-revalidate` so the Cloudflare
+// edge revalidates every request against the origin. That is what made an
+// alias-write edge purge unnecessary: infra `ef71932d` added the header on
+// 2026-09-02, and artemis `4eb4c80` then removed the purge seam. See
+// docs/COMPATIBILITY.md entry 29.
 //
-// This test is a trip-wire. When any layer ships explicit
-// Cache-Control (defensive Caddy header, or a future PutObject change
-// in artemis, or a CF page rule), update the expected value here in
-// the same commit. Until then, this stays the canonical baseline
-// assertion.
+// artemis itself still sets no Cache-Control — `PutObject` sets ContentType
+// only — so this asserts the end-to-end value, not an artemis behaviour.
 //
 // No R2 creds needed — pure HTTP HEAD.
 func TestResponseCacheControl(t *testing.T) {
@@ -56,11 +52,12 @@ func TestResponseCacheControl(t *testing.T) {
 				t.Skipf("HEAD %s returned %d; expected 200 (site %s has no %s deploy yet?)",
 					tc.url, resp.StatusCode, c.Site, tc.name)
 			}
-			if cc := resp.Header.Get("Cache-Control"); cc != "" {
-				t.Fatalf("%s: Cache-Control=%q — baseline contract is absent end-to-end (artemis PutObject sets ContentType only; Caddy file_server synthesizes none; CF zone-default does not add one to HTML). Update this assertion in the commit that adds Cache-Control on purpose.",
-					tc.url, cc)
+			const want = "public, max-age=0, must-revalidate"
+			if cc := resp.Header.Get("Cache-Control"); cc != want {
+				t.Fatalf("%s: Cache-Control=%q, want %q — the edge must revalidate every request, which is what replaced the alias-write purge. Update this assertion in the commit that changes the header on purpose.",
+					tc.url, cc, want)
 			}
-			t.Logf("[cc] %s status=%d Cache-Control=<absent>", tc.url, resp.StatusCode)
+			t.Logf("[cc] %s status=%d Cache-Control=%q", tc.url, resp.StatusCode, want)
 		})
 	}
 }
