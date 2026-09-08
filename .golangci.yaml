@@ -3,6 +3,7 @@ version: "2"
 linters:
   default: none
   enable:
+    - errcheck
     - govet
     - staticcheck
     - bodyclose
@@ -13,6 +14,14 @@ linters:
     - whitespace
     - dupl
     - gochecknoinits
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
   exclusions:
     rules:
       - path: internal/hatchet/adapter\.go
