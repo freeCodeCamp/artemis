@@ -56,6 +56,9 @@ jobs:
           # Build the exact commit release-please tagged, not the branch HEAD,
           # so the image content matches the published tag + GitHub Release.
           ref: ${{ needs.release-please.outputs.sha }}
+          # Full history: `set_commits: auto` derives the commit range from it,
+          # and the default shallow clone carries none.
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
@@ -132,3 +135,20 @@ jobs:
           release: artemis@${{ needs.release-please.outputs.version }}+${{ needs.release-please.outputs.sha }}
           set_commits: skip
           finalize: true
+
+      # Commit association is a second, failure-tolerant step on purpose. It
+      # needs freeCodeCamp/artemis linked to the Sentry org through the GitHub
+      # integration, and `auto` errors when that link is absent. Doing it here
+      # rather than as `set_commits: auto` above means a missing integration
+      # costs the suspect-commit data, never the release registration itself.
+      - name: Associate commits with the Sentry release
+        uses: getsentry/action-release@ff07929a6537bac57790c3451cf4d364aca38528 # v3.7.0
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: freecodecamp
+          SENTRY_PROJECT: artemis
+        with:
+          release: artemis@${{ needs.release-please.outputs.version }}+${{ needs.release-please.outputs.sha }}
+          set_commits: auto
+          finalize: false
