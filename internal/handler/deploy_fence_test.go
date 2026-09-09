@@ -15,8 +15,9 @@ import (
 )
 
 type fakeDeployFence struct {
-	marked map[string]time.Duration
-	err    error
+	marked   map[string]time.Duration
+	err      error
+	writeErr error
 }
 
 func newFakeDeployFence() *fakeDeployFence {
@@ -24,6 +25,9 @@ func newFakeDeployFence() *fakeDeployFence {
 }
 
 func (f *fakeDeployFence) MarkDeployFinalized(_ context.Context, site sitekey.Slug, id string, ttl time.Duration) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -129,7 +133,7 @@ func TestDeployFinalize_SucceedsAndReportsWhenTheFenceWriteFails(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, jwt, _ := newFinalizeHandlers(t, store)
-	h.DeployFence = &fakeDeployFence{err: errors.New("valkey unreachable")}
+	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, writeErr: errors.New("valkey unreachable")}
 
 	require.Equal(t, http.StatusOK, callFinalize(t, h, jwt, deployID).Code,
 		"the marker, the alias and the index row are already committed; failing here would report a "+
@@ -152,4 +156,32 @@ func TestDeployFinalize_FencesTheDeployEvenWhenTheIndexWriteFails(t *testing.T) 
 	assert.Contains(t, fence.marked, "www/"+deployID,
 		"the alias write already succeeded, so the deploy is live and the permit can still overwrite it; "+
 			"fencing only on the fully-successful path leaves the live-but-unindexed deploy open")
+}
+
+func TestDeployFinalize_RefusesASecondFinalizeOfTheSameDeploy(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, _ := newFinalizeHandlers(t, store)
+	fence := newFakeDeployFence()
+	h.DeployFence = fence
+	require.NoError(t, fence.MarkDeployFinalized(context.Background(), "www", deployID, time.Minute))
+	w := callFinalize(t, h, jwt, deployID)
+
+	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	_, aliasErr := store.GetAlias(context.Background(), "www/preview")
+	assert.Error(t, aliasErr,
+		"a retry inside the still-valid permit TTL would repoint the alias, silently undoing a rollback that ran between the two calls")
+}
+
+func TestDeployFinalize_AllowsTheFirstFinalize(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, _ := newFinalizeHandlers(t, store)
+	h.DeployFence = newFakeDeployFence()
+
+	w := callFinalize(t, h, jwt, deployID)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }

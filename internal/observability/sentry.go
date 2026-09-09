@@ -389,6 +389,7 @@ var cronShapedOps = map[string]bool{
 	"drift.reclaimable":     true,
 	"drift.orphan_aliases":  true,
 	"tombstone.purge":       true,
+	"pending.sweep":         true,
 	"reservation.sweep":     true,
 	"site.reclaim":          true,
 	"drift.ledger":          true,

@@ -19,7 +19,7 @@ const (
 )
 
 type reclaimableSource interface {
-	ReclaimableReservations(ctx context.Context, before time.Time, claimTTL time.Duration, limit int) ([]registry.Reservation, error)
+	ReclaimableReservations(ctx context.Context, claimTTL time.Duration, limit int) ([]registry.Reservation, error)
 }
 
 type lifecycleEmitter interface {
@@ -50,7 +50,7 @@ func scheduleReclaims(ctx context.Context, src reclaimableSource, emit lifecycle
 			"source", src != nil, "emitter", emit != nil)
 		return 0, nil
 	}
-	rows, err := src.ReclaimableReservations(ctx, now().UTC(), reclaimClaimTTL, reservationSweepLimit)
+	rows, err := src.ReclaimableReservations(ctx, reclaimClaimTTL, reservationSweepLimit)
 	if err != nil {
 		return 0, fmt.Errorf("reservation sweep: %w", err)
 	}

@@ -31,6 +31,11 @@ func (l *racingLister) ListPrefix(_ context.Context, prefix string) ([]string, e
 	return keysUnder(l.site, prefix), nil
 }
 
+func (l *racingLister) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	keys, err := l.ListPrefix(context.Background(), prefix)
+	return int64(len(keys)), err
+}
+
 type racingStore struct {
 	deploys          map[string]Deploy
 	aliases          map[string]struct{}

@@ -74,6 +74,9 @@ type gcPurgeAuditor struct {
 }
 
 func (a gcPurgeAuditor) RecordPurge(ctx context.Context, site sitekey.Dirname, deployID string) error {
+	if a.repo == nil {
+		return nil
+	}
 	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    "system:gc",
@@ -97,6 +100,9 @@ type gcTombstoneAuditor struct {
 }
 
 func (a gcTombstoneAuditor) AuditTombstone(ctx context.Context, site sitekey.Dirname, id string) error {
+	if a.repo == nil {
+		return nil
+	}
 	slug, detail := auditSite(a.toSlug, site)
 	err := a.repo.RecordAudit(ctx, pg.AuditEvent{
 		Actor:    a.actor,
@@ -259,6 +265,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 	var tombstoneRecorder siteTombstoneRecorder
 	var pending gc.PendingSource
 	var pendingIDs func(context.Context, sitekey.Dirname) (map[string]struct{}, error)
+	var auditRepo auditRecorder
 	if repo != nil {
 		pendingSites = repo
 		pending = repo
@@ -269,6 +276,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		reaper = repo
 		siteLocker = repo
 		tombstoneRecorder = repo
+		auditRepo = repo
 	}
 	resv, _ := writer.(reservationWiring)
 
@@ -278,6 +286,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 		Lifecycle:    lifecycle,
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
+			Lister:    r2c,
 			Tombstone: tombstoneRecorder,
 			Locker:    gcLocker,
 			Expired:   expiredClaimChecker(resv),
@@ -301,7 +310,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			TrashPrefix:  layout.trashPrefix,
 			Now:          time.Now,
 			Held:         heldChecker(resv, tmpl.SiteSlug),
-			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:gc", action: "gc.tombstone", toSlug: toSlug},
+			Audit:        gcTombstoneAuditor{repo: auditRepo, actor: "system:gc", action: "gc.tombstone", toSlug: toSlug},
 		},
 		Reconciler: &gc.Reconciler{
 			Lister:       r2c,
@@ -316,8 +325,8 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			LiveAliases:  liveAliases,
 			PendingIDs:   pendingIDs,
 			Now:          time.Now,
-			Audit:        gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile", toSlug: toSlug},
-			PruneAudit:   gcTombstoneAuditor{repo: repo, actor: "system:reconcile", action: "gc.reconcile.prune", toSlug: toSlug},
+			Audit:        gcTombstoneAuditor{repo: auditRepo, actor: "system:reconcile", action: "gc.reconcile", toSlug: toSlug},
+			PruneAudit:   gcTombstoneAuditor{repo: auditRepo, actor: "system:reconcile", action: "gc.reconcile.prune", toSlug: toSlug},
 		},
 		PendingSites: pendingSites,
 		Purge: &gc.TombstonePurge{
@@ -328,7 +337,8 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			BlastCap:  cfg.Cleanup.BlastCap,
 			Now:       time.Now,
 			Locker:    siteLocker,
-			Audit:     gcPurgeAuditor{repo: repo, toSlug: toSlug},
+			Sizer:     r2c,
+			Audit:     gcPurgeAuditor{repo: auditRepo, toSlug: toSlug},
 		},
 	}, nil
 }

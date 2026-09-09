@@ -400,3 +400,29 @@ func TestWithCheckIn_ReportsErrorOnPanic(t *testing.T) {
 	assert.Equal(t, []sentry.CheckInStatus{sentry.CheckInStatusInProgress, sentry.CheckInStatusError}, statuses,
 		"a panic must close the monitor as error, not leave it in-progress until Sentry times it out")
 }
+
+func TestGCWorkflowDefs_EveryDefStatesItsRetryCount(t *testing.T) {
+	for _, def := range gcWorkflowDefs(&gcWiring{}, true, nil) {
+		assert.GreaterOrEqual(t, def.Retries, 0,
+			"the adapter passes Retries unconditionally, so an engine default can never decide it for %s", def.Name)
+	}
+}
+
+func TestGCWorkflowDefs_SiteLifecycleDoesNotRetry(t *testing.T) {
+	for _, def := range gcWorkflowDefs(&gcWiring{}, true, nil) {
+		if def.Name != worker.WorkflowSiteLifecycle {
+			continue
+		}
+		assert.Equal(t, 0, def.Retries,
+			"the claim holds for reclaimClaimTTL, so an engine retry reaches !won and does nothing; "+
+				"the reservation sweep is the retry and it re-emits the next night")
+		return
+	}
+	t.Fatal("site.lifecycle is not registered")
+}
+
+func TestNightlySubJobBudget_SplitsTheRunBudgetAcrossItsSubJobs(t *testing.T) {
+	assert.Equal(t, gcRunBudget, nightlySubJobBudget*nightlySubJobs,
+		"the four sub-jobs shared one 30-minute budget and the reservation sweep ran last, so a slow purge "+
+			"could starve it silently; each share must add back to the workflow timeout")
+}

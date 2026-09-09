@@ -16,6 +16,7 @@ const reconcileOpTimeout = 10 * time.Minute
 
 type ReconcileLister interface {
 	ListPrefix(ctx context.Context, prefix string) ([]string, error)
+	PrefixBytes(ctx context.Context, prefix string) (int64, error)
 }
 
 type ReconcileStore interface {
@@ -53,7 +54,7 @@ type DriftReport struct {
 	CapReason        string
 }
 
-const orphanBytesUnknown int64 = 0
+const orphanBytesUnmeasured int64 = 0
 
 type r2Deploy struct {
 	hasMarker bool
@@ -284,7 +285,7 @@ func (rc *Reconciler) repair(ctx context.Context, sess LockSession, site sitekey
 				return false, err
 			}
 			trash := rc.TrashPrefix(site, id)
-			if err := rc.Store.RecordTombstone(opCtx, site, id, orphanBytesUnknown); err != nil {
+			if err := rc.Store.RecordTombstone(opCtx, site, id, rc.orphanBytes(opCtx, site, id)); err != nil {
 				return false, fmt.Errorf("record orphan %s: %w", id, err)
 			}
 			rowRecorded = true
@@ -522,4 +523,14 @@ func parseDeployTime(id string, fallback time.Time) time.Time {
 		}
 	}
 	return fallback
+}
+
+func (rc *Reconciler) orphanBytes(ctx context.Context, site sitekey.Dirname, id string) int64 {
+	n, err := rc.Lister.PrefixBytes(ctx, rc.DeployPrefix(site, id))
+	if err != nil {
+		slog.WarnContext(ctx, "reconcile.orphan_bytes_unmeasured", "site", site, "deploy_id", id, "err", err,
+			"detail", "the tombstone row lands with 0 bytes; the purge measures the trash prefix instead")
+		return orphanBytesUnmeasured
+	}
+	return n
 }

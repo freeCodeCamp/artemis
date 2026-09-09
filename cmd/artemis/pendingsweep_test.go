@@ -224,7 +224,7 @@ func TestRunPendingSweep_DryRunMovesNothing(t *testing.T) {
 
 type orderingReservations struct{ order *[]string }
 
-func (o orderingReservations) ReclaimableReservations(context.Context, time.Time, time.Duration, int) ([]registry.Reservation, error) {
+func (o orderingReservations) ReclaimableReservations(context.Context, time.Duration, int) ([]registry.Reservation, error) {
 	*o.order = append(*o.order, "reservation")
 	return nil, nil
 }

@@ -457,3 +457,23 @@ func TestHeldChecker_AForeignDirnameIsNotHeld(t *testing.T) {
 	assert.False(t, held)
 	assert.Empty(t, src.seen, "an artemis-owned prefix is not a site and must not reach the registry")
 }
+
+func TestNewGCWiring_AuditorsWithNoRepoAreNoOpsNotPanics(t *testing.T) {
+	cfg := &config.Config{
+		DeployPrefixFormat: "<site>.freecode.camp/deploys/<ts>-<sha>/",
+		Cleanup:            config.CleanupConfig{TrashPrefix: "_trash/", BlastCap: 10},
+	}
+	cfg.Aliases.ProductionKeyFormat = "<site>.freecode.camp/production"
+	cfg.Aliases.PreviewKeyFormat = "<site>.freecode.camp/preview"
+
+	w, err := newGCWiring(cfg, nil, nil, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	assert.NoError(t, w.SiteGC.Audit.AuditTombstone(ctx, "test.freecode.camp", "d1"),
+		"eight siblings go through repo != nil; an unguarded auditor holds a typed-nil *pg.Repo and "+
+			"dereferences its pool on the first tombstone")
+	assert.NoError(t, w.Reconciler.Audit.AuditTombstone(ctx, "test.freecode.camp", "d1"))
+	assert.NoError(t, w.Reconciler.PruneAudit.AuditTombstone(ctx, "test.freecode.camp", "d1"))
+	assert.NoError(t, w.Purge.Audit.RecordPurge(ctx, "test.freecode.camp", "d1"))
+}

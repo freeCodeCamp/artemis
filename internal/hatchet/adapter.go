@@ -149,7 +149,7 @@ func (a *Adapter) buildWorkflow(client *hsdk.Client, def worker.WorkflowDef) *hs
 	}
 	wf := client.NewWorkflow(def.Name, opts...)
 	handler := def.Handler
-	var taskOpts []hsdk.TaskOption
+	taskOpts := []hsdk.TaskOption{hsdk.WithRetries(def.Retries)}
 	if def.ExecutionTimeout > 0 {
 		taskOpts = append(taskOpts, hsdk.WithExecutionTimeout(def.ExecutionTimeout))
 	}

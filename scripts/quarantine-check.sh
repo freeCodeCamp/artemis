@@ -35,7 +35,7 @@ else
     done <<< "$sites"
 fi
 
-aliases="$(grep -rnE "^\s*(import\s+)?[A-Za-z_][A-Za-z0-9_]*\s+\"$pkg\"" --include='*_test.go' --exclude-dir=.scratchpad "$root" | grep -vE ':[0-9]+:\s*((import\s+)?quarantine\s|import\s+")' || true)"
+aliases="$(grep -rnE "^\s*(import\s+)?([A-Za-z_][A-Za-z0-9_]*|\.)\s+\"$pkg\"" --include='*_test.go' --exclude-dir=.scratchpad "$root" | grep -vE ':[0-9]+:\s*((import\s+)?quarantine\s|import\s+")' || true)"
 if [ -n "$aliases" ]; then
     printf '%s\n' "$aliases" | sed "s|^$root/||; s|$| ALIASED-IMPORT-HIDES-CALLS|"; bad=1
 fi

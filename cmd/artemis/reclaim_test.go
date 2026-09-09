@@ -219,7 +219,8 @@ func TestRunSiteReclaim_AuditsTheReleaseExactlyOnceWithTheMoveCount(t *testing.T
 	e := f.releaser.events[0]
 	assert.Equal(t, "system:gc", e.Actor, "audit readers separate system rows from staff rows by actor")
 	assert.Equal(t, "site.reclaim", e.Action, "COMPATIBILITY entry 33 names site.reclaim; any other action hides the row from every filter and dashboard keyed on it")
-	assert.Equal(t, "gone.freecode.camp", e.Site)
+	assert.Equal(t, "gone", e.Site,
+		"every other audit writer keys on the slug, so a dirname here makes ListAudit?site=gone miss the reclaim entirely")
 	assert.Equal(t, "success", e.Outcome)
 	assert.Equal(t, map[string]any{"moved": 3, "tombstoned": true}, e.Detail)
 }
@@ -359,4 +360,43 @@ func TestReclaimClaimTTL_ReemitsNextNight(t *testing.T) {
 func TestSiteReclaimOpIsCronShaped(t *testing.T) {
 	assert.True(t, observability.IsCronShaped(opSiteReclaim),
 		"a reclaim failure must never be held back by the transient-rate tracker")
+}
+
+type scriptedPrefixLister struct {
+	keys     []string
+	err      error
+	prefixes []string
+}
+
+func (l *scriptedPrefixLister) ListPrefix(_ context.Context, prefix string) ([]string, error) {
+	l.prefixes = append(l.prefixes, prefix)
+	return l.keys, l.err
+}
+
+func TestRunSiteReclaim_RefusesASiteAboveTheBlastCap(t *testing.T) {
+	f, deps := newReclaimFixture()
+	keys := make([]string, reclaimSiteObjectCap+1)
+	for i := range keys {
+		keys[i] = "gone.freecode.camp/deploys/d1/f"
+	}
+	deps.Lister = &scriptedPrefixLister{keys: keys}
+
+	err := runSiteReclaim(context.Background(), deps, reclaimInput("gone"), false)
+
+	require.Error(t, err, "every other destructive path has a ceiling; an unbounded whole-site move has none")
+	assert.Empty(t, f.mover.moved, "nothing moves once the cap refuses")
+	assert.Empty(t, f.tb.sites, "no tombstone row is written for a move that never happened")
+	assert.Empty(t, f.releaser.released, "the reservation stays so an operator can decide")
+}
+
+func TestRunSiteReclaim_MovesASiteInsideTheBlastCap(t *testing.T) {
+	f, deps := newReclaimFixture()
+	lister := &scriptedPrefixLister{keys: []string{"gone.freecode.camp/deploys/d1/index.html"}}
+	deps.Lister = lister
+
+	require.NoError(t, runSiteReclaim(context.Background(), deps, reclaimInput("gone"), false))
+
+	assert.Equal(t, []string{"gone.freecode.camp/"}, lister.prefixes)
+	assert.Equal(t, [][2]string{{"gone.freecode.camp/", "_trash/gone.freecode.camp/"}}, f.mover.moved)
+	assert.Equal(t, []sitekey.Slug{"gone"}, f.releaser.released)
 }

@@ -74,6 +74,8 @@ const (
 	cronDriftDetect      = "0 4 * * *"
 	driftDetectRunBudget = 30 * time.Minute
 	gcRunBudget          = 30 * time.Minute
+	nightlySubJobBudget  = gcRunBudget / nightlySubJobs
+	nightlySubJobs       = 4
 	relayInterval        = 5 * time.Second
 	outboxStuckAfter     = 15 * time.Minute
 	outboxProbeEvery     = 12
@@ -197,19 +199,33 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			ExecutionTimeout: gcRunBudget,
 			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
 				var errs []error
-				if _, err := gcw.Purge.Run(ctx, dryRun); err != nil {
-					observability.CaptureBackground("tombstone.purge", err)
-					errs = append(errs, err)
+				run := func(name string, fn func(context.Context) error) {
+					subCtx, cancel := context.WithTimeout(ctx, nightlySubJobBudget)
+					defer cancel()
+					if err := fn(subCtx); err != nil {
+						errs = append(errs, err)
+					}
+					if subCtx.Err() != nil && ctx.Err() == nil {
+						slog.WarnContext(ctx, "gc.nightly.subjob_budget_exhausted", "subjob", name, "budget", nightlySubJobBudget,
+							"detail", "this sub-job used its whole share; the sub-jobs after it keep theirs")
+					}
 				}
-				if err := purgeOutbox(ctx, gcw.Outbox, gcw.OutboxRetention, dryRun); err != nil {
-					errs = append(errs, err)
-				}
-				if err := runPendingSweep(ctx, gcw.PendingSites, gcw.SiteGC, dryRun); err != nil {
-					errs = append(errs, err)
-				}
-				if err := runReservationSweep(ctx, gcw.Reservations, gcw.Lifecycle, gcw.Reclaim.Dirname, time.Now, dryRun); err != nil {
-					errs = append(errs, err)
-				}
+				run("tombstone.purge", func(c context.Context) error {
+					if _, err := gcw.Purge.Run(c, dryRun); err != nil {
+						observability.CaptureBackground("tombstone.purge", err)
+						return err
+					}
+					return nil
+				})
+				run("outbox.purge", func(c context.Context) error {
+					return purgeOutbox(c, gcw.Outbox, gcw.OutboxRetention, dryRun)
+				})
+				run(opPendingSweep, func(c context.Context) error {
+					return runPendingSweep(c, gcw.PendingSites, gcw.SiteGC, dryRun)
+				})
+				run(opReservationSweep, func(c context.Context) error {
+					return runReservationSweep(c, gcw.Reservations, gcw.Lifecycle, gcw.Reclaim.Dirname, time.Now, dryRun)
+				})
 				return errors.Join(errs...)
 			})),
 		},
@@ -219,6 +235,7 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			ExtraConcurrency: []worker.ConcurrencyLimit{{Key: worker.ConcurrencyKeyAction, MaxRuns: reclaimParallelism}},
 			EventTriggers:    []string{pg.TopicSiteLifecycle},
 			ExecutionTimeout: gcRunBudget,
+			Retries:          siteLifecycleRetries,
 			Handler: observeWorkflow(worker.WorkflowSiteLifecycle, func(ctx context.Context, input map[string]any) error {
 				if err := runSiteReclaim(ctx, gcw.Reclaim, input, dryRun); err != nil {
 					observability.CaptureBackground(opSiteReclaim, err)

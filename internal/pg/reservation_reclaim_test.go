@@ -58,7 +58,7 @@ func TestRegistryStore_ReclaimableReservationsSkipsARowClaimedInsideTheTTL(t *te
 	setClaim(t, repo, ctx, "fresh-claim", now.Add(-time.Hour))
 	setClaim(t, repo, ctx, "stale-claim", now.Add(-reclaimTestTTL-time.Hour))
 
-	rows, err := store.ReclaimableReservations(ctx, now, reclaimTestTTL, 10)
+	rows, err := store.ReclaimableReservations(ctx, reclaimTestTTL, 10)
 
 	require.NoError(t, err)
 	var slugs []sitekey.Slug
@@ -83,7 +83,7 @@ func TestRegistryStore_ReclaimableReservationsIsOldestFirstAndHonoursItsLimit(t 
 	_, err = store.Reserve(ctx, reservationSlug, reservationDirname, now.Add(-time.Hour), "bob", registry.ObservedAliases{})
 	require.NoError(t, err)
 
-	rows, err := store.ReclaimableReservations(ctx, now, reclaimTestTTL, 2)
+	rows, err := store.ReclaimableReservations(ctx, reclaimTestTTL, 2)
 
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
@@ -204,4 +204,22 @@ func TestRecordAuditTx_RollsBackWithItsTransaction(t *testing.T) {
 	require.NoError(t, tx.Rollback(ctx))
 
 	assert.Zero(t, countAudit(t, repo, ctx, "site.reclaim"), "an audit row written on the transaction dies with it")
+}
+
+func TestRegistryStore_ReclaimableReservationsUsesTheDatabaseClock(t *testing.T) {
+	store, _, ctx := newReservationFixture(t)
+	_, err := store.Register(ctx, "notyet", []string{"staff"}, "alice")
+	require.NoError(t, err)
+	_, err = store.Reserve(ctx, "notyet", "notyet.freecode.camp",
+		time.Now().UTC().Add(5*time.Minute), "bob", registry.ObservedAliases{})
+	require.NoError(t, err)
+
+	rows, err := store.ReclaimableReservations(ctx, reclaimTestTTL, 10)
+
+	require.NoError(t, err)
+	for _, r := range rows {
+		assert.NotEqual(t, sitekey.Slug("notyet"), r.Slug,
+			"the sweep once measured eligibility on the caller's clock while ClaimReclaim used now(); "+
+				"a fast pod selected rows the claim then refused, and the site waited a whole night")
+	}
 }

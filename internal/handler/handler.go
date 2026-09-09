@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/freeCodeCamp/artemis/internal/auth"
@@ -392,8 +393,28 @@ func writeUpstreamError(w http.ResponseWriter, r *http.Request, status int, code
 
 const statusClientClosedRequest = 499
 
+const upstreamReportWindow = time.Minute
+
+var upstreamReports = struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}{last: map[string]time.Time{}}
+
+func upstreamReportAllowed(op string, now time.Time) bool {
+	upstreamReports.mu.Lock()
+	defer upstreamReports.mu.Unlock()
+	if prev, ok := upstreamReports.last[op]; ok && now.Sub(prev) < upstreamReportWindow {
+		return false
+	}
+	upstreamReports.last[op] = now
+	return true
+}
+
 func reportUpstream(r *http.Request, code, op string, err error) {
 	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if !upstreamReportAllowed(op, time.Now()) {
 		return
 	}
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {

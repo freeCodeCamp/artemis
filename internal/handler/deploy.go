@@ -274,6 +274,19 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 				"site was deleted; deploy cannot be finalized", site, err)
 			return errAliasWriteHandled
 		}
+		if h.DeployFence != nil {
+			finalized, fenceErr := h.DeployFence.IsDeployFinalized(commitCtx, claims.Site, deployID)
+			if fenceErr != nil {
+				writeUpstreamError(w, r, http.StatusServiceUnavailable, "fence_unavailable",
+					"valkey.get.deploy_fence.finalize", fenceErr)
+				return errAliasWriteHandled
+			}
+			if finalized {
+				writeError(w, http.StatusConflict, "deploy_finalized",
+					"deploy is finalized and immutable; start a new deploy")
+				return errAliasWriteHandled
+			}
+		}
 		if err := telemetry.WithSpan(commitCtx, "r2.put.marker.finalize", func(ctx context.Context) error {
 			return h.R2.PutObject(ctx, markerKey, strings.NewReader(meta), "application/json", int64(len(meta)))
 		}); err != nil {

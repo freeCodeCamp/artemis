@@ -18,7 +18,15 @@ const (
 	reclaimActor       = "system:gc"
 	reclaimClaimTTL    = 12 * time.Hour
 	reclaimParallelism = 4
+	// The claim holds for reclaimClaimTTL, so an engine-side retry inside that
+	// window reaches !won and does nothing. The reservation sweep is the retry.
+	siteLifecycleRetries = 0
+	reclaimSiteObjectCap = 50000
 )
+
+type prefixLister interface {
+	ListPrefix(ctx context.Context, prefix string) ([]string, error)
+}
 
 var reclaimBatchWorstCase = time.Duration(reservationSweepLimit/reclaimParallelism+1) * gcRunBudget
 
@@ -40,6 +48,7 @@ type auditedReleaser interface {
 
 type reclaimDeps struct {
 	Mover     siteReclaimer
+	Lister    prefixLister
 	Tombstone siteTombstoneRecorder
 	Locker    gc.Locker
 	Expired   func(ctx context.Context, slug sitekey.Slug) (bool, error)
@@ -122,7 +131,7 @@ func runSiteReclaim(ctx context.Context, deps reclaimDeps, input map[string]any,
 		err = deps.Releaser.ReleaseReservationAudited(ctx, in.Slug, pg.AuditEvent{
 			Actor:   reclaimActor,
 			Action:  opSiteReclaim,
-			Site:    string(dirname),
+			Site:    string(in.Slug),
 			Outcome: "success",
 			Detail:  map[string]any{"moved": moved, "tombstoned": true},
 		})
@@ -144,10 +153,21 @@ func reclaimSiteBytes(ctx context.Context, deps reclaimDeps, dirname sitekey.Dir
 	if base == "" {
 		base = "_trash/"
 	}
+	src := string(dirname) + "/"
+	if deps.Lister != nil {
+		keys, err := deps.Lister.ListPrefix(ctx, src)
+		if err != nil {
+			return 0, fmt.Errorf("site.reclaim measure %s: %w", dirname, err)
+		}
+		if len(keys) > reclaimSiteObjectCap {
+			slog.ErrorContext(ctx, "site.reclaim.blast_capped", "site", dirname, "objects", len(keys), "cap", reclaimSiteObjectCap,
+				"detail", "refusing to move a site this large in one run; the reservation stays and an operator decides")
+			return 0, fmt.Errorf("site.reclaim %s: %d objects exceeds the blast cap of %d", dirname, len(keys), reclaimSiteObjectCap)
+		}
+	}
 	if err := deps.Tombstone.RecordSiteTombstone(ctx, dirname); err != nil {
 		return 0, fmt.Errorf("site.reclaim tombstone %s: %w", dirname, err)
 	}
-	src := string(dirname) + "/"
 	n, err := deps.Mover.MovePrefix(ctx, src, base+src)
 	if err != nil {
 		return 0, fmt.Errorf("site.reclaim move %s: %w", dirname, err)

@@ -26,8 +26,8 @@ type scriptedReclaimables struct {
 	err    error
 }
 
-func (s *scriptedReclaimables) ReclaimableReservations(_ context.Context, before time.Time, ttl time.Duration, limit int) ([]registry.Reservation, error) {
-	s.before, s.ttl, s.limit = before, ttl, limit
+func (s *scriptedReclaimables) ReclaimableReservations(_ context.Context, ttl time.Duration, limit int) ([]registry.Reservation, error) {
+	s.ttl, s.limit = ttl, limit
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -73,8 +73,6 @@ func TestScheduleReclaims_EmitsOneEventPerReclaimableRowInOneBatch(t *testing.T)
 		{Action: pg.LifecycleActionReclaim, Slug: "old-one", Site: "old-one.freecode.camp"},
 		{Action: pg.LifecycleActionReclaim, Slug: "old-two", Site: "old-two.freecode.camp"},
 	}, emit.batches[0])
-	assert.Equal(t, fixedNow(), src.before,
-		"the cutoff must be now; a future cutoff would emit names still inside their grace")
 	assert.Equal(t, reclaimClaimTTL, src.ttl,
 		"a row claimed inside the TTL belongs to a run that may still be moving bytes")
 	assert.Equal(t, reservationSweepLimit, src.limit)

@@ -58,14 +58,15 @@ func TestSelfHealing_WarnNotError(t *testing.T) {
 }
 
 type fakeReconcileStore struct {
-	deploys       map[string][]Deploy
-	aliases       map[string]struct{}
-	aliasesAfter  map[string]struct{}
-	tombstonedIDs map[string]bool
-	aliasCalls    int
-	reindexed     []string
-	tombstoned    []string
-	pruned        []string
+	deploys        map[string][]Deploy
+	aliases        map[string]struct{}
+	aliasesAfter   map[string]struct{}
+	tombstonedIDs  map[string]bool
+	aliasCalls     int
+	reindexed      []string
+	tombstoned     []string
+	tombstoneBytes map[string]int64
+	pruned         []string
 }
 
 func (s *fakeReconcileStore) DeploysForSite(_ context.Context, site sitekey.Dirname) ([]Deploy, error) {
@@ -88,8 +89,12 @@ func (s *fakeReconcileStore) ReindexDeploy(_ context.Context, _ sitekey.Dirname,
 	return true, nil
 }
 
-func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, _ int64) error {
+func (s *fakeReconcileStore) RecordTombstone(_ context.Context, _ sitekey.Dirname, id string, bytes int64) error {
 	s.tombstoned = append(s.tombstoned, id)
+	if s.tombstoneBytes == nil {
+		s.tombstoneBytes = map[string]int64{}
+	}
+	s.tombstoneBytes[id] = bytes
 	return nil
 }
 
@@ -127,10 +132,23 @@ func (passthroughLocker) NewLockSession(context.Context) (LockSession, error) {
 	return passthroughSession{}, nil
 }
 
-type fakeReconcileLister struct{ keys []string }
+type fakeReconcileLister struct {
+	keys      []string
+	bytesPer  int64
+	bytesErr  error
+	byteCalls int
+}
 
 func (f *fakeReconcileLister) ListPrefix(_ context.Context, prefix string) ([]string, error) {
 	return keysUnder(f.keys, prefix), nil
+}
+
+func (f *fakeReconcileLister) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	f.byteCalls++
+	if f.bytesErr != nil {
+		return 0, f.bytesErr
+	}
+	return int64(len(keysUnder(f.keys, prefix))) * f.bytesPer, nil
 }
 
 func keysUnder(keys []string, prefix string) []string {
@@ -323,4 +341,34 @@ func TestReconcile_AliasedWithMarker_ReindexedNotPaged(t *testing.T) {
 	assert.NotContains(t, report.AliasedMissing, id, "a self-healed deploy must not page as dangerous drift")
 	assert.Equal(t, []string{id}, store.reindexed, "reindex persisted to the store")
 	assert.Empty(t, mover.moves, "self-healed deploy is not tombstoned")
+}
+
+func TestReconcile_OrphanTombstoneCarriesTheMeasuredBytes(t *testing.T) {
+	orphan := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{
+		keys:     []string{"www/deploys/" + orphan + "/index.html", "www/deploys/" + orphan + "/app.js"},
+		bytesPer: 1000,
+	}
+	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
+
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
+	require.NoError(t, err)
+	require.Equal(t, []string{orphan}, report.OrphanTombstoned)
+
+	assert.Equal(t, int64(2000), store.tombstoneBytes[orphan],
+		"the sweep already lists the orphan prefix, so recording 0 makes BytesReclaimed under-report every purge")
+}
+
+func TestReconcile_OrphanTombstoneStillLandsWhenTheSizeIsUnreadable(t *testing.T) {
+	orphan := ts(2 * time.Hour)
+	lister := &fakeReconcileLister{
+		keys:     []string{"www/deploys/" + orphan + "/index.html"},
+		bytesErr: errAudit,
+	}
+	store := &fakeReconcileStore{deploys: map[string][]Deploy{}, aliases: map[string]struct{}{}}
+
+	report, err := newReconciler(lister, store, &fakeMover{}).ReconcileSite(context.Background(), "www", false)
+	require.NoError(t, err, "an unreadable size must never block the tombstone; the bytes are a report, the row is the safety")
+	require.Equal(t, []string{orphan}, report.OrphanTombstoned)
+	assert.Equal(t, int64(0), store.tombstoneBytes[orphan])
 }

@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -261,4 +262,60 @@ func TestTombstonePurge_SitePurgeAccountsForTheDeploysItAlsoDeletes(t *testing.T
 
 func (staleReaper) TombstonesForSite(context.Context, sitekey.Dirname) ([]Tombstone, error) {
 	return nil, nil
+}
+
+type fakeSizer struct {
+	bytes    map[string]int64
+	err      error
+	prefixes []string
+}
+
+func (f *fakeSizer) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	f.prefixes = append(f.prefixes, prefix)
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.bytes[prefix], nil
+}
+
+func TestPurge_MeasuresARowThatCarriesNoSize(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d1", TrashedAt: testNow.Add(-8 * 24 * time.Hour), Bytes: 0},
+	}}
+	p := newPurge(reaper, &fakeDeleter{})
+	p.Sizer = &fakeSizer{bytes: map[string]int64{"_trash/www/d1/": 4096}}
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+	assert.EqualValues(t, 4096, res.BytesReclaimed,
+		"reconcile records an orphan with 0 bytes and the reclaim records a whole site with none at all, "+
+			"so a purge that trusts the row reports 0 for every prefix those two paths created")
+}
+
+func TestPurge_KeepsTheRecordedSizeWhenTheRowHasOne(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d1", TrashedAt: testNow.Add(-8 * 24 * time.Hour), Bytes: 100},
+	}}
+	sizer := &fakeSizer{bytes: map[string]int64{"_trash/www/d1/": 4096}}
+	p := newPurge(reaper, &fakeDeleter{})
+	p.Sizer = sizer
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err)
+	assert.EqualValues(t, 100, res.BytesReclaimed,
+		"the row was measured at tombstone time against the live prefix; re-listing the trash cannot improve on it")
+	assert.Empty(t, sizer.prefixes, "a row that carries a size costs no extra listing")
+}
+
+func TestPurge_StillPurgesWhenTheSizeIsUnreadable(t *testing.T) {
+	reaper := &fakeReaper{tombstones: []Tombstone{
+		{Site: "www", ID: "d1", TrashedAt: testNow.Add(-8 * 24 * time.Hour), Bytes: 0},
+	}}
+	p := newPurge(reaper, &fakeDeleter{})
+	p.Sizer = &fakeSizer{err: errors.New("r2 down")}
+
+	res, err := p.Run(context.Background(), false)
+	require.NoError(t, err, "the bytes are a report; an unreadable size must never hold trash on the bill")
+	assert.Equal(t, []string{"www/d1"}, res.Purged)
+	assert.Zero(t, res.BytesReclaimed)
 }

@@ -34,6 +34,7 @@ type WorkflowDef struct {
 	EventTriggers    []string
 	Cron             []string
 	ExecutionTimeout time.Duration
+	Retries          int
 	Handler          Handler
 }
 

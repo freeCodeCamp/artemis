@@ -27,6 +27,10 @@ type Deleter interface {
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
 }
 
+type PrefixSizer interface {
+	PrefixBytes(ctx context.Context, prefix string) (int64, error)
+}
+
 type SiteLocker interface {
 	WithSiteLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error
 }
@@ -44,6 +48,20 @@ type TombstonePurge struct {
 	Locker    SiteLocker
 	Audit     PurgeAuditor
 	BlastCap  int
+	Sizer     PrefixSizer
+}
+
+func (p *TombstonePurge) measured(ctx context.Context, t Tombstone) int64 {
+	if t.Bytes > 0 || p.Sizer == nil {
+		return t.Bytes
+	}
+	n, err := p.Sizer.PrefixBytes(ctx, p.trashPrefix(t))
+	if err != nil {
+		slog.WarnContext(ctx, "gc.tombstone-purge.bytes_unmeasured", "site", t.Site, "deploy_id", t.ID, "err", err,
+			"detail", "the row carries no size and the trash prefix could not be listed, so BytesReclaimed under-reports this prefix")
+		return 0
+	}
+	return n
 }
 
 func (p *TombstonePurge) withLock(ctx context.Context, site sitekey.Dirname, fn func(context.Context) error) error {
@@ -108,6 +126,9 @@ func (p *TombstonePurge) Run(ctx context.Context, dryRun bool) (PurgeResult, err
 					return fmt.Errorf("tombstone-purge: list %s: %w", label, err)
 				}
 				covered = all
+			}
+			for i := range covered {
+				covered[i].Bytes = p.measured(lockCtx, covered[i])
 			}
 			if _, err := p.Deleter.DeletePrefix(lockCtx, p.trashPrefix(t)); err != nil {
 				return fmt.Errorf("tombstone-purge: delete %s: %w", label, err)

@@ -62,6 +62,10 @@ func (l *countingLister) ListPrefix(ctx context.Context, prefix string) ([]strin
 	return keys, err
 }
 
+func (l *countingLister) PrefixBytes(ctx context.Context, prefix string) (int64, error) {
+	return l.inner.PrefixBytes(ctx, prefix)
+}
+
 type countingStore struct {
 	gc.ReconcileStore
 	deploys int

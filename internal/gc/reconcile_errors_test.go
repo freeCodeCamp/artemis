@@ -21,6 +21,10 @@ func (l *errLister) ListPrefix(_ context.Context, prefix string) ([]string, erro
 	return keysUnder(l.keys, prefix), l.err
 }
 
+func (l *errLister) PrefixBytes(_ context.Context, prefix string) (int64, error) {
+	return int64(len(keysUnder(l.keys, prefix))), l.err
+}
+
 type deepErrStore struct {
 	deploys      map[string][]Deploy
 	aliases      map[string]struct{}

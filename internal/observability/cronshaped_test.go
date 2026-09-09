@@ -33,3 +33,10 @@ func TestCronShapedOps_CoverTheEventTriggeredReclaim(t *testing.T) {
 		"up to 50 event-triggered reclaim runs a night share one op; the bypass keeps every failure visible instead "+
 			"of collapsing the batch into one rate-limited event")
 }
+
+func TestCronShapedOps_CoverThePendingSweep(t *testing.T) {
+	t.Parallel()
+	assert.True(t, cronShapedOps["pending.sweep"],
+		"the pending sweep is a sub-job of the 03:00 cron, so its 24h gap sits on the same escalation "+
+			"cooldown as every sibling; without the bypass a whole night is suppressed")
+}

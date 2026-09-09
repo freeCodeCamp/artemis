@@ -206,13 +206,13 @@ func aliasPointers(ctx context.Context, tx pgx.Tx, site sitekey.Dirname) (produc
 	return production, preview, nil
 }
 
-func (s *RegistryStore) ReclaimableReservations(ctx context.Context, before time.Time, claimTTL time.Duration, limit int) ([]registry.Reservation, error) {
+func (s *RegistryStore) ReclaimableReservations(ctx context.Context, claimTTL time.Duration, limit int) ([]registry.Reservation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT slug, reserved_at, reserved_until, reserved_by, prev_production, prev_preview
-		 FROM sites WHERE state = $1 AND reserved_until < $2
-		   AND (reclaim_started_at IS NULL OR reclaim_started_at < $2 - make_interval(secs => $3))
-		 ORDER BY reserved_until LIMIT $4`,
-		registry.StateReserved, before.UTC(), claimTTL.Seconds(), limit)
+		 FROM sites WHERE state = $1 AND reserved_until < now()
+		   AND (reclaim_started_at IS NULL OR reclaim_started_at < now() - make_interval(secs => $2))
+		 ORDER BY reserved_until LIMIT $3`,
+		registry.StateReserved, claimTTL.Seconds(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("pg reclaimable reservations: %w", err)
 	}

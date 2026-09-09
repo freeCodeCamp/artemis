@@ -12,10 +12,13 @@ package r2
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -504,17 +507,29 @@ func (c *Client) VerifyDeployComplete(ctx context.Context, prefix string, expect
 //
 // For deterministic output (tests, replays) use NewDeployIDWithClock.
 func NewDeployID(commitSHA string) string {
-	return NewDeployIDWithClock(time.Now, commitSHA)
+	return newDeployID(time.Now, randomDeploySuffix, commitSHA)
 }
 
 // NewDeployIDWithClock is NewDeployID with an injectable clock. Pass
 // time.Now in production; pass a fixed-time func in tests.
 func NewDeployIDWithClock(now func() time.Time, commitSHA string) string {
+	return newDeployID(now, randomDeploySuffix, commitSHA)
+}
+
+func newDeployID(now func() time.Time, suffix func() string, commitSHA string) string {
 	short := commitSHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	return fmt.Sprintf("%s-%s", now().UTC().Format("20060102-150405"), short)
+	return fmt.Sprintf("%s-%s-%s", now().UTC().Format("20060102-150405"), short, suffix())
+}
+
+func randomDeploySuffix() string {
+	var b [3]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano()%0xffffff, 16)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // ErrNotFound is returned by GetAlias when the alias key doesn't exist.

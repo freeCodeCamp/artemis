@@ -100,7 +100,7 @@ func TestWiring_ReservationsAndTombstonesArriveTogether(t *testing.T) {
 // registry writer that also expires and releases reservations.
 type reservingWriter struct{ registry.Writer }
 
-func (reservingWriter) ReclaimableReservations(context.Context, time.Time, time.Duration, int) ([]registry.Reservation, error) {
+func (reservingWriter) ReclaimableReservations(context.Context, time.Duration, int) ([]registry.Reservation, error) {
 	return nil, nil
 }
 
