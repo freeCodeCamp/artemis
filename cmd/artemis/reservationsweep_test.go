@@ -19,11 +19,10 @@ import (
 )
 
 type scriptedReclaimables struct {
-	rows   []registry.Reservation
-	before time.Time
-	ttl    time.Duration
-	limit  int
-	err    error
+	rows  []registry.Reservation
+	ttl   time.Duration
+	limit int
+	err   error
 }
 
 func (s *scriptedReclaimables) ReclaimableReservations(_ context.Context, ttl time.Duration, limit int) ([]registry.Reservation, error) {
