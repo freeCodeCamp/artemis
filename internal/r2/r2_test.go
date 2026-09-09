@@ -611,21 +611,15 @@ func TestGetAlias_NotFound(t *testing.T) {
 
 func TestDeployIDFormat_TimestampPlusShortSha(t *testing.T) {
 	id := NewDeployID("abc1234567890")
-	// Format: <yyyymmdd-hhmmss>-<sha7>-<entropy>
-	assert.Regexp(t, `^\d{8}-\d{6}-abc1234-[0-9a-f]{6}$`, id)
+	assert.Regexp(t, `^\d{8}-\d{6}-abc1234$`, id)
 }
 
-func TestNewDeployID_DoesNotCollideWithinOneSecond(t *testing.T) {
-	fixed := func() time.Time { return time.Date(2026, 4, 20, 14, 15, 22, 0, time.UTC) }
-	seen := make(map[string]struct{}, 500)
-	for range 500 {
-		id := NewDeployIDWithClock(fixed, "deadbeef0000")
-		if _, dup := seen[id]; dup {
-			t.Fatalf("two deploys of the same commit in the same second produced the same id %q, "+
-				"so the second would write into the first deploy's prefix", id)
-		}
-		seen[id] = struct{}{}
-	}
+func TestNewDeployID_KeepsTheShaAsTheWholeThirdSegment(t *testing.T) {
+	id := NewDeployIDWithClock(func() time.Time { return time.Date(2026, 4, 20, 14, 15, 22, 0, time.UTC) },
+		"abc1234567890")
+	assert.Equal(t, "abc1234", strings.TrimPrefix(id, "20260420-141522-"),
+		"universe-cli src/deploy/stamp.ts:38 captures everything after the second dash and compares it "+
+			"with git.hash via startsWith, so an extra segment silently disables preview reuse")
 }
 
 func TestNewDeployID_StaysInsideTheHandlerPattern(t *testing.T) {
@@ -642,7 +636,7 @@ func TestNewDeployIDWithClock_Deterministic(t *testing.T) {
 		return time.Date(2026, 4, 20, 14, 15, 22, 0, time.UTC)
 	}
 	id := NewDeployIDWithClock(fixed, "deadbeef0000")
-	assert.Regexp(t, `^20260420-141522-deadbee-[0-9a-f]{6}$`, id)
+	assert.Equal(t, "20260420-141522-deadbee", id)
 }
 
 // TestHasPrefix_TrueWhenObjectsExist — B6: existence probe must return

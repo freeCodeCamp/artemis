@@ -12,13 +12,10 @@ package r2
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -505,31 +502,23 @@ func (c *Client) VerifyDeployComplete(ctx context.Context, prefix string, expect
 // NewDeployID builds a deploy id of the form <yyyymmdd-hhmmss>-<sha7>
 // using time.Now() as the clock source.
 //
+// The shape is a cross-repo contract: ADR-016 line 162 defines it, and
+// universe-cli src/deploy/stamp.ts:38 parses the third segment as the sha.
+// Do not add a segment here without changing both.
+//
 // For deterministic output (tests, replays) use NewDeployIDWithClock.
 func NewDeployID(commitSHA string) string {
-	return newDeployID(time.Now, randomDeploySuffix, commitSHA)
+	return NewDeployIDWithClock(time.Now, commitSHA)
 }
 
 // NewDeployIDWithClock is NewDeployID with an injectable clock. Pass
 // time.Now in production; pass a fixed-time func in tests.
 func NewDeployIDWithClock(now func() time.Time, commitSHA string) string {
-	return newDeployID(now, randomDeploySuffix, commitSHA)
-}
-
-func newDeployID(now func() time.Time, suffix func() string, commitSHA string) string {
 	short := commitSHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	return fmt.Sprintf("%s-%s-%s", now().UTC().Format("20060102-150405"), short, suffix())
-}
-
-func randomDeploySuffix() string {
-	var b [3]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano()%0xffffff, 16)
-	}
-	return hex.EncodeToString(b[:])
+	return fmt.Sprintf("%s-%s", now().UTC().Format("20060102-150405"), short)
 }
 
 // ErrNotFound is returned by GetAlias when the alias key doesn't exist.
