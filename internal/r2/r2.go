@@ -21,6 +21,7 @@ import (
 	"time"
 
 	awsv2 "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -31,6 +32,11 @@ import (
 )
 
 const defaultProbeTimeout = 3 * time.Second
+
+// aws/retry/standard.go:44-75
+const r2ThrottleErrorCode = "ServiceUnavailable"
+
+const deletePrefixMaxErrs = 8
 
 const probeNoMatchPrefix = "_artemis_readyz_probe_no_match"
 
@@ -45,9 +51,10 @@ type Config struct {
 
 // Client is the narrowed wrapper over s3.Client used by Artemis.
 type Client struct {
-	s3        *s3.Client
-	bucket    string
-	probeHTTP *awshttp.BuildableClient
+	s3            *s3.Client
+	bucket        string
+	probeHTTP     *awshttp.BuildableClient
+	deleteRetryer awsv2.Retryer
 }
 
 // New returns a configured client. Uses path-style addressing because R2
@@ -77,9 +84,10 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	})
 
 	return &Client{
-		s3:        cli,
-		bucket:    cfg.Bucket,
-		probeHTTP: awshttp.NewBuildableClient().WithTimeout(defaultProbeTimeout),
+		s3:            cli,
+		bucket:        cfg.Bucket,
+		probeHTTP:     awshttp.NewBuildableClient().WithTimeout(defaultProbeTimeout),
+		deleteRetryer: retry.AddWithErrorCodes(cli.Options().Retryer, r2ThrottleErrorCode),
 	}, nil
 }
 
@@ -282,7 +290,17 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 const deleteBatchMax = 1000
 
 func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
-	var deleted int
+	var deleted, batchFailures int
+	var errs []error
+	result := func(extra error) (int, error) {
+		if omitted := batchFailures - len(errs); omitted > 0 {
+			errs = append(errs, fmt.Errorf("r2 deleteprefix %s: %d further batch errors omitted", prefix, omitted))
+		}
+		if extra != nil {
+			errs = append(errs, extra)
+		}
+		return deleted, errors.Join(errs...)
+	}
 	var token *string
 	for {
 		page, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -291,7 +309,7 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 			ContinuationToken: token,
 		})
 		if err != nil {
-			return deleted, fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err)
+			return result(fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err))
 		}
 		ids := make([]s3types.ObjectIdentifier, 0, len(page.Contents))
 		for _, obj := range page.Contents {
@@ -301,20 +319,23 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 		}
 		for start := 0; start < len(ids); start += deleteBatchMax {
 			end := min(start+deleteBatchMax, len(ids))
-			n, err := c.deleteBatch(ctx, ids[start:end])
+			n, batchErr := c.deleteBatch(ctx, ids[start:end])
 			deleted += n
-			if err != nil {
-				return deleted, err
+			if batchErr != nil {
+				batchFailures++
+				if len(errs) < deletePrefixMaxErrs {
+					errs = append(errs, batchErr)
+				}
 			}
 		}
 		if token, err = nextListPage(page); err != nil {
-			return deleted, fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err)
+			return result(fmt.Errorf("r2 deleteprefix list %s: %w", prefix, err))
 		}
 		if token == nil {
 			break
 		}
 	}
-	return deleted, nil
+	return result(nil)
 }
 
 func encodeCopySource(bucket, key string) string {
@@ -332,6 +353,8 @@ func (c *Client) deleteBatch(ctx context.Context, ids []s3types.ObjectIdentifier
 	out, err := c.s3.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 		Bucket: awsv2.String(c.bucket),
 		Delete: &s3types.Delete{Objects: ids, Quiet: awsv2.Bool(true)},
+	}, func(o *s3.Options) {
+		o.Retryer = c.deleteRetryer
 	})
 	if err != nil {
 		return 0, fmt.Errorf("r2 deleteobjects: %w", err)

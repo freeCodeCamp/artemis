@@ -54,15 +54,18 @@ type fakeS3 struct {
 	listCalls int
 	hangList  bool
 
-	failList          bool
-	failDeleteObjects bool
-	deleteFailKeys    map[string]struct{}
-	failDeleteKeys    map[string]struct{}
-	failHeadKeys      map[string]struct{}
-	failCopyKeys      map[string]struct{}
-	denyCopyKeys      map[string]struct{}
-	failGetKeys       map[string]struct{}
-	truncateGetKeys   map[string]struct{}
+	failList              bool
+	failDeleteObjects     bool
+	throttleDeleteObjects int
+	throttlePutObject     int
+	putCalls              int
+	deleteFailKeys        map[string]struct{}
+	failDeleteKeys        map[string]struct{}
+	failHeadKeys          map[string]struct{}
+	failCopyKeys          map[string]struct{}
+	denyCopyKeys          map[string]struct{}
+	failGetKeys           map[string]struct{}
+	truncateGetKeys       map[string]struct{}
 
 	onObjectWrite func()
 }
@@ -118,6 +121,13 @@ func (f *fakeS3) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
+		f.putCalls++
+		if f.throttlePutObject > 0 {
+			f.throttlePutObject--
+			f.mu.Unlock()
+			writeS3Error(w, http.StatusTooManyRequests, "ServiceUnavailable", "Reduce your concurrent request rate for the same object.")
+			return
+		}
 		f.objects[f.bucket+"/"+key] = body
 		f.lastPutContentLength = r.ContentLength
 		f.lastPutTransferEncoding = ""
@@ -373,6 +383,12 @@ func (f *fakeS3) deleteObjects(w http.ResponseWriter, r *http.Request) {
 	if f.failDeleteObjects {
 		f.mu.Unlock()
 		writeS3Error(w, http.StatusInternalServerError, "InternalError", "deleteobjects failed")
+		return
+	}
+	if f.throttleDeleteObjects > 0 {
+		f.throttleDeleteObjects--
+		f.mu.Unlock()
+		writeS3Error(w, http.StatusTooManyRequests, "ServiceUnavailable", "Reduce your concurrent request rate for the same object.")
 		return
 	}
 	var deleted []string
@@ -1168,4 +1184,87 @@ func TestListPrefix_StopsWhenATruncatedPageHasNoToken(t *testing.T) {
 	calls := f.listCalls
 	f.mu.Unlock()
 	assert.Equal(t, 1, calls, "the loop must stop on the first such page instead of re-reading it until the deadline")
+}
+
+func TestDeletePrefix_RetriesR2ThrottleOnDeleteObjects(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.throttleDeleteObjects = 1
+	c := newClient(t, fake)
+	for _, k := range []string{
+		"www/deploys/d1/index.html",
+		"www/deploys/d1/app.js",
+	} {
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "www/deploys/d1/")
+	require.NoError(t, err,
+		"R2 answers 429/ServiceUnavailable where AWS answers 503/SlowDown, and the SDK default retryer classifies neither the status nor the code as retryable")
+	assert.Equal(t, 2, n)
+
+	fake.mu.Lock()
+	calls := fake.deleteObjectsCalls
+	fake.mu.Unlock()
+	assert.Greater(t, calls, 1, "the throttled batch must be retried, not surfaced as a purge failure")
+}
+
+func TestDeletePrefix_ContinuesToLaterPagesAfterAFailedBatch(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.pageSize = 2
+	fake.deleteFailKeys = map[string]struct{}{
+		"s/deploys/d/f00.html": {},
+		"s/deploys/d/f01.html": {},
+	}
+	c := newClient(t, fake)
+	for i := 0; i < 5; i++ {
+		require.NoError(t, c.PutObject(context.Background(),
+			fmtKey("s/deploys/d/f%02d.html", i), bytes.NewReader([]byte("z")), "text/plain", 1))
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "s/deploys/d/")
+	require.Error(t, err, "the failed batch must still surface so the tombstone row is kept")
+	assert.Equal(t, 3, n, "the three keys on the later pages must be deleted")
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for _, k := range []string{"s/deploys/d/f02.html", "s/deploys/d/f03.html", "s/deploys/d/f04.html"} {
+		_, present := fake.objects["b/"+k]
+		assert.False(t, present, "one bad batch must not strand the rest of the prefix: "+k)
+	}
+}
+
+func TestPutObject_DoesNotRetryTheR2Throttle(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.throttlePutObject = 1
+	c := newClient(t, fake)
+
+	err := c.PutObject(context.Background(), "www/deploys/d1/index.html",
+		bytes.NewReader([]byte("z")), "text/plain", 1)
+	require.Error(t, err,
+		"the ServiceUnavailable retry belongs to DeleteObjects alone; a client-wide rule would make a throttled upload fail on the SDK stream rewind instead")
+
+	fake.mu.Lock()
+	calls := fake.putCalls
+	fake.mu.Unlock()
+	assert.Equal(t, 1, calls, "PutObject must still make exactly one attempt on a 429")
+}
+
+func TestDeletePrefix_BoundsTheJoinedBatchErrors(t *testing.T) {
+	fake := newFakeS3(t, "b")
+	fake.pageSize = 1
+	fake.deleteFailKeys = map[string]struct{}{}
+	c := newClient(t, fake)
+	for i := 0; i < 12; i++ {
+		k := fmtKey("s/deploys/d/f%02d.html", i)
+		require.NoError(t, c.PutObject(context.Background(), k, bytes.NewReader([]byte("z")), "text/plain", 1))
+		fake.deleteFailKeys[k] = struct{}{}
+	}
+
+	n, err := c.DeletePrefix(context.Background(), "s/deploys/d/")
+	require.Error(t, err)
+	assert.Equal(t, 0, n)
+	assert.Contains(t, err.Error(), "4 further batch errors omitted",
+		"12 failed batches must not join into 12 error strings shipped to Sentry")
+	assert.Equal(t, 8, strings.Count(err.Error(), "r2 deleteobjects: 1 of 1 failed"),
+		"the first deletePrefixMaxErrs errors are kept verbatim")
 }
