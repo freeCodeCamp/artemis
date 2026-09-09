@@ -63,7 +63,7 @@ func TestScheduleReclaims_EmitsOneEventPerReclaimableRowInOneBatch(t *testing.T)
 	}}
 	emit := &recordingEmitter{}
 
-	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, fixedNow, false)
+	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, n)
@@ -90,7 +90,7 @@ func TestScheduleReclaims_EmitsAtMostTheSweepLimit(t *testing.T) {
 	src := &scriptedReclaimables{rows: rows}
 	emit := &recordingEmitter{}
 
-	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, fixedNow, false)
+	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, reservationSweepLimit, n,
@@ -107,7 +107,7 @@ func TestScheduleReclaims_DryRunEmitsNothing(t *testing.T) {
 	src := &scriptedReclaimables{rows: []registry.Reservation{{Slug: "old-one"}}}
 	emit := &recordingEmitter{}
 
-	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, fixedNow, true)
+	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, true)
 
 	require.NoError(t, err)
 	assert.Zero(t, n)
@@ -117,7 +117,7 @@ func TestScheduleReclaims_DryRunEmitsNothing(t *testing.T) {
 func TestScheduleReclaims_NothingToEmitTouchesNothing(t *testing.T) {
 	emit := &recordingEmitter{}
 
-	n, err := scheduleReclaims(context.Background(), &scriptedReclaimables{}, emit, testDirname, fixedNow, false)
+	n, err := scheduleReclaims(context.Background(), &scriptedReclaimables{}, emit, testDirname, false)
 
 	require.NoError(t, err)
 	assert.Zero(t, n)
@@ -128,14 +128,14 @@ func TestScheduleReclaims_SurfacesAnEmitFailure(t *testing.T) {
 	src := &scriptedReclaimables{rows: []registry.Reservation{{Slug: "old-one"}}}
 	emit := &recordingEmitter{err: errors.New("outbox down")}
 
-	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, fixedNow, false)
+	n, err := scheduleReclaims(context.Background(), src, emit, testDirname, false)
 
 	require.Error(t, err, "a batch that never reached the outbox must surface, never be swallowed")
 	assert.Zero(t, n)
 }
 
 func TestScheduleReclaims_NoStoreIsANoOp(t *testing.T) {
-	n, err := scheduleReclaims(context.Background(), nil, nil, testDirname, fixedNow, false)
+	n, err := scheduleReclaims(context.Background(), nil, nil, testDirname, false)
 	require.NoError(t, err)
 	assert.Zero(t, n)
 }
@@ -143,7 +143,7 @@ func TestScheduleReclaims_NoStoreIsANoOp(t *testing.T) {
 func TestScheduleReclaims_LiveRunWithoutADirnameIsAWiringError(t *testing.T) {
 	src := &scriptedReclaimables{rows: []registry.Reservation{{Slug: "old-one"}}}
 
-	_, err := scheduleReclaims(context.Background(), src, &recordingEmitter{}, nil, fixedNow, false)
+	_, err := scheduleReclaims(context.Background(), src, &recordingEmitter{}, nil, false)
 
 	require.Error(t, err, "an event without a site names no prefix; the step would fail every run")
 }

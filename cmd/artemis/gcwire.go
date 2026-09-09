@@ -280,13 +280,20 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 	}
 	resv, _ := writer.(reservationWiring)
 
+	var r2Sizer gc.PrefixSizer
+	var r2Lister prefixLister
+	if r2c != nil {
+		r2Sizer = r2c
+		r2Lister = r2c
+	}
+
 	return &gcWiring{
 		Repo:         repo,
 		Reservations: resv,
 		Lifecycle:    lifecycle,
 		Reclaim: reclaimDeps{
 			Mover:     r2c,
-			Lister:    r2c,
+			Lister:    r2Lister,
 			Tombstone: tombstoneRecorder,
 			Locker:    gcLocker,
 			Expired:   expiredClaimChecker(resv),
@@ -337,7 +344,7 @@ func newGCWiring(cfg *config.Config, repo *pg.Repo, r2c *r2.Client, writer regis
 			BlastCap:  cfg.Cleanup.BlastCap,
 			Now:       time.Now,
 			Locker:    siteLocker,
-			Sizer:     r2c,
+			Sizer:     r2Sizer,
 			Audit:     gcPurgeAuditor{repo: auditRepo, toSlug: toSlug},
 		},
 	}, nil

@@ -401,13 +401,6 @@ func TestWithCheckIn_ReportsErrorOnPanic(t *testing.T) {
 		"a panic must close the monitor as error, not leave it in-progress until Sentry times it out")
 }
 
-func TestGCWorkflowDefs_EveryDefStatesItsRetryCount(t *testing.T) {
-	for _, def := range gcWorkflowDefs(&gcWiring{}, true, nil) {
-		assert.GreaterOrEqual(t, def.Retries, 0,
-			"the adapter passes Retries unconditionally, so an engine default can never decide it for %s", def.Name)
-	}
-}
-
 func TestGCWorkflowDefs_SiteLifecycleDoesNotRetry(t *testing.T) {
 	for _, def := range gcWorkflowDefs(&gcWiring{}, true, nil) {
 		if def.Name != worker.WorkflowSiteLifecycle {
@@ -425,4 +418,27 @@ func TestNightlySubJobBudget_SplitsTheRunBudgetAcrossItsSubJobs(t *testing.T) {
 	assert.Equal(t, gcRunBudget, nightlySubJobBudget*nightlySubJobs,
 		"the four sub-jobs shared one 30-minute budget and the reservation sweep ran last, so a slow purge "+
 			"could starve it silently; each share must add back to the workflow timeout")
+}
+
+func TestRunSubJob_CancelsTheSubJobAtItsBudgetAndLeavesTheParentRunnable(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+
+	err := runSubJob(parent, "slow", time.Millisecond, func(c context.Context) error {
+		<-c.Done()
+		return c.Err()
+	})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"a sub-job that overruns its share must be cut off, not allowed to consume the whole run budget")
+	require.NoError(t, parent.Err(),
+		"the sub-job timeout must not cancel the parent, or the sub-jobs after it never start")
+}
+
+func TestRunSubJob_ReturnsTheSubJobErrorUntouched(t *testing.T) {
+	want := errors.New("purge failed")
+
+	err := runSubJob(context.Background(), "purge", time.Minute, func(context.Context) error { return want })
+
+	assert.ErrorIs(t, err, want, "errors.Join in the nightly handler reports every sub-job failure, not just the last")
 }

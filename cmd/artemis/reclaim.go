@@ -14,12 +14,10 @@ import (
 )
 
 const (
-	opSiteReclaim      = "site.reclaim"
-	reclaimActor       = "system:gc"
-	reclaimClaimTTL    = 12 * time.Hour
-	reclaimParallelism = 4
-	// The claim holds for reclaimClaimTTL, so an engine-side retry inside that
-	// window reaches !won and does nothing. The reservation sweep is the retry.
+	opSiteReclaim        = "site.reclaim"
+	reclaimActor         = "system:gc"
+	reclaimClaimTTL      = 12 * time.Hour
+	reclaimParallelism   = 4
 	siteLifecycleRetries = 0
 	reclaimSiteObjectCap = 50000
 )

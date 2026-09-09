@@ -185,3 +185,19 @@ func TestDeployFinalize_AllowsTheFirstFinalize(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
+
+func TestDeployFinalize_RefusesWhenTheFenceCannotBeRead(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, _ := newFinalizeHandlers(t, store)
+	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, err: errors.New("valkey unreachable")}
+
+	w := callFinalize(t, h, jwt, deployID)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "fence_unavailable")
+	_, aliasErr := store.GetAlias(context.Background(), "www/preview")
+	assert.Error(t, aliasErr,
+		"the read runs before any commit, so answering on a cache fault reinstates the alias overwrite the fence prevents")
+}

@@ -200,14 +200,8 @@ func gcWorkflowDefs(gcw *gcWiring, dryRun bool, sweepDrift driftSweeper) []worke
 			Handler: withCheckIn(worker.WorkflowTombstonePurge, cronTombstonePurge, observeWorkflow(worker.WorkflowTombstonePurge, func(ctx context.Context, _ map[string]any) error {
 				var errs []error
 				run := func(name string, fn func(context.Context) error) {
-					subCtx, cancel := context.WithTimeout(ctx, nightlySubJobBudget)
-					defer cancel()
-					if err := fn(subCtx); err != nil {
+					if err := runSubJob(ctx, name, nightlySubJobBudget, fn); err != nil {
 						errs = append(errs, err)
-					}
-					if subCtx.Err() != nil && ctx.Err() == nil {
-						slog.WarnContext(ctx, "gc.nightly.subjob_budget_exhausted", "subjob", name, "budget", nightlySubJobBudget,
-							"detail", "this sub-job used its whole share; the sub-jobs after it keep theirs")
 					}
 				}
 				run("tombstone.purge", func(c context.Context) error {
@@ -301,4 +295,15 @@ func purgeOutbox(ctx context.Context, p outboxPurger, retention time.Duration, d
 			fmt.Errorf("outbox purge hit its %d-row ceiling: a backlog survived the run", outboxPurgeBatch))
 	}
 	return nil
+}
+
+func runSubJob(ctx context.Context, name string, budget time.Duration, fn func(context.Context) error) error {
+	subCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	err := fn(subCtx)
+	if subCtx.Err() != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "gc.nightly.subjob_budget_exhausted", "subjob", name, "budget", budget,
+			"detail", "this sub-job used its whole share; the sub-jobs after it keep theirs")
+	}
+	return err
 }

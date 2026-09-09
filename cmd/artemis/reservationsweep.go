@@ -43,7 +43,7 @@ type reservationWiring interface {
 }
 
 func scheduleReclaims(ctx context.Context, src reclaimableSource, emit lifecycleEmitter,
-	dirname func(sitekey.Slug) sitekey.Dirname, now func() time.Time, dryRun bool,
+	dirname func(sitekey.Slug) sitekey.Dirname, dryRun bool,
 ) (int, error) {
 	if src == nil || emit == nil {
 		slog.WarnContext(ctx, "reservation.sweep.unwired",
@@ -98,7 +98,7 @@ func warnIfSweepCapped(ctx context.Context, n int) {
 func runReservationSweep(ctx context.Context, src reclaimableSource, emit lifecycleEmitter,
 	dirname func(sitekey.Slug) sitekey.Dirname, now func() time.Time, dryRun bool,
 ) error {
-	n, err := scheduleReclaims(ctx, src, emit, dirname, now, dryRun)
+	n, err := scheduleReclaims(ctx, src, emit, dirname, dryRun)
 	if n > 0 {
 		slog.InfoContext(ctx, "reservation.sweep.done", "emitted", n)
 	}
