@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/telemetry"
 )
 
 type scriptedWriteProber struct {
@@ -82,4 +85,19 @@ func TestRunWriteProbeLoop_ProbesOnTheTick(t *testing.T) {
 		return p.calls > 0
 	}, 5*time.Second, time.Millisecond,
 		"a loop that ticks without probing burns the interval and still reports nothing when the write grant is gone")
+}
+
+func TestRunWriteProbe_LogsSuccessAtInfo(t *testing.T) {
+	rec := &capturingHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewLogHandler(rec)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	runWriteProbe(context.Background(), &scriptedWriteProber{})
+
+	lvl, found := rec.levelOf("r2.write_probe.ok")
+	require.True(t, found, "the probe logged no success event at all")
+	assert.Equal(t, slog.LevelInfo, lvl,
+		"production runs LOG_LEVEL=info, so a success at Debug never reaches stdout and absence of "+
+			"the failure event cannot be told apart from a dead ticker goroutine")
 }

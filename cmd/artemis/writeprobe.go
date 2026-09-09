@@ -43,5 +43,5 @@ func runWriteProbe(ctx context.Context, probe writeProber) {
 		captureBackground(opWriteProbe, err)
 		return
 	}
-	slog.DebugContext(ctx, "r2.write_probe.ok", "key", writeProbeKey)
+	slog.InfoContext(ctx, "r2.write_probe.ok", "key", writeProbeKey)
 }
