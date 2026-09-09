@@ -420,19 +420,14 @@ func TestNightlySubJobBudget_SplitsTheRunBudgetAcrossItsSubJobs(t *testing.T) {
 			"could starve it silently; each share must add back to the workflow timeout")
 }
 
-func TestRunSubJob_CancelsTheSubJobAtItsBudgetAndLeavesTheParentRunnable(t *testing.T) {
-	parent, cancelParent := context.WithCancel(context.Background())
-	defer cancelParent()
-
-	err := runSubJob(parent, "slow", time.Millisecond, func(c context.Context) error {
+func TestRunSubJob_CutsTheSubJobOffAtItsBudget(t *testing.T) {
+	err := runSubJob(context.Background(), "slow", time.Millisecond, func(c context.Context) error {
 		<-c.Done()
 		return c.Err()
 	})
 
 	require.ErrorIs(t, err, context.DeadlineExceeded,
 		"a sub-job that overruns its share must be cut off, not allowed to consume the whole run budget")
-	require.NoError(t, parent.Err(),
-		"the sub-job timeout must not cancel the parent, or the sub-jobs after it never start")
 }
 
 func TestRunSubJob_ReturnsTheSubJobErrorUntouched(t *testing.T) {

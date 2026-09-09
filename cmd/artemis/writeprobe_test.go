@@ -69,3 +69,17 @@ func TestRunWriteProbeLoop_StopsWithItsContext(t *testing.T) {
 		require.Fail(t, "the probe loop outlived its context; a leaked goroutine writes to r2 after shutdown")
 	}
 }
+
+func TestRunWriteProbeLoop_ProbesOnTheTick(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &scriptedWriteProber{}
+	go runWriteProbeLoop(ctx, p, time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.calls > 0
+	}, 5*time.Second, time.Millisecond,
+		"a loop that ticks without probing burns the interval and still reports nothing when the write grant is gone")
+}
