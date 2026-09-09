@@ -2,6 +2,26 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.12.0](https://github.com/freeCodeCamp/artemis/compare/v1.11.0...v1.12.0) (2026-09-09)
+
+
+### Features
+
+* **probe:** add a periodic r2 write probe ([ad8f8d0](https://github.com/freeCodeCamp/artemis/commit/ad8f8d041536005e7b934a93d11519ba941d9146))
+
+
+### Bug Fixes
+
+* **ci:** make the flake temp log portable ([c3a95a0](https://github.com/freeCodeCamp/artemis/commit/c3a95a0bf10fa6db952816dcc776339dcc6a7ec4))
+* close the review findings on the fix pass ([892ad4e](https://github.com/freeCodeCamp/artemis/commit/892ad4e5fb3036d8ab3648060af9bff5c5f5d9b0))
+* close twelve triaged defects ([ad1f9a3](https://github.com/freeCodeCamp/artemis/commit/ad1f9a3e5ef75f59299213816644ec4486ee667c))
+* **r2:** retry the R2 delete throttle and drain the whole prefix ([62210a0](https://github.com/freeCodeCamp/artemis/commit/62210a06c300e6f3ee1cde27d6f97d2a177be4f4))
+
+
+### Reverts
+
+* **r2:** keep the two-segment deploy id ([913e2b1](https://github.com/freeCodeCamp/artemis/commit/913e2b1389b2fe8298655499f362682b02c08dfa))
+
 ## [1.11.0](https://github.com/freeCodeCamp/artemis/compare/v1.10.2...v1.11.0) (2026-09-04)
 
 
