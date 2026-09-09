@@ -529,8 +529,16 @@ func trimPrefix(s, p string) string {
 
 // newTestHandlers wires a Handlers struct with the fakes plus sensible
 // alias/prefix templates.
+func resetUpstreamReports(t *testing.T) {
+	t.Helper()
+	upstreamReports.mu.Lock()
+	defer upstreamReports.mu.Unlock()
+	upstreamReports.last = map[string]time.Time{}
+}
+
 func newTestHandlers(t *testing.T, gh *fakeGH, st *fakeSites, store R2Store) (*Handlers, *fakeJWT) {
 	t.Helper()
+	resetUpstreamReports(t)
 	jwt := newFakeJWT(t)
 	reg := newFakeRegistry()
 	for slug, teams := range st.bySite {
