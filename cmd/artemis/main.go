@@ -174,6 +174,9 @@ func runWith(rootCtx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("init r2: %w", err)
 	}
 
+	go runWriteProbeLoop(rootCtx, r2Client, writeProbeInterval)
+	slog.Info("r2.write_probe.started", "interval", writeProbeInterval, "key", writeProbeKey)
+
 	githubTeamCache, teamCacheCleanup, err := openTeamCache(rootCtx, cfg)
 	if err != nil {
 		return fmt.Errorf("open team cache: %w", err)
