@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func TestRepo_BeginDeploy_IsInvisibleToEveryActiveRead(t *testing.T) {
@@ -14,7 +16,7 @@ func TestRepo_BeginDeploy_IsInvisibleToEveryActiveRead(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "d1", t0))
+	mustBegin(t, repo, ctx, "www", "d1", t0)
 
 	deploys, err := repo.DeploysForSite(ctx, "www")
 	require.NoError(t, err)
@@ -32,7 +34,7 @@ func TestRepo_BeginDeploy_IsPromotedByFinalize(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "d1", t0))
+	mustBegin(t, repo, ctx, "www", "d1", t0)
 	require.NoError(t, repo.FinalizeAtomic(ctx, "www", "d1", "production", t0, 4096))
 
 	deploys, err := repo.DeploysForSite(ctx, "www")
@@ -52,9 +54,9 @@ func TestRepo_BeginDeploy_IsIdempotentAndNeverDemotesALiveDeploy(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "d1", t0))
+	mustBegin(t, repo, ctx, "www", "d1", t0)
 	require.NoError(t, repo.FinalizeAtomic(ctx, "www", "d1", "production", t0, 4096))
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "d1", t0))
+	mustBegin(t, repo, ctx, "www", "d1", t0)
 
 	deploys, err := repo.DeploysForSite(ctx, "www")
 	require.NoError(t, err)
@@ -69,9 +71,9 @@ func TestRepo_ExpiredPendingDeploys_ReturnsOnlyRowsPastTheCutoff(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "old", t0.Add(-96*time.Hour)))
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "fresh", t0))
-	require.NoError(t, repo.BeginDeploy(ctx, "learn", "other", t0.Add(-96*time.Hour)))
+	mustBegin(t, repo, ctx, "www", "old", t0.Add(-96*time.Hour))
+	mustBegin(t, repo, ctx, "www", "fresh", t0)
+	mustBegin(t, repo, ctx, "learn", "other", t0.Add(-96*time.Hour))
 
 	got, err := repo.ExpiredPendingDeploys(ctx, "www", t0.Add(-72*time.Hour))
 	require.NoError(t, err)
@@ -91,4 +93,10 @@ func TestRepo_ExpiredPendingDeploys_IgnoresActiveRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got,
 		"expiry reaps abandoned sessions only; an old active deploy is retention's business, not this query's")
+}
+
+func mustBegin(t *testing.T, repo *Repo, ctx context.Context, site sitekey.Dirname, id string, mtime time.Time) {
+	t.Helper()
+	_, err := repo.BeginDeploy(ctx, site, id, mtime)
+	require.NoError(t, err)
 }

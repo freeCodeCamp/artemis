@@ -80,6 +80,12 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deployID := h.NewDeployID(req.SHA)
+	if !h.claimDeployID(r.Context(), h.DeployPrefix.SiteDirname(req.Site), deployID) {
+		h.logAction(r.Context(), "deploy.init", "error", slog.String("reason", "deploy_id_taken"))
+		writeError(w, http.StatusConflict, "deploy_id_taken",
+			"another deploy of this commit is already in flight; retry")
+		return
+	}
 	tok, exp, err := h.JWT.Sign(login, req.Site, deployID)
 	if err != nil {
 		h.logAction(r.Context(), "deploy.init", "error", slog.String("reason", "jwt_sign_failed"))
@@ -88,7 +94,6 @@ func (h *Handlers) DeployInit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	telemetry.FromContext(r.Context()).SetResource(string(req.Site), deployID)
-	h.beginPendingDeploy(r.Context(), h.DeployPrefix.SiteDirname(req.Site), deployID)
 	h.logAction(r.Context(), "deploy.init", "success")
 	h.auditFromScope(r.Context(), "deploy.init", "success", map[string]any{"sha": req.SHA})
 

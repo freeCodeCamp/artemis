@@ -12,16 +12,16 @@ import (
 
 const StatePending = "pending"
 
-func (r *Repo) BeginDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time) error {
-	_, err := r.pool.Exec(ctx, `
+func (r *Repo) BeginDeploy(ctx context.Context, site sitekey.Dirname, id string, mtime time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO deploys (site, id, mtime, bytes, has_marker, state)
 		VALUES ($1, $2, $3, 0, false, $4)
 		ON CONFLICT (site, id) DO NOTHING`,
 		site, id, mtime, StatePending)
 	if err != nil {
-		return fmt.Errorf("pg begin deploy %s/%s: %w", site, id, err)
+		return false, fmt.Errorf("pg begin deploy %s/%s: %w", site, id, err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func (r *Repo) ExpiredPendingDeploys(ctx context.Context, site sitekey.Dirname, before time.Time) ([]gc.Deploy, error) {

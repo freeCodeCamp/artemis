@@ -21,13 +21,14 @@ type recordingBeginner struct {
 	mu    sync.Mutex
 	calls [][2]string
 	err   error
+	taken bool
 }
 
-func (b *recordingBeginner) BeginDeploy(_ context.Context, site sitekey.Dirname, id string, _ time.Time) error {
+func (b *recordingBeginner) BeginDeploy(_ context.Context, site sitekey.Dirname, id string, _ time.Time) (bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.calls = append(b.calls, [2]string{string(site), id})
-	return b.err
+	return !b.taken, b.err
 }
 
 func newPendingHandlers(t *testing.T) *Handlers {
@@ -88,4 +89,27 @@ func TestDeployInit_SucceedsWithNoPendingWriterWired(t *testing.T) {
 	rec := initRequest(t, h)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestDeployInit_RefusesADeployIDAnotherDeployAlreadyHolds(t *testing.T) {
+	h := newPendingHandlers(t)
+	h.Pending = &recordingBeginner{taken: true}
+
+	rec := initRequest(t, h)
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "deploy_id_taken",
+		"the id is the timestamp plus the short sha, so two deploys of one commit in one second shared a "+
+			"prefix and mixed two builds under one alias with no error on either call")
+}
+
+func TestDeployInit_MintsNoPermitForAnIDItCouldNotClaim(t *testing.T) {
+	h := newPendingHandlers(t)
+	h.Pending = &recordingBeginner{taken: true}
+
+	rec := initRequest(t, h)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "jwt",
+		"a permit for a refused id would let the caller upload into the winner's prefix anyway")
 }

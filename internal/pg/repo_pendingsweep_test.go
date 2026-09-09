@@ -16,10 +16,10 @@ func TestRepo_PendingDeployIDs_SeesWhatDeploysForSiteHides(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "abandoned", t0))
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "finished", t0))
+	mustBegin(t, repo, ctx, "www", "abandoned", t0)
+	mustBegin(t, repo, ctx, "www", "finished", t0)
 	require.NoError(t, repo.FinalizeAtomic(ctx, "www", "finished", "production", t0, 4096))
-	require.NoError(t, repo.BeginDeploy(ctx, "learn", "elsewhere", t0))
+	mustBegin(t, repo, ctx, "learn", "elsewhere", t0)
 
 	ids, err := repo.PendingDeployIDs(ctx, "www")
 	require.NoError(t, err)
@@ -42,9 +42,9 @@ func TestRepo_SitesWithExpiredPending_ReturnsOnlySitesPastTheCutoff(t *testing.T
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "latex", "old", t0.Add(-120*time.Hour)))
-	require.NoError(t, repo.BeginDeploy(ctx, "plumb-select", "older", t0.Add(-150*time.Hour)))
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "fresh", t0))
+	mustBegin(t, repo, ctx, "latex", "old", t0.Add(-120*time.Hour))
+	mustBegin(t, repo, ctx, "plumb-select", "older", t0.Add(-150*time.Hour))
+	mustBegin(t, repo, ctx, "www", "fresh", t0)
 
 	sites, err := repo.SitesWithExpiredPending(ctx, t0.Add(-72*time.Hour), 10)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestRepo_SitesWithExpiredPending_IgnoresActiveRows(t *testing.T) {
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "www", "d1", t0.Add(-120*time.Hour)))
+	mustBegin(t, repo, ctx, "www", "d1", t0.Add(-120*time.Hour))
 	require.NoError(t, repo.FinalizeAtomic(ctx, "www", "d1", "production", t0.Add(-120*time.Hour), 4096))
 
 	sites, err := repo.SitesWithExpiredPending(ctx, t0.Add(-72*time.Hour), 10)
@@ -72,8 +72,8 @@ func TestRepo_SitesWithExpiredPending_DeduplicatesASiteWithSeveralRows(t *testin
 	ctx := context.Background()
 	t0 := time.Now().UTC().Truncate(time.Second)
 
-	require.NoError(t, repo.BeginDeploy(ctx, "latex", "a", t0.Add(-120*time.Hour)))
-	require.NoError(t, repo.BeginDeploy(ctx, "latex", "b", t0.Add(-130*time.Hour)))
+	mustBegin(t, repo, ctx, "latex", "a", t0.Add(-120*time.Hour))
+	mustBegin(t, repo, ctx, "latex", "b", t0.Add(-130*time.Hour))
 
 	sites, err := repo.SitesWithExpiredPending(ctx, t0.Add(-72*time.Hour), 10)
 	require.NoError(t, err)
@@ -87,7 +87,7 @@ func TestRepo_SitesWithExpiredPending_BoundsTheReadNotOnlyTheWrite(t *testing.T)
 	t0 := time.Now().UTC().Truncate(time.Second)
 
 	for _, site := range []sitekey.Dirname{"a", "b", "c", "d"} {
-		require.NoError(t, repo.BeginDeploy(ctx, site, "abandoned", t0.Add(-120*time.Hour)))
+		mustBegin(t, repo, ctx, site, "abandoned", t0.Add(-120*time.Hour))
 	}
 
 	sites, err := repo.SitesWithExpiredPending(ctx, t0.Add(-72*time.Hour), 2)

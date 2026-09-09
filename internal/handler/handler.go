@@ -96,7 +96,7 @@ type DeployIndexWriter interface {
 }
 
 type PendingDeployWriter interface {
-	BeginDeploy(ctx context.Context, site sitekey.Dirname, deployID string, mtime time.Time) error
+	BeginDeploy(ctx context.Context, site sitekey.Dirname, deployID string, mtime time.Time) (bool, error)
 }
 
 // ReservationStore holds a deleted site's name for a grace period so
@@ -283,13 +283,14 @@ func (h *Handlers) audit(ctx context.Context, e pg.AuditEvent) {
 
 const pendingWriteTimeout = 5 * time.Second
 
-func (h *Handlers) beginPendingDeploy(ctx context.Context, site sitekey.Dirname, deployID string) {
+func (h *Handlers) claimDeployID(ctx context.Context, site sitekey.Dirname, deployID string) bool {
 	if h.Pending == nil {
-		return
+		return true
 	}
 	beginCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pendingWriteTimeout)
 	defer cancel()
-	if err := h.Pending.BeginDeploy(beginCtx, site, deployID, h.Now().UTC()); err != nil {
+	claimed, err := h.Pending.BeginDeploy(beginCtx, site, deployID, h.Now().UTC())
+	if err != nil {
 		slog.ErrorContext(ctx, "deploy.pending.write_failed", "site", site, "deploy_id", deployID, "err", err)
 		if hub := sentry.GetHubFromContext(ctx); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {
@@ -298,7 +299,13 @@ func (h *Handlers) beginPendingDeploy(ctx context.Context, site sitekey.Dirname,
 				hub.CaptureException(err)
 			})
 		}
+		return true
 	}
+	if !claimed {
+		slog.WarnContext(ctx, "deploy.init.id_collision", "site", site, "deploy_id", deployID,
+			"detail", "a deploy already holds this id; sharing the prefix would mix two builds under one alias")
+	}
+	return claimed
 }
 
 func (h *Handlers) logAction(ctx context.Context, action, outcome string, attrs ...slog.Attr) {
