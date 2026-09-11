@@ -107,6 +107,26 @@ func ClientOptions(cfg Config) *redis.Options {
 	}
 }
 
+// NewUnverified builds a Store without dialing. Every later call reports
+// the outage on its own, so a pod whose registry source is Postgres boots
+// while Valkey is down instead of crashlooping. Returns nil on an empty
+// Addr, which is a configuration fault rather than an outage.
+func NewUnverified(cfg Config) *Store {
+	if cfg.Addr == "" {
+		return nil
+	}
+	return &Store{client: redis.NewClient(ClientOptions(cfg)), Now: time.Now}
+}
+
+// NewClientUnverified builds the raw client without dialing, for the
+// same reason as NewUnverified. Returns nil on an empty Addr.
+func NewClientUnverified(cfg Config) *redis.Client {
+	if cfg.Addr == "" {
+		return nil
+	}
+	return redis.NewClient(ClientOptions(cfg))
+}
+
 func policy(window time.Duration) retryconnect.Policy {
 	return retryconnect.Policy{
 		Event:   "valkey.connect.retrying",

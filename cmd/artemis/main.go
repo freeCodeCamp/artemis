@@ -408,14 +408,21 @@ func openPostgres(ctx context.Context, cfg *config.Config) (*pg.DB, func(), erro
 // health probe. When pgDB is non-nil, pg.RegistryStore is the
 // source-of-truth (Writer + Reader source) and Valkey is the
 // OnChange-published cache-front transport; otherwise Valkey is the
-// source-of-truth. Cleanup MUST be called on shutdown.
+// source-of-truth. Boot survives a Valkey outage in the first case and
+// fails in the second, because NewReaderFromSource cannot read its
+// source. Cleanup MUST be called on shutdown.
 func openRegistry(ctx context.Context, cfg *config.Config, pgDB *pg.DB) (registry.Writer, *valkey.Reader, *valkey.Store, func(), error) {
-	store, err := valkey.NewWithRetry(ctx, valkey.Config{
+	vcfg := valkey.Config{
 		Addr:     cfg.Registry.Valkey.Addr,
 		Password: cfg.Registry.Valkey.Password,
-	}, cfg.Registry.Valkey.RetryWindow)
+	}
+	store, err := valkey.NewWithRetry(ctx, vcfg, cfg.Registry.Valkey.RetryWindow)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("valkey: %w", err)
+		if store = valkey.NewUnverified(vcfg); store == nil {
+			return nil, nil, nil, nil, fmt.Errorf("valkey: %w", err)
+		}
+		slog.WarnContext(ctx, "valkey.connect.degraded", "err", err,
+			"detail", "booting without Valkey; deploys fail closed and the registry serves from its source")
 	}
 
 	var (
@@ -450,12 +457,17 @@ func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, fun
 	if cfg.Registry.Valkey.Addr == "" {
 		return nil, func() {}, nil
 	}
-	client, err := valkey.NewClientWithRetry(ctx, valkey.Config{
+	vcfg := valkey.Config{
 		Addr:     cfg.Registry.Valkey.Addr,
 		Password: cfg.Registry.Valkey.Password,
-	}, cfg.Registry.Valkey.RetryWindow)
+	}
+	client, err := valkey.NewClientWithRetry(ctx, vcfg, cfg.Registry.Valkey.RetryWindow)
 	if err != nil {
-		return nil, func() {}, err
+		slog.WarnContext(ctx, "teamcache.connect.degraded", "err", err,
+			"detail", "booting without the durable team cache; membership reads go to the GitHub API")
+		if client = valkey.NewClientUnverified(vcfg); client == nil {
+			return nil, func() {}, err
+		}
 	}
 	return teamcache.New(client, cfg.GitHub.MembershipCacheTTL), func() { _ = client.Close() }, nil
 }

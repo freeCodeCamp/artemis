@@ -174,14 +174,16 @@ func TestOpenTeamCache_DisabledWithoutValkeyAddr(t *testing.T) {
 	cleanup()
 }
 
-func TestOpenTeamCache_UnreachableValkeyFails(t *testing.T) {
+func TestOpenTeamCache_UnreachableValkeyDegrades(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Registry.Valkey.Addr = "127.0.0.1:1"
 	cfg.Registry.Valkey.RetryWindow = 0
 
-	_, cleanup, err := openTeamCache(context.Background(), cfg)
+	cache, cleanup, err := openTeamCache(context.Background(), cfg)
 
-	require.Error(t, err)
-	require.NotNil(t, cleanup, "cleanup must stay safe to call after a failed connect")
+	require.NoError(t, err,
+		"the durable team cache is an optimisation; a pod that restarts during a Valkey outage must boot")
+	require.NotNil(t, cache)
+	require.NotNil(t, cleanup, "cleanup must stay safe to call after a degraded connect")
 	cleanup()
 }

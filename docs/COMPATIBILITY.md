@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 39, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 40, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -61,6 +61,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 37 | A second finalize of one deploy is refused per mode, so promote-by-finalize works again | v1.12.0, narrowed unreleased | API callers that promote by finalize |
 | 38 | `GET /readyz` with Valkey unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
 | 39 | A dial-phase network fault gets its own transient error class, `net.dial` | unreleased | Sentry and alert-rule readers |
+| 40 | artemis boots during a Valkey outage instead of crashlooping | unreleased | Operators |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -908,3 +909,35 @@ under `net.dial`. ARTEMIS-M is the existing issue and it goes stale.
 
 **Action:** re-point any saved search or alert rule that used `error_class:unclassified` to catch
 connection faults. Add `error_class:net.dial`.
+
+## 40 — artemis boots during a Valkey outage instead of crashlooping
+
+**Release:** unreleased.
+
+**Old:** `openRegistry` and `openTeamCache` both dialed Valkey at boot and returned an error when the
+retry window ended. The default window is 5 seconds (`defaultValkeyRetryWindow`), so a pod that
+restarted while Valkey was down crashlooped almost at once. A running pod survived the outage; a
+restarting pod did not. That made a Valkey eviction unsafe during a node drain, because the
+rescheduled artemis pod could not start.
+
+**New:** both fall back to a client built without dialing (`valkey.NewUnverified`,
+`valkey.NewClientUnverified`) and log `valkey.connect.degraded` or `teamcache.connect.degraded` at
+Warn. Boot then succeeds or fails on what the registry Reader can read:
+
+- After the Postgres cutover the Reader's source is `pg.RegistryStore`, so the initial refresh
+  succeeds and only the `registry.changed` subscription fails. That is a warning,
+  `registry.subscribe.failed`, and the reader serves from the TTL refresh alone. The TTL ticker
+  retries the subscription and logs `registry.resubscribed` when Valkey returns.
+- Before the cutover Valkey is the source, the initial refresh fails, and boot fails with it. A pod
+  that cannot read the registry must not serve.
+
+An empty `VALKEY_ADDR` still fails boot. That is a configuration fault, not an outage.
+
+**What a degraded boot costs.** Deploys return `503 fence_unavailable` for the length of the outage.
+Team-membership reads go to the GitHub API instead of the durable cache. A registry change reaches
+the pod on the 60-second TTL refresh instead of at once.
+
+**Action:** an operator who used a crashlooping artemis pod as the alarm for a Valkey outage must
+switch to the Sentry page on `op=valkey.ping` (entry 38) or to the `valkey.connect.degraded` log
+key. A node drain that evicts `valkey-0` no longer takes artemis pods with it; see infra
+`docs/runbooks/12-node-drain-maintenance.md`.

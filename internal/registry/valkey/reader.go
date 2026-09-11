@@ -41,6 +41,8 @@ type Reader struct {
 	mu       sync.RWMutex
 	snapshot snapshot
 
+	subscribed atomic.Bool
+
 	// onRefreshError is invoked for every refresh that errored out of
 	// run(). The previous snapshot stays served; this hook is the only
 	// way an external metrics layer learns about the stale read. Set
@@ -114,11 +116,19 @@ func NewReaderFromSource(ctx context.Context, source SitesSource, pubsub *Store,
 	}
 	events, err := pubsub.Subscribe(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("registry: subscribe: %w", err)
+		slog.WarnContext(ctx, "registry.subscribe.failed", "err", err,
+			"detail", "serving from the TTL refresh alone until Valkey returns")
+		events = nil
+	} else {
+		r.subscribed.Store(true)
 	}
 	go r.run(ctx, events, ttl)
 	return r, nil
 }
+
+// Subscribed reports whether the change channel is live. False means the
+// reader sees a change only on the next TTL refresh.
+func (r *Reader) Subscribed() bool { return r.subscribed.Load() }
 
 // Snapshot returns a point-in-time view of the registry. The view
 // is whatever the latest refresh observed; calls to Snapshot do
@@ -177,6 +187,15 @@ func (r *Reader) run(ctx context.Context, events <-chan string, ttl time.Duratio
 			if err := r.Refresh(ctx); err != nil {
 				slog.Warn("registry.refresh.failed", "trigger", "ttl", "err", err)
 				r.invokeOnRefreshError(err)
+			}
+			if events == nil {
+				if resubscribed, err := r.pubsub.Subscribe(ctx); err != nil {
+					slog.Warn("registry.resubscribe.failed", "err", err)
+				} else {
+					events = resubscribed
+					r.subscribed.Store(true)
+					slog.Info("registry.resubscribed")
+				}
 			}
 		}
 	}

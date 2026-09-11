@@ -56,13 +56,35 @@ outage. It now logs a warning and calls the GitHub API
 membership, so the fall-through is more authoritative than the cache, not
 less.
 
-### What stays hard
+### Boot
 
-Boot stays hard. `openRegistry` calls `valkey.NewWithRetry` and returns
-an error when the retry window ends. The default window is 5 seconds
-(`defaultValkeyRetryWindow`, `VALKEY_CONNECT_RETRY_WINDOW` overrides
-it), so a pod that restarts during a Valkey outage crashloops almost at
-once. A running pod survives the outage; a restarting pod does not. The fix for that is a second Valkey replica,
+Boot survives a Valkey outage after the Postgres cutover, and fails
+before it. The rule falls out of what the registry Reader can read, not
+from a flag.
+
+`openRegistry` still calls `valkey.NewWithRetry` first. When the retry
+window ends it falls back to `valkey.NewUnverified`, which builds the
+client without dialing, and logs `valkey.connect.degraded`. Every later
+call reports the outage on its own. `openTeamCache` does the same and
+logs `teamcache.connect.degraded`.
+
+`NewReaderFromSource` then decides the outcome:
+
+- **After the cutover** the source is `pg.RegistryStore`, the initial
+  `Refresh` reads Postgres and succeeds, and only `Subscribe` fails. That
+  is a warning, `registry.subscribe.failed`, and the reader serves from
+  the TTL refresh alone. The TTL ticker retries `Subscribe` on every tick
+  and logs `registry.resubscribed` when Valkey returns.
+- **Before the cutover** the source is Valkey itself, the initial
+  `Refresh` fails, and boot fails with it. A pod that cannot read the
+  registry must not serve.
+
+An empty `VALKEY_ADDR` still fails boot. That is a configuration fault,
+not an outage, so `NewUnverified` returns nil for it.
+
+What a degraded boot costs: deploys fail closed with `503
+fence_unavailable`, team-membership reads go to the GitHub API, and a
+registry change reaches the pod on the TTL refresh instead of at once. The fix for that is a second Valkey replica,
 tracked in the infra wave `2026-09-11-gxy-platform-resilience` T2.
 
 ## Paging
