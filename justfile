@@ -35,14 +35,23 @@ test:
 
 # CI's coverage gate: statement coverage, every package, per .testcoverage.yml
 covgate:
-    {{go}} test -race -shuffle=on -coverprofile=coverage.out {{pkg}}
-    {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # workaround: golang/go#70441
+    profile="$(mktemp -t artemis-covgate.XXXXXX.out)"
+    trap 'rm -f "$profile"' EXIT
+    {{go}} test -race -shuffle=on -coverprofile="$profile" {{pkg}}
+    {{go}} run github.com/vladopajic/go-test-coverage/v2@{{gotestcoverage}} --config=.testcoverage.yml --profile="$profile"
 
 # go test with coverage profile + html report (unit only)
 cover:
-    {{go}} test -race -shuffle=on -coverprofile=coverage.out {{pkg}}
-    {{go}} tool cover -html=coverage.out -o coverage.html
-    @echo "open coverage.html"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    profile="$(mktemp -t artemis-cover.XXXXXX.out)"
+    trap 'rm -f "$profile"' EXIT
+    {{go}} test -race -shuffle=on -coverprofile="$profile" {{pkg}}
+    {{go}} tool cover -html="$profile" -o coverage.html
+    echo "open coverage.html"
 
 # go test -tags=integration ./internal/integration/... (live E2E)
 integration:
