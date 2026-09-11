@@ -889,11 +889,15 @@ subject to the same 24-hour per-op cooldown as `net.dns_resolver`
 (`internal/observability/errorclass.go`, `internal/observability/transientrate.go`).
 
 **Why.** A CloudNativePG instance roll moves the `artemis-pg-rw` Service endpoint. In that window
-the relay's dial gets `operation not permitted` from the NetworkPolicy until the CNI reconciles the
-new pod. The roll of 2026-09-11 produced nine events in ARTEMIS-M across two windows, 08:22:39 and
-10:15:48 to 10:15:58 UTC, and both cleared inside ten seconds with no operator action. An instance
-roll is routine — every operator change to the `Cluster` causes one — so the class needs a cooldown,
-not a page per occurrence.
+the relay's dial fails with `operation not permitted`. The roll of 2026-09-11 produced nine events
+in ARTEMIS-M across two windows, 08:22:39 and 10:15:48 to 10:15:58 UTC, and both cleared inside ten
+seconds with no operator action. An instance roll is routine — every operator change to the
+`Cluster` causes one — so the class needs a cooldown, not a page per occurrence.
+
+UNVERIFIED: the cause of the `EPERM` is the NetworkPolicy, which rejects the connection until the
+CNI reconciles the new pod. An iptables `REJECT` in `OUTPUT` does return `EPERM` to `connect()`, so
+the reading fits, but no probe confirmed it. The measurement above stands on its own and the
+classification does not depend on the mechanism.
 
 **The trade, stated plainly.** A genuinely wrong `DATABASE_URL` host or port also dials and is now
 cooled to one event per op per 24 hours per pod. This is the same trade entry 18 made for the DNS
