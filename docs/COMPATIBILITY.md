@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 38, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 39, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -60,6 +60,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 36 | A failed outbox publish retries after 60 s, not 5 minutes, and the rest of the batch is not held | unreleased | Operators and alert-rule readers |
 | 37 | A second finalize of one deploy is refused per mode, so promote-by-finalize works again | v1.12.0, narrowed unreleased | API callers that promote by finalize |
 | 38 | `GET /readyz` with Valkey unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
+| 39 | A dial-phase network fault gets its own transient error class, `net.dial` | unreleased | Sentry and alert-rule readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -872,3 +873,38 @@ that key is Warn, so `LOG_LEVEL=error` drops it entirely. A Valkey outage no lon
 `NotReady` pods in `kubectl get pods`. Watch Sentry `op=valkey.ping` instead. A rollout no longer
 wedges on an unreachable Valkey, so new pods become Ready while it is down — but they still
 crashloop at boot for the reason above, which is the signal that remains.
+
+## 39 — a dial-phase network fault gets its own transient error class, `net.dial`
+
+**Release:** unreleased.
+
+**Old:** a connect failure at the dial phase — `connect: operation not permitted`, `connection
+refused`, `no route to host` — reached `errorClass` with no matching case and became
+`unclassified`. That class is not in `transientClasses`, so every occurrence opened or escalated a
+Sentry issue at once with no cooldown.
+
+**New:** a `*net.OpError` whose `Op` is `dial` classifies as `net.dial`, which is transient. It is
+subject to the same 24-hour per-op cooldown as `net.dns_resolver`
+(`internal/observability/errorclass.go`, `internal/observability/transientrate.go`).
+
+**Why.** A CloudNativePG instance roll moves the `artemis-pg-rw` Service endpoint. In that window
+the relay's dial gets `operation not permitted` from the NetworkPolicy until the CNI reconciles the
+new pod. The roll of 2026-09-11 produced nine events in ARTEMIS-M across two windows, 08:22:39 and
+10:15:48 to 10:15:58 UTC, and both cleared inside ten seconds with no operator action. An instance
+roll is routine — every operator change to the `Cluster` causes one — so the class needs a cooldown,
+not a page per occurrence.
+
+**The trade, stated plainly.** A genuinely wrong `DATABASE_URL` host or port also dials and is now
+cooled to one event per op per 24 hours per pod. This is the same trade entry 18 made for the DNS
+resolver class, and the same mitigation applies: a wrong connection target fails at boot, and a boot
+failure is a crashloop that pod alerting sees.
+
+**Scope.** Only the dial phase. A mid-stream `*net.OpError` with `Op` of `read` or `write` stays
+`unclassified`, because a fault after the connection is up has a different remedy. NXDOMAIN still
+outranks the dial wrapper and keeps `net.dns_notfound`, which is not transient.
+
+**Bucket move.** Events under `error_class:unclassified` that were dial faults open a new issue
+under `net.dial`. ARTEMIS-M is the existing issue and it goes stale.
+
+**Action:** re-point any saved search or alert rule that used `error_class:unclassified` to catch
+connection faults. Add `error_class:net.dial`.

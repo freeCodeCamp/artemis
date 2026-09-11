@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"syscall"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -79,4 +81,45 @@ func TestErrorClass_ContextDeadlineBeatsDNS(t *testing.T) {
 	dnsErr := &net.DNSError{Err: "i/o timeout", UnwrapErr: context.DeadlineExceeded, IsTimeout: true}
 
 	require.Equal(t, classCtxDeadline, errorClass(dnsErr), "classification order is behaviour: context is tested first")
+}
+
+func TestErrorClass_DialFaultsAreOneTransientClass(t *testing.T) {
+	t.Parallel()
+
+	addr := &net.TCPAddr{IP: net.ParseIP("10.11.196.31"), Port: 5432}
+	shapes := []error{
+		&net.OpError{Op: "dial", Net: "tcp", Addr: addr, Err: os.NewSyscallError("connect", syscall.EPERM)},
+		&net.OpError{Op: "dial", Net: "tcp", Addr: addr, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)},
+		&net.OpError{Op: "dial", Net: "tcp", Addr: addr, Err: os.NewSyscallError("connect", syscall.EHOSTUNREACH)},
+	}
+
+	for _, err := range shapes {
+		wrapped := fmt.Errorf("relay outbox fetch: %w", err)
+		require.Equal(t, classNetDial, errorClass(wrapped),
+			"a CloudNativePG instance roll moves the artemis-pg-rw endpoint and every dial fault in that window has one remedy: wait")
+		require.True(t, transientClasses[errorClass(wrapped)],
+			"an unclassified dial fault pages on every occurrence; the roll produced nine events in one window on 2026-09-11")
+	}
+}
+
+func TestErrorClass_DNSFaultOutranksTheDialWrapper(t *testing.T) {
+	t.Parallel()
+
+	err := &net.OpError{
+		Op:  "dial",
+		Net: "tcp",
+		Err: &net.DNSError{Err: "no such host", Name: "artemis-pg-rw", IsNotFound: true},
+	}
+
+	require.Equal(t, classDNSNotFound, errorClass(err),
+		"NXDOMAIN names a configuration fault and keeps its own page; the dial wrapper must not swallow it")
+}
+
+func TestErrorClass_NonDialOpErrorStaysUnclassified(t *testing.T) {
+	t.Parallel()
+
+	err := &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)}
+
+	require.Equal(t, classUnclassified, errorClass(err),
+		"only the dial phase is covered; a mid-stream fault has a different remedy")
 }

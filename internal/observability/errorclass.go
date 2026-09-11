@@ -23,6 +23,7 @@ const (
 	classDNSTemporary  = "net.dns_temporary"
 	classDNSResolver   = "net.dns_resolver"
 	classDNSNotFound   = "net.dns_notfound"
+	classNetDial       = "net.dial"
 	classUnclassified  = "unclassified"
 )
 
@@ -37,6 +38,7 @@ var transientClasses = map[string]bool{
 	classUnexpectedEOF: true,
 	classDNSTemporary:  true,
 	classDNSResolver:   true,
+	classNetDial:       true,
 }
 
 var shutdownClasses = map[string]bool{
@@ -89,6 +91,10 @@ func errorClass(err error) string {
 	}
 	if code, ok := pg.SQLState(err); ok {
 		return "pg." + code
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return classNetDial
 	}
 	return classUnclassified
 }
