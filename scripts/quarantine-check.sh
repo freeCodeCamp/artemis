@@ -2,7 +2,11 @@
 # Usage: scripts/quarantine-check.sh list|check [root]
 # The call sites of quarantine.Skip are the registry. `check` exits 1 on an
 # expired quarantine (UTC date), a non-literal ref or date, a call outside a
-# _test.go file, or a production binary that links the package.
+# _test.go file, an aliased or dot-import of the package, or a production
+# binary that links it. An aliased import (`q "..."`) or a dot-import
+# (`. "..."`) hides the calls from the registry scan below, which matches the
+# literal `quarantine.Skip(`, so such a quarantine would never expire. Both
+# are reported as ALIASED-IMPORT-HIDES-CALLS.
 set -euo pipefail
 
 mode="${1:-list}"
