@@ -59,9 +59,10 @@ less.
 ### What stays hard
 
 Boot stays hard. `openRegistry` calls `valkey.NewWithRetry` and returns
-an error when the retry window ends, so a pod that restarts during a
-Valkey outage crashloops. A running pod survives the outage; a
-restarting pod does not. The fix for that is a second Valkey replica,
+an error when the retry window ends. The default window is 5 seconds
+(`defaultValkeyRetryWindow`, `VALKEY_CONNECT_RETRY_WINDOW` overrides
+it), so a pod that restarts during a Valkey outage crashloops almost at
+once. A running pod survives the outage; a restarting pod does not. The fix for that is a second Valkey replica,
 tracked in the infra wave `2026-09-11-gxy-platform-resilience` T2.
 
 ## Paging
