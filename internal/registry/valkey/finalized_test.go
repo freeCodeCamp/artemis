@@ -18,7 +18,7 @@ func TestMarkDeployFinalized_MakesTheDeployReadAsFinalized(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, finalized, "a deploy nobody finalized must accept uploads")
 
-	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "20260420-141522-abc1234", 15*time.Minute))
+	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "20260420-141522-abc1234", "preview", 15*time.Minute))
 
 	finalized, err = s.IsDeployFinalized(ctx, "www", "20260420-141522-abc1234")
 	require.NoError(t, err)
@@ -30,7 +30,7 @@ func TestMarkDeployFinalized_MakesTheDeployReadAsFinalized(t *testing.T) {
 func TestMarkDeployFinalized_ScopesToTheSiteAndTheDeploy(t *testing.T) {
 	s, _, _ := newStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "d1", time.Minute))
+	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "d1", "preview", time.Minute))
 
 	for _, tc := range []struct {
 		site sitekey.Slug
@@ -45,7 +45,7 @@ func TestMarkDeployFinalized_ScopesToTheSiteAndTheDeploy(t *testing.T) {
 func TestMarkDeployFinalized_ExpiresWithThePermitThatCouldAbuseIt(t *testing.T) {
 	s, mr, _ := newStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "d1", 15*time.Minute))
+	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "d1", "preview", 15*time.Minute))
 
 	mr.FastForward(15*time.Minute + time.Second)
 
@@ -70,7 +70,7 @@ func TestIsDeployFinalized_ReportsTheFaultRatherThanAnswerNo(t *testing.T) {
 func TestMarkDeployFinalized_RefusesANonPositiveTTL(t *testing.T) {
 	s, _, _ := newStore(t)
 
-	err := s.MarkDeployFinalized(context.Background(), "www", "d1", 0)
+	err := s.MarkDeployFinalized(context.Background(), "www", "d1", "preview", 0)
 
 	require.Error(t, err,
 		"go-redis treats a zero expiration as no expiration, so a miswired ttl would write a key that "+
@@ -79,4 +79,18 @@ func TestMarkDeployFinalized_RefusesANonPositiveTTL(t *testing.T) {
 	finalized, readErr := s.IsDeployFinalized(context.Background(), "www", "d1")
 	require.NoError(t, readErr)
 	assert.False(t, finalized, "the refused write must leave nothing behind")
+}
+
+func TestIsDeployModeFinalized_FencesTheFinalizedModeOnly(t *testing.T) {
+	s, _, _ := newStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.MarkDeployFinalized(ctx, "www", "d1", "preview", time.Minute))
+
+	preview, err := s.IsDeployModeFinalized(ctx, "www", "d1", "preview")
+	require.NoError(t, err)
+	assert.True(t, preview, "a second finalize of the same mode would repoint the alias it already wrote")
+
+	production, err := s.IsDeployModeFinalized(ctx, "www", "d1", "production")
+	require.NoError(t, err)
+	assert.False(t, production, "promote-by-finalize sends the same deploy id with mode production")
 }

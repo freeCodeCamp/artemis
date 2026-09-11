@@ -58,6 +58,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 34 | A deploy-session JWT without `exp` is rejected with `403 jwt_invalid` | unreleased | Nobody in practice; hand-built tokens only |
 | 35 | `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing | unreleased | Operators |
 | 36 | A failed outbox publish retries after 60 s, not 5 minutes, and the rest of the batch is not held | unreleased | Operators and alert-rule readers |
+| 37 | A second finalize of one deploy is refused per mode, so promote-by-finalize works again | v1.12.0, narrowed unreleased | API callers that promote by finalize |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -802,3 +803,27 @@ first error, so one gRPC fault froze the whole batch for 5 minutes with no log l
 
 **Action:** none for a caller. An alert rule that assumed a 5-minute silence after a relay fault
 now sees a retry within a minute.
+
+## 37 — a second finalize of one deploy is refused per mode, so promote-by-finalize works again
+
+**Release:** `v1.12.0` shipped the refusal. Commit `ad1f9a3`. The narrowing is unreleased. Commit `4ba6946`.
+
+**Old, before v1.12.0:** `POST /api/deploy/{deployId}/finalize` accepted any number of calls for one
+deploy id. A caller could finalize with `mode: "preview"`, check the preview URL, then finalize the
+same deploy id with `mode: "production"` to publish the same bytes. A caller could also repeat one
+finalize unchanged, which re-wrote the alias it had already written.
+
+**v1.12.0:** the finalize path started to read the same finalized record as the upload path. That
+record names the deploy and not the mode, so the second finalize answered `409 deploy_finalized`
+whatever mode it carried. The repeat case is the one the check was added for. Promote-by-finalize
+was refused with it. `universe static deploy --promote` is unaffected, because it runs a new
+`init`, a new upload and one finalize per promote.
+
+**New, unreleased:** the finalize record now carries the mode as well. A second finalize of the same
+deploy id **and the same mode** answers `409 deploy_finalized` with the message "deploy is already
+finalized for this mode; start a new deploy". A finalize of a different mode with the same deploy id
+answers `200`. The upload fence is unchanged: an upload into a deploy finalized in any mode still
+answers `409`.
+
+**Action:** a caller that promotes by finalize must run `v1.12.0` through the current production
+image only with one mode per deploy id. The next release restores the two-mode flow.

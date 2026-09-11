@@ -280,7 +280,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		if h.DeployFence != nil {
-			finalized, fenceErr := h.DeployFence.IsDeployFinalized(commitCtx, claims.Site, deployID)
+			finalized, fenceErr := h.DeployFence.IsDeployModeFinalized(commitCtx, claims.Site, deployID, mode)
 			if fenceErr != nil {
 				writeUpstreamError(w, r, http.StatusServiceUnavailable, "fence_unavailable",
 					"valkey.get.deploy_fence.finalize", fenceErr)
@@ -288,7 +288,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			}
 			if finalized {
 				writeError(w, http.StatusConflict, "deploy_finalized",
-					"deploy is finalized and immutable; start a new deploy")
+					"deploy is already finalized for this mode; start a new deploy")
 				return errAliasWriteHandled
 			}
 		}
@@ -315,7 +315,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.finalize", err)
 			return errAliasWriteHandled
 		}
-		h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID)
+		h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID, mode)
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
 				return retryIdempotentCommit(ctx, func(ctx context.Context) error {

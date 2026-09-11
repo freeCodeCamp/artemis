@@ -15,16 +15,17 @@ import (
 )
 
 type fakeDeployFence struct {
-	marked   map[string]time.Duration
-	err      error
-	writeErr error
+	marked      map[string]time.Duration
+	markedModes map[string]time.Duration
+	err         error
+	writeErr    error
 }
 
 func newFakeDeployFence() *fakeDeployFence {
-	return &fakeDeployFence{marked: map[string]time.Duration{}}
+	return &fakeDeployFence{marked: map[string]time.Duration{}, markedModes: map[string]time.Duration{}}
 }
 
-func (f *fakeDeployFence) MarkDeployFinalized(_ context.Context, site sitekey.Slug, id string, ttl time.Duration) error {
+func (f *fakeDeployFence) MarkDeployFinalized(_ context.Context, site sitekey.Slug, id, mode string, ttl time.Duration) error {
 	if f.writeErr != nil {
 		return f.writeErr
 	}
@@ -32,6 +33,7 @@ func (f *fakeDeployFence) MarkDeployFinalized(_ context.Context, site sitekey.Sl
 		return f.err
 	}
 	f.marked[string(site)+"/"+id] = ttl
+	f.markedModes[string(site)+"/"+id+"/"+mode] = ttl
 	return nil
 }
 
@@ -43,13 +45,21 @@ func (f *fakeDeployFence) IsDeployFinalized(_ context.Context, site sitekey.Slug
 	return ok, nil
 }
 
+func (f *fakeDeployFence) IsDeployModeFinalized(_ context.Context, site sitekey.Slug, id, mode string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	_, ok := f.markedModes[string(site)+"/"+id+"/"+mode]
+	return ok, nil
+}
+
 func TestDeployUpload_RefusesAWriteIntoAFinalizedDeploy(t *testing.T) {
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
 	fence := newFakeDeployFence()
 	h.DeployFence = fence
-	require.NoError(t, fence.MarkDeployFinalized(context.Background(), "www", deployID, time.Minute))
+	require.NoError(t, fence.MarkDeployFinalized(context.Background(), "www", deployID, "preview", time.Minute))
 
 	w := callUpload(t, h, jwt, deployID, "index.html", []byte("evil"))
 
@@ -75,7 +85,7 @@ func TestDeployUpload_RefusesWhenTheFenceCannotBeRead(t *testing.T) {
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	h, jwt := newTestHandlers(t, &fakeGH{}, standardSites(), store)
-	h.DeployFence = &fakeDeployFence{err: errors.New("valkey unreachable")}
+	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, markedModes: map[string]time.Duration{}, err: errors.New("valkey unreachable")}
 
 	w := callUpload(t, h, jwt, deployID, "index.html", []byte("hi"))
 
@@ -133,7 +143,7 @@ func TestDeployFinalize_SucceedsAndReportsWhenTheFenceWriteFails(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, jwt, _ := newFinalizeHandlers(t, store)
-	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, writeErr: errors.New("valkey unreachable")}
+	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, markedModes: map[string]time.Duration{}, writeErr: errors.New("valkey unreachable")}
 
 	require.Equal(t, http.StatusOK, callFinalize(t, h, jwt, deployID).Code,
 		"the marker, the alias and the index row are already committed; failing here would report a "+
@@ -158,20 +168,43 @@ func TestDeployFinalize_FencesTheDeployEvenWhenTheIndexWriteFails(t *testing.T) 
 			"fencing only on the fully-successful path leaves the live-but-unindexed deploy open")
 }
 
-func TestDeployFinalize_RefusesASecondFinalizeOfTheSameDeploy(t *testing.T) {
+func TestDeployFinalize_RefusesASecondFinalizeOfTheSameDeployAndMode(t *testing.T) {
 	deployID := "20260420-141522-abc1234"
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, jwt, _ := newFinalizeHandlers(t, store)
 	fence := newFakeDeployFence()
 	h.DeployFence = fence
-	require.NoError(t, fence.MarkDeployFinalized(context.Background(), "www", deployID, time.Minute))
+	require.NoError(t, fence.MarkDeployFinalized(context.Background(), "www", deployID, "preview", time.Minute))
 	w := callFinalize(t, h, jwt, deployID)
 
 	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	_, aliasErr := store.GetAlias(context.Background(), "www/preview")
 	assert.Error(t, aliasErr,
 		"a retry inside the still-valid permit TTL would repoint the alias, silently undoing a rollback that ran between the two calls")
+}
+
+func TestDeployFinalize_AllowsProductionAfterPreview(t *testing.T) {
+	deployID := "20260420-141522-abc1234"
+	store := newFakeR2()
+	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
+	h, jwt, _ := newFinalizeHandlers(t, store)
+	h.DeployFence = newFakeDeployFence()
+
+	require.Equal(t, http.StatusOK, callFinalizeMode(t, h, jwt, deployID, "preview").Code)
+
+	assert.Equal(t, http.StatusConflict, callUpload(t, h, jwt, deployID, "index.html", []byte("evil")).Code,
+		"the preview alias already points at this prefix, so the upload fence must not loosen with the mode split")
+
+	w := callFinalizeMode(t, h, jwt, deployID, "production")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	prod, err := store.GetAlias(context.Background(), "www/production")
+	require.NoError(t, err)
+	assert.Equal(t, deployID, prod,
+		"promote-by-finalize reuses the deploy id and only changes the mode; fencing it refuses the flow openapi.yaml documents")
+
+	assert.Equal(t, http.StatusConflict, callFinalizeMode(t, h, jwt, deployID, "production").Code,
+		"a retry of the production finalize inside the permit ttl would repoint the alias again and undo a rollback that ran between the two calls")
 }
 
 func TestDeployFinalize_AllowsTheFirstFinalize(t *testing.T) {
@@ -191,7 +224,7 @@ func TestDeployFinalize_RefusesWhenTheFenceCannotBeRead(t *testing.T) {
 	store := newFakeR2()
 	store.objects["www/deploys/"+deployID+"/index.html"] = []byte("hi")
 	h, jwt, _ := newFinalizeHandlers(t, store)
-	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, err: errors.New("valkey unreachable")}
+	h.DeployFence = &fakeDeployFence{marked: map[string]time.Duration{}, markedModes: map[string]time.Duration{}, err: errors.New("valkey unreachable")}
 
 	w := callFinalize(t, h, jwt, deployID)
 

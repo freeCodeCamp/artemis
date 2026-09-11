@@ -10,16 +10,17 @@ import (
 
 const opDeployFence = "deploy.fence"
 
-func (h *Handlers) fenceFinalizedDeploy(ctx context.Context, site sitekey.Slug, deployID string) {
+func (h *Handlers) fenceFinalizedDeploy(ctx context.Context, site sitekey.Slug, deployID, mode string) {
 	if h.DeployFence == nil {
 		slog.WarnContext(ctx, "deploy.fence.unwired", "site", site, "deployId", deployID,
 			"detail", "the alias now points at this prefix and the deploy permit stays valid, so a "+
 				"later upload with the same token can overwrite what is live")
 		return
 	}
-	if err := h.DeployFence.MarkDeployFinalized(ctx, site, deployID, h.DeployJWTTTL); err != nil {
-		slog.ErrorContext(ctx, "deploy.fence.failed", "site", site, "deployId", deployID, "err", err,
-			"detail", "the deploy is live and unfenced until the permit expires")
+	if err := h.DeployFence.MarkDeployFinalized(ctx, site, deployID, mode, h.DeployJWTTTL); err != nil {
+		slog.ErrorContext(ctx, "deploy.fence.failed", "site", site, "deployId", deployID, "mode", mode, "err", err,
+			"detail", "neither the upload fence nor the mode fence was written, so the permit can still "+
+				"overwrite this deploy or repoint its alias until it expires")
 		observability.CaptureBackground(opDeployFence, err)
 	}
 }

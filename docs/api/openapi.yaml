@@ -695,7 +695,11 @@ paths:
             an RFC 3339 time. No alias is written.
 
             `site_locked`: a different operation has exclusive access to the site. Message "another operation
-            on this site is in progress; retry shortly". Send the request again.'
+            on this site is in progress; retry shortly". Send the request again.
+
+            `deploy_finalized`: the deploy is already finalized for the mode of the request. Message "deploy
+            is already finalized for this mode; start a new deploy". A finalize of a different mode with
+            the same deploy id stays permitted, because that is the promote flow.'
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'

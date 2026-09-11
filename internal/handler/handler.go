@@ -70,8 +70,9 @@ type R2Store interface {
 }
 
 type DeployFenceStore interface {
-	MarkDeployFinalized(ctx context.Context, site sitekey.Slug, deployID string, ttl time.Duration) error
+	MarkDeployFinalized(ctx context.Context, site sitekey.Slug, deployID, mode string, ttl time.Duration) error
 	IsDeployFinalized(ctx context.Context, site sitekey.Slug, deployID string) (bool, error)
+	IsDeployModeFinalized(ctx context.Context, site sitekey.Slug, deployID, mode string) (bool, error)
 }
 
 type TombstoneStore interface {

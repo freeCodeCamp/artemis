@@ -23,9 +23,14 @@ func (f *failAliasPutR2) PutAlias(_ context.Context, _, _ string) error {
 
 func callFinalize(t *testing.T, h *Handlers, jwt *fakeJWT, deployID string) *httptest.ResponseRecorder {
 	t.Helper()
+	return callFinalizeMode(t, h, jwt, deployID, "preview")
+}
+
+func callFinalizeMode(t *testing.T, h *Handlers, jwt *fakeJWT, deployID, mode string) *httptest.ResponseRecorder {
+	t.Helper()
 	tok, _, err := jwt.Sign("alice", "www", deployID)
 	require.NoError(t, err)
-	body, _ := json.Marshal(DeployFinalizeRequest{Mode: "preview", Files: []string{"index.html"}})
+	body, _ := json.Marshal(DeployFinalizeRequest{Mode: mode, Files: []string{"index.html"}})
 	return withChiRoute(http.MethodPost, "/api/deploy/{deployId}/finalize",
 		"/api/deploy/"+deployID+"/finalize", body,
 		map[string]string{"Authorization": "Bearer " + tok},
