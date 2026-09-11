@@ -46,6 +46,16 @@ type Config struct {
 	BackfillOnBoot       bool
 	Hatchet              HatchetConfig
 	Cleanup              CleanupConfig
+	EdgeCache            EdgeCacheConfig
+}
+
+type EdgeCacheConfig struct {
+	ZoneID   string
+	APIToken string
+}
+
+func (e EdgeCacheConfig) Enabled() bool {
+	return e.ZoneID != "" && e.APIToken != ""
 }
 
 type HatchetConfig struct {
@@ -375,6 +385,9 @@ func Load() (*Config, error) {
 	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
 	cfg.Repo.App.PrivateKeyPEM = os.Getenv("GH_APP_PRIVATE_KEY")
 
+	cfg.EdgeCache.ZoneID = os.Getenv("CF_ZONE_ID")
+	cfg.EdgeCache.APIToken = os.Getenv("CF_PURGE_API_TOKEN")
+
 	cfg.Sentry.DSN = os.Getenv("SENTRY_DSN")
 	cfg.Sentry.Environment = os.Getenv("ENVIRONMENT")
 	if v, ok := os.LookupEnv("SENTRY_TRACES_SAMPLE_RATE"); ok {
@@ -487,6 +500,9 @@ func (c *Config) validate() error {
 	}
 	if strings.TrimSpace(c.Repo.AuditReadAuthzTeam) == "" {
 		return fmt.Errorf("AUDIT_READ_AUTHZ_TEAM must not be empty")
+	}
+	if (c.EdgeCache.ZoneID != "") != (c.EdgeCache.APIToken != "") {
+		return fmt.Errorf("edge cache config is partial: set both CF_ZONE_ID and CF_PURGE_API_TOKEN, or neither")
 	}
 	// Repo App credentials are optional (feature off when absent), but
 	// partial config is a misconfiguration — fail fast rather than boot

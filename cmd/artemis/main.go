@@ -23,6 +23,7 @@ import (
 	"github.com/freeCodeCamp/artemis/internal/auth"
 	"github.com/freeCodeCamp/artemis/internal/backfill"
 	"github.com/freeCodeCamp/artemis/internal/config"
+	"github.com/freeCodeCamp/artemis/internal/edgecache"
 	"github.com/freeCodeCamp/artemis/internal/githubapp"
 	"github.com/freeCodeCamp/artemis/internal/handler"
 	"github.com/freeCodeCamp/artemis/internal/hatchet"
@@ -45,6 +46,9 @@ var (
 )
 
 const bootPhaseTimeout = 20 * time.Second
+
+// caddy-r2alias caches the alias for cache_ttl (15s); a purge inside that window re-caches the old deploy.
+const edgePurgeDelay = 16 * time.Second
 
 func dispatchSubcommand(ctx context.Context, out io.Writer, args []string) (bool, error) {
 	if len(args) == 0 {
@@ -536,6 +540,14 @@ func buildHandlers(cfg *config.Config, d handlerDeps) *handler.Handlers {
 		Now:                    time.Now,
 	}
 	h.RepoGH = d.repoGH
+	if cfg.EdgeCache.Enabled() {
+		h.EdgePurge = &edgecache.Client{
+			HTTP:   &http.Client{Timeout: 15 * time.Second},
+			ZoneID: cfg.EdgeCache.ZoneID,
+			Token:  cfg.EdgeCache.APIToken,
+		}
+		h.EdgePurgeDelay = edgePurgeDelay
+	}
 	if cfg.Repo.Enabled() {
 		h.Repos = d.repoStore
 		h.GitHubApp = d.appClient

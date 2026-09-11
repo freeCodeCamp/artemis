@@ -151,6 +151,8 @@ type Handlers struct {
 	PublicPreviewURLFmt    string // e.g. "https://<site>.preview.freecode.camp"
 	DeployFence            DeployFenceStore
 	DeployJWTTTL           time.Duration
+	EdgePurge              EdgePurger
+	EdgePurgeDelay         time.Duration
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
 	NameReleaser           NameReleaser

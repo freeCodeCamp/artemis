@@ -152,6 +152,7 @@ func (h *Handlers) SitePromote(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.promote", err)
 			return errAliasWriteHandled
 		}
+		h.purgeEdge(site, "production")
 		if h.Index != nil {
 			if err := retryIdempotentCommit(commitCtx, func(ctx context.Context) error {
 				return h.Index.AliasAtomic(ctx, h.DeployPrefix.SiteDirname(site), "production", deployID, time.Now().UTC())
@@ -272,6 +273,7 @@ func (h *Handlers) SiteRollback(w http.ResponseWriter, r *http.Request) {
 			writeUpstreamError(w, r, http.StatusBadGateway, "r2_put_failed", "r2.put.alias.rollback", err)
 			return errAliasWriteHandled
 		}
+		h.purgeEdge(site, "production")
 		if h.Index != nil {
 			if err := retryIdempotentCommit(commitCtx, func(ctx context.Context) error {
 				return h.Index.AliasAtomic(ctx, h.DeployPrefix.SiteDirname(site), "production", req.To, time.Now().UTC())

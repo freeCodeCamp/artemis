@@ -151,6 +151,15 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.2`           | Tracing sample rate `[0,1]`; probes dropped |
 | `SENTRY_DEBUG`              | `false`         | Log SDK internals to stderr                 |
 
+### Edge cache purge (optional)
+
+Both or neither. A partial pair refuses the boot. When set, every alias write (finalize, promote, rollback, delete, undelete) purges the site host at the Cloudflare edge 16 s later, after the caddy alias cache expires. A purge failure logs `edge.purge.failed` and never fails the request.
+
+| Variable             | Default         | Description                                            |
+| -------------------- | --------------- | ------------------------------------------------------ |
+| `CF_ZONE_ID`         | _(empty → off)_ | Cloudflare zone id that fronts the public site hosts   |
+| `CF_PURGE_API_TOKEN` | _(empty → off)_ | API token with `Zone.Cache Purge` on that zone (secret) |
+
 **Postgres + retention GC + Hatchet** (feature-gated on `DATABASE_URL`; see [local ADR 0001](design/0001-durable-execution-model.md))
 
 | Variable                        | Default                   | Description                                                                                  |

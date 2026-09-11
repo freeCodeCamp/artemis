@@ -409,6 +409,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 				return nil
 			}
 		}
+		h.purgeEdge(slug, modes...)
 		until := h.Now().UTC().Add(h.ReservationGrace)
 		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context()), observed); err != nil {
 			if errors.Is(err, registry.ErrNotFound) && (served || headErr != nil) {
@@ -525,6 +526,8 @@ func (h *Handlers) restoreAliasPins(ctx context.Context, slug sitekey.Slug, held
 		{"preview", held.PrevPreview},
 	}
 	dirname := h.DeployPrefix.SiteDirname(slug)
+	var restored []string
+	defer func() { h.purgeEdge(slug, restored...) }()
 	for _, pin := range pins {
 		if pin.deployID == "" {
 			continue
@@ -532,6 +535,7 @@ func (h *Handlers) restoreAliasPins(ctx context.Context, slug sitekey.Slug, held
 		if err := h.R2.PutAlias(ctx, h.aliasKey(slug, pin.mode), pin.deployID); err != nil {
 			return "restore_alias", fmt.Errorf("undelete restore %s alias %s: %w", pin.mode, slug, err)
 		}
+		restored = append(restored, pin.mode)
 		if h.Index == nil {
 			continue
 		}

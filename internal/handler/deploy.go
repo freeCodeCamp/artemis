@@ -316,6 +316,7 @@ func (h *Handlers) DeployFinalize(w http.ResponseWriter, r *http.Request) {
 			return errAliasWriteHandled
 		}
 		h.fenceFinalizedDeploy(commitCtx, claims.Site, deployID, mode)
+		h.purgeEdge(claims.Site, mode)
 		if h.Index != nil {
 			if err := telemetry.WithSpan(commitCtx, "pg.finalize.index", func(ctx context.Context) error {
 				return retryIdempotentCommit(ctx, func(ctx context.Context) error {
