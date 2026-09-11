@@ -465,9 +465,7 @@ func openTeamCache(ctx context.Context, cfg *config.Config) (auth.TeamCache, fun
 	if err != nil {
 		slog.WarnContext(ctx, "teamcache.connect.degraded", "err", err,
 			"detail", "booting without the durable team cache; membership reads go to the GitHub API")
-		if client = valkey.NewClientUnverified(vcfg); client == nil {
-			return nil, func() {}, err
-		}
+		client = valkey.NewClientUnverified(vcfg)
 	}
 	return teamcache.New(client, cfg.GitHub.MembershipCacheTTL), func() { _ = client.Close() }, nil
 }

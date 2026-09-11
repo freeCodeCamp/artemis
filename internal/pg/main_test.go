@@ -68,7 +68,12 @@ func startSharedPostgres() {
 		sharedErr = fmt.Errorf("create template: %w", err)
 		return
 	}
-	tmpl, err := pgxpool.New(ctx, dsnFor(testTemplateDB))
+	tmplDSN, err := dsnFor(testTemplateDB)
+	if err != nil {
+		sharedErr = err
+		return
+	}
+	tmpl, err := pgxpool.New(ctx, tmplDSN)
 	if err != nil {
 		sharedErr = fmt.Errorf("template pool: %w", err)
 		return
@@ -80,8 +85,12 @@ func startSharedPostgres() {
 	}
 }
 
-func dsnFor(name string) string {
-	return strings.Replace(sharedBaseURL, "/"+testAdminDB+"?", "/"+name+"?", 1)
+func dsnFor(name string) (string, error) {
+	segment := "/" + testAdminDB + "?"
+	if !strings.Contains(sharedBaseURL, segment) {
+		return "", fmt.Errorf("container dsn carries no %q segment", segment)
+	}
+	return strings.Replace(sharedBaseURL, segment, "/"+name+"?", 1), nil
 }
 
 func newTestDatabase(t *testing.T, template string) string {
@@ -100,7 +109,9 @@ func newTestDatabase(t *testing.T, template string) string {
 	t.Cleanup(func() {
 		_, _ = sharedAdmin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
 	})
-	return dsnFor(name)
+	dsn, err := dsnFor(name)
+	require.NoError(t, err)
+	return dsn
 }
 
 func migratedTestDSN(t *testing.T) string { return newTestDatabase(t, testTemplateDB) }
