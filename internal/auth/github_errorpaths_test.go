@@ -23,7 +23,7 @@ func (f failingGetTeamCache) Get(context.Context, string) ([]string, bool, error
 
 func (failingGetTeamCache) Set(context.Context, string, []string) error { return nil }
 
-func TestUserTeams_DurableGetError_SurfacesNotRefetches(t *testing.T) {
+func TestUserTeams_DurableGetError_FallsThroughToGitHub(t *testing.T) {
 	getErr := errors.New("valkey down")
 
 	teamsCalls := atomic.Int32{}
@@ -48,12 +48,10 @@ func TestUserTeams_DurableGetError_SurfacesNotRefetches(t *testing.T) {
 	})
 
 	teams, err := c.UserTeams(context.Background(), "ghp_x")
-	require.Error(t, err, "a durable-cache Get error must fail auth, not silently re-fetch")
-	require.Nil(t, teams)
-	assert.ErrorIs(t, err, getErr,
-		"the Get failure must propagate to the caller so auth fails closed")
-	assert.EqualValues(t, 0, teamsCalls.Load(),
-		"a durable Get error must NOT fall through to a fresh GitHub /user/teams fetch")
+	require.NoError(t, err, "the durable cache is an optimisation; GitHub is the authority for team membership")
+	assert.Equal(t, []string{"staff"}, teams)
+	assert.EqualValues(t, 1, teamsCalls.Load(),
+		"a durable Get error must fall through to GitHub, not break authentication for the whole outage")
 }
 
 func TestFetchTeamMembership_StatusClassification(t *testing.T) {

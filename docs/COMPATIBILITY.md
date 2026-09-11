@@ -14,7 +14,7 @@ So this file is hand-maintained. Add an entry here whenever a change alters a st
 
 ## Scope
 
-Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 36, which are committed and **not yet released**.
+Range: `v1.6.0` (tagged 2026-07-17) through `v1.10.2` (tagged 2026-08-28), the release running in production on 2026-09-04, plus entries 29 to 38, which are committed and **not yet released**.
 
 The audit that produced this file found no accidental breaks. Every entry below is intentional. The summary table's "Who feels it" column is the breakdown, and it is derived from the rows rather than restated in prose, because a hand-kept tally has drifted three times in this file's short life.
 
@@ -59,6 +59,7 @@ The audit that produced this file found no accidental breaks. Every entry below 
 | 35 | `SENTRY_TRACES_SAMPLE_RATE=NaN` refuses to boot, not silently disables tracing | unreleased | Operators |
 | 36 | A failed outbox publish retries after 60 s, not 5 minutes, and the rest of the batch is not held | unreleased | Operators and alert-rule readers |
 | 37 | A second finalize of one deploy is refused per mode, so promote-by-finalize works again | v1.12.0, narrowed unreleased | API callers that promote by finalize |
+| 38 | `GET /readyz` with Valkey unreachable returns `200` degraded, not `503` | unreleased | Operators and probe readers |
 
 ## 1 — Upload `?path=` no longer strips a leading slash
 
@@ -330,7 +331,7 @@ The advisory lock is session-scoped on a dedicated connection, and a failed unlo
 
 **Old:** an R2 probe failure returned `503` with `{"code":"r2_unreachable"}` and logged `readyz.probe.unavailable` at Error, tagged `op=r2.has_prefix`. Kubernetes removed the pod from the Service after three consecutive failures.
 
-**New:** an R2 probe failure returns `200 {"ready":true,"degraded":true}` and logs `readyz.r2.degraded` at Warn (`internal/handler/readyz.go:67-75`). The pod stays in the Service. Valkey is now the only upstream that produces a `503`.
+**New:** an R2 probe failure returns `200 {"ready":true,"degraded":true}` and logs `readyz.r2.degraded` at Warn. The pod stays in the Service. Valkey was the only upstream left that produced a `503`; entry 38 removed that one too, so `/readyz` now has no `503` path at all.
 
 **Why:** all replicas share one bucket, one token and one endpoint, so an R2 fault is correlated across every pod and the `503` emptied the Service rather than shedding load onto a healthy replica. The endpoints that need R2 already fail per request with `r2_put_failed`, `r2_list_failed`, `r2_get_failed`, `r2_move_failed` and `r2_has_prefix_failed`, which name the failing operation; an empty Service returns a connection failure with no code, no request id and no audit row.
 
@@ -401,7 +402,7 @@ NXDOMAIN is the only DNS answer that names a configuration fault, so it keeps it
 
 The cooldown is keyed per op and per class but the tracker is a package variable (`internal/observability/transientrate.go:37`), so its scope is one process — **one pod**. It suppresses repeats inside a pod, never across pods. The recorded morning of 2026-08-23 shows the size of that effect. Twenty-one DNS events arrived in two bursts, 05:50:58-05:51:11 and 06:03:19-06:03:30, each burst hitting all three replicas: eighteen under `op=relay.run` (ARTEMIS-7), three events per pod across six distinct pods, and three under `op=registry.refresh` (ARTEMIS-8), one per pod across three distinct pods. Under this release the `relay.run` repeats collapse to one per pod and the eighteen become six; the three `registry.refresh` events come from three different pods and stay three. Twenty-one becomes nine, not one.
 
-The trade is symmetric and deliberate: a **sustained** resolver outage now pages less loudly than it does today. Scope the mitigation carefully, because it is narrower than it looks. A **resolver-wide** outage also fails the readyz Valkey probe, which answers 503 and ejects the pod from the Service (`internal/handler/readyz.go:57-62`), and pod alerting covers that. A **Postgres-only** name failure — which is exactly what ARTEMIS-8 records, `lookup artemis-postgresql` — does not: the Postgres branch only sets `degraded` and still answers 200 with the pod in the Service (`internal/handler/readyz.go:77-84`), and unlike the R2 branch at `:69-70` it captures nothing to Sentry at all. For that class the floor after this change is one cooled event per pod per 24 hours plus a `WARN` log, and nothing else pages. The one signal that survives is a pod restarted mid-outage, which crashloops at boot inside the 45-second connect window and is visible to pod alerting.
+The trade is symmetric and deliberate: a **sustained** resolver outage now pages less loudly than it does today. Scope the mitigation carefully, because it is narrower than it looks. A **resolver-wide** outage also fails the readyz Valkey probe. **Corrected by entry 38:** that probe used to answer 503 and eject the pod, so pod alerting covered this class. It no longer does. Since entry 38 the Valkey branch answers 200 degraded and pages Sentry on the same three-failure threshold as R2, so the cover is a Sentry page rather than a pod alert. A **Postgres-only** name failure — which is exactly what ARTEMIS-8 records, `lookup artemis-postgresql` — is covered by neither: the Postgres branch only sets `degraded` and still answers 200 with the pod in the Service, and unlike the Valkey and R2 branches it captures nothing to Sentry at all. For that class the floor after this change is one cooled event per pod per 24 hours plus a `WARN` log, and nothing else pages. The one signal that survives is a pod restarted mid-outage, which crashloops at boot inside the 45-second connect window and is visible to pod alerting.
 
 **Bucket moves.** NXDOMAIN opens a new issue under `net.dns_notfound`; any existing issue under `net.dns` goes stale and Sentry offers no redirect, exactly as in entry 16.
 
@@ -827,3 +828,47 @@ answers `409`.
 
 **Action:** a caller that promotes by finalize must run `v1.12.0` through the current production
 image only with one mode per deploy id. The next release restores the two-mode flow.
+
+## 38 — `GET /readyz` with Valkey unreachable returns `200` degraded, not `503`
+
+**Release:** unreleased.
+
+**Old:** a Valkey probe failure returned `503` with `{"code":"valkey_unreachable"}` and logged
+`readyz.probe.unavailable` at Error. Kubernetes removed the pod from the Service after three
+consecutive failures. Valkey was the last upstream with a `503` path; entry 15 had already moved R2
+off it.
+
+**New:** a Valkey probe failure returns `200 {"ready":true,"degraded":true}` and logs
+`readyz.valkey.degraded` at Warn (`internal/handler/readyz.go`). The pod stays in the Service.
+`/readyz` now has no `503` path. The `valkey_unreachable` error code is gone from that endpoint, and
+`writeProbeUnavailable` is deleted.
+
+**Why:** Valkey stopped being the registry source of truth at the Postgres cutover of 2026-09-11.
+`pg.RegistryStore` is the Writer and the Reader source, and Valkey is the cache front and the
+`registry.changed` transport (`cmd/artemis/main.go`, `openRegistry`). All three replicas share one
+Valkey, so the fault is correlated and the `503` emptied the Service instead of shedding load onto a
+healthy replica. Nothing was protected by it: the upload and finalize handlers already return
+`503 fence_unavailable` per request when the deploy-fence read fails
+(`internal/handler/deploy.go`), and a registry write does not fail when the `registry.changed`
+publish fails. ADR-019's 2026-06-04 amendment already set this rule for Postgres and Hatchet:
+"`/readyz` reports degraded (not down) in this state". The full ruling is in
+`docs/design/0007-readyz-degradation.md`.
+
+**A second change ships with it.** `GitHubClient.userTeamsThroughDurableCache` used to return the
+durable team-cache read error, so a Valkey outage broke every authenticated request. It now logs
+`teamcache.read.failed` at Warn and calls the GitHub API (`internal/auth/github.go`). GitHub is the
+authority for team membership, so the fall-through is more authoritative than the cache, not less.
+
+**Paging.** Valkey reaches Sentry once per outage at `readyzPageThreshold` (3) consecutive
+failures, with the fingerprint `[readyz valkey.ping]`. The fingerprint is unchanged, so the existing
+Sentry issue keeps receiving events.
+
+**Boot is unchanged and still hard.** `openRegistry` uses `valkey.NewWithRetry`, so a pod that
+restarts while Valkey is down crashloops after the retry window. A running pod survives the outage;
+a restarting pod does not.
+
+**Action:** an operator grepping `readyz.probe.unavailable` must switch to `readyz.valkey.degraded`;
+that key is Warn, so `LOG_LEVEL=error` drops it entirely. A Valkey outage no longer shows as
+`NotReady` pods in `kubectl get pods`. Watch Sentry `op=valkey.ping` instead. A rollout no longer
+wedges on an unreachable Valkey, so new pods become Ready while it is down — but they still
+crashloop at boot for the reason above, which is the signal that remains.

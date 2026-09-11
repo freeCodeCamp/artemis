@@ -54,15 +54,17 @@ func (h *Handlers) ReadyZ(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if valkeyErr != nil {
-		page := h.readyzValkey.observe(true, true)
-		h.readyzR2.observe(r2Err != nil, false)
-		writeProbeUnavailable(w, r, "valkey_unreachable", "valkey.ping", valkeyErr, page)
-		return
-	}
-	h.readyzValkey.observe(false, false)
-
 	var degraded bool
+
+	if valkeyErr != nil {
+		degraded = true
+		if h.readyzValkey.observe(true, true) {
+			captureProbeFailure(r, "valkey_unreachable", "valkey.ping", valkeyErr)
+		}
+		slog.WarnContext(r.Context(), "readyz.valkey.degraded", "err", valkeyErr)
+	} else {
+		h.readyzValkey.observe(false, false)
+	}
 
 	if r2Err != nil {
 		degraded = true
@@ -119,15 +121,4 @@ func captureProbeFailure(r *http.Request, code, op string, err error) {
 		scope.SetFingerprint([]string{"readyz", op})
 		hub.CaptureException(err)
 	})
-}
-
-func writeProbeUnavailable(w http.ResponseWriter, r *http.Request, code, op string, err error, page bool) {
-	slog.ErrorContext(r.Context(), "readyz.probe.unavailable",
-		"op", op,
-		"err", err,
-	)
-	if page {
-		captureProbeFailure(r, code, op, err)
-	}
-	writeError(w, http.StatusServiceUnavailable, code, "upstream call failed")
 }

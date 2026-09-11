@@ -69,7 +69,7 @@ func TestReadyzDegraded_PGUp_ReturnsReady(t *testing.T) {
 	assert.JSONEq(t, `{"ready":true}`, w.Body.String())
 }
 
-func TestReadyzDegraded_ValkeyDownHardFailsEvenIfPGUp(t *testing.T) {
+func TestReadyzDegraded_ValkeyDown_Returns200Degraded(t *testing.T) {
 	h := &Handlers{
 		Health:   &fakeHealth{err: errors.New("valkey down")},
 		R2:       newFakeR2(),
@@ -80,10 +80,11 @@ func TestReadyzDegraded_ValkeyDownHardFailsEvenIfPGUp(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ReadyZ(w, r)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code, "Valkey down = hard down even when PG ok")
+	require.Equal(t, http.StatusOK, w.Code, "Postgres is the registry source of truth; Valkey down is degraded, not down")
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String())
 }
 
-func TestReadyZ_ValkeyDown_Returns503_ValkeyUnreachable(t *testing.T) {
+func TestReadyZ_ValkeyDown_PodStaysInServiceEndpoints(t *testing.T) {
 	h := &Handlers{
 		Health: &fakeHealth{err: errors.New("dial tcp valkey:6379: i/o timeout")},
 		R2:     newFakeR2(),
@@ -93,8 +94,9 @@ func TestReadyZ_ValkeyDown_Returns503_ValkeyUnreachable(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ReadyZ(w, r)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
+	require.Equal(t, http.StatusOK, w.Code,
+		"all replicas share one Valkey, so a 503 here empties the Service on a single correlated fault")
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String())
 }
 
 func TestReadyZ_R2Down_Returns200Degraded_PodStaysReady(t *testing.T) {
@@ -146,7 +148,7 @@ func TestReadyZ_R2Degraded_LogsAtWarn(t *testing.T) {
 		"the 200-tolerated degraded path must log at Warn, not out-rank the failing check")
 }
 
-func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
+func TestReadyZ_ValkeyAndR2Down_Returns200Degraded(t *testing.T) {
 	r2 := newFakeR2()
 	r2.listErr = errors.New("r2 also down")
 	h := &Handlers{
@@ -158,19 +160,20 @@ func TestReadyZ_ValkeyFailureTakesPrecedenceOnDoubleFailure(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ReadyZ(w, r)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Contains(t, w.Body.String(), `"code":"valkey_unreachable"`)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"ready":true,"degraded":true}`, w.Body.String(),
+		"no upstream fails readyz closed; two down still produce one degraded marker")
 }
 
 func TestReadyz_LevelMatchesStatus(t *testing.T) {
 	cap := captureAccessLog(t)
 
-	down := &Handlers{Health: &fakeHealth{err: errors.New("valkey down")}, R2: newFakeR2()}
+	valkey := &Handlers{Health: &fakeHealth{err: errors.New("valkey down")}, R2: newFakeR2()}
 	w := httptest.NewRecorder()
-	down.ReadyZ(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	assert.Equal(t, slog.LevelError, cap.levelOf(t, "readyz.probe.unavailable"),
-		"the 503-causing check must log at Error so it pages")
+	valkey.ReadyZ(w, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, slog.LevelWarn, cap.levelOf(t, "readyz.valkey.degraded"),
+		"the 200-tolerated degraded path must log at Warn, not out-rank the failing check")
 
 	degraded := &Handlers{Health: &fakeHealth{}, R2: newFakeR2(), PGHealth: &fakeHealth{err: errors.New("pg down")}}
 	w2 := httptest.NewRecorder()
@@ -199,8 +202,27 @@ func TestReadyz_SingleFailure_DoesNotPage(t *testing.T) {
 	w := readyzProbe(t, h, hub)
 	hub.Flush(time.Second)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Equal(t, http.StatusOK, w.Code)
 	require.Empty(t, ft.events, "a single readyz failure is a blip (streak < threshold) — must not page")
+}
+
+func TestReadyZ_ValkeySustainedFailure_PagesAtThreshold(t *testing.T) {
+	hub, ft := newHubWithTransport(t)
+	h := &Handlers{
+		Health: &fakeHealth{err: fmt.Errorf("valkey ping: %w", context.DeadlineExceeded)},
+		R2:     newFakeR2(),
+	}
+
+	for i := 0; i < readyzPageThreshold+5; i++ {
+		require.Equal(t, http.StatusOK, readyzProbe(t, h, hub).Code,
+			"paging and readiness are independent: the pod stays in the Service for the whole outage")
+	}
+	hub.Flush(time.Second)
+
+	require.Len(t, ft.events, 1,
+		"a sustained Valkey outage must page exactly once — the 200 is quiet, Sentry is not")
+	assert.Equal(t, "valkey.ping", ft.events[0].Tags["op"])
+	assert.Equal(t, []string{"readyz", "valkey.ping"}, ft.events[0].Fingerprint)
 }
 
 func TestReadyZ_R2SustainedFailure_PagesAtThreshold(t *testing.T) {
@@ -267,7 +289,7 @@ func TestReadyz_RepagesAfterRecovery(t *testing.T) {
 	require.Len(t, ft.events, 2, "each distinct outage episode pages once; recovery re-arms the latch")
 }
 
-func TestReadyz_DualOutageThenValkeyHeals_R2StillPages(t *testing.T) {
+func TestReadyz_DualOutage_EachUpstreamPagesOnce(t *testing.T) {
 	hub, ft := newHubWithTransport(t)
 	r2 := newFakeR2()
 	health := &fakeHealth{}
@@ -276,11 +298,11 @@ func TestReadyz_DualOutageThenValkeyHeals_R2StillPages(t *testing.T) {
 	health.err = errors.New("valkey down")
 	r2.listErr = errors.New("r2 down")
 	for i := 0; i < readyzPageThreshold+2; i++ {
-		readyzProbe(t, h, hub) // valkey precedence masks r2; r2 streak overshoots threshold
+		readyzProbe(t, h, hub)
 	}
 	health.err = nil
 	for i := 0; i < 10; i++ {
-		readyzProbe(t, h, hub) // real ongoing r2 outage, now unmasked
+		readyzProbe(t, h, hub)
 	}
 	hub.Flush(time.Second)
 
@@ -288,8 +310,8 @@ func TestReadyz_DualOutageThenValkeyHeals_R2StillPages(t *testing.T) {
 	for _, e := range ft.events {
 		ops[e.Tags["op"]]++
 	}
-	require.Equal(t, 1, ops["r2.ping"],
-		"an ongoing R2 outage must page once even after being masked by a valkey outage that healed — latch dead-zone fix")
+	require.Equal(t, 1, ops["r2.ping"], "the ongoing R2 outage pages once")
+	require.Equal(t, 1, ops["valkey.ping"], "the healed Valkey outage pages once; neither upstream masks the other")
 }
 
 func TestProbeState_ConcurrentObserveAtThreshold_PagesExactlyOnce(t *testing.T) {

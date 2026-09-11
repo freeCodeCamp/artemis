@@ -59,9 +59,9 @@ paths:
             The `degraded` field is absent, not false. A probe that does not answer inside its time limit
             counts as a failure.
 
-            The body is `{"ready": true, "degraded": true}` when Valkey answers and the R2 probe, the
-            Postgres probe, or both fail. The body carries one `degraded` field, whatever number of these
-            two probes fail.'
+            The body is `{"ready": true, "degraded": true}` when any of the Valkey, R2 and Postgres
+            probes fail. The body carries one `degraded` field, whatever number of the three probes fail.
+            No probe failure produces a `503`.'
           headers:
             X-Request-ID:
               $ref: '#/components/headers/X-Request-ID'

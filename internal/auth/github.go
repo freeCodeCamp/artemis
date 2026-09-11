@@ -394,11 +394,12 @@ func (c *GitHubClient) userTeamsThroughDurableCache(ctx context.Context, cacheKe
 	if err != nil {
 		return nil, err
 	}
-	if teams, hit, err := c.teamCacheDurable.Get(ctx, login); err != nil {
-		return nil, err
+	cached, hit, err := c.teamCacheDurable.Get(ctx, login)
+	if err != nil {
+		slog.WarnContext(ctx, "teamcache.read.failed", "login", login, "err", err)
 	} else if hit {
-		c.storeUserTeams(cacheKey, teams)
-		return append([]string(nil), teams...), nil
+		c.storeUserTeams(cacheKey, cached)
+		return append([]string(nil), cached...), nil
 	}
 	teams, err := c.fetchUserTeams(ctx, cacheKey, token)
 	if err != nil {
