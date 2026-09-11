@@ -949,6 +949,13 @@ Warn. Boot then succeeds or fails on what the registry Reader can read:
 
 An empty `VALKEY_ADDR` still fails boot. That is a configuration fault, not an outage.
 
+**One case after the cutover still fails boot.** `pg.RegistryStore.Import` runs before the Reader.
+It returns at once when the Postgres `sites` table holds rows, and on an empty table it seeds them
+from Valkey, so that read fails during an outage and boot fails with it. The window is the first
+boot after the cutover, and a boot against a Postgres restored from a dump that predates the
+registry. A populated `sites` table closes it. Live `sites` is 73 on 2026-09-11, so the case is not
+reachable on the running cluster.
+
 **What a degraded boot costs.** Deploys return `503 fence_unavailable` for the length of the outage.
 Team-membership reads go to the GitHub API instead of the durable cache. A registry change reaches
 the pod on the 60-second TTL refresh instead of at once.

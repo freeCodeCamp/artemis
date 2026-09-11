@@ -68,6 +68,14 @@ client without dialing, and logs `valkey.connect.degraded`. Every later
 call reports the outage on its own. `openTeamCache` does the same and
 logs `teamcache.connect.degraded`.
 
+`pg.RegistryStore.Import` runs first, and it is the one step that can
+still fail after the cutover. It returns at once when the Postgres
+`sites` table holds rows. On an **empty** `sites` table it reads the
+sites from Valkey to seed them, so a Valkey outage fails that read and
+boot fails with it. The window is the first boot after the cutover, and
+a boot against a Postgres restored from a dump that predates the
+registry. A populated `sites` table closes it.
+
 `NewReaderFromSource` then decides the outcome:
 
 - **After the cutover** the source is `pg.RegistryStore`, the initial
@@ -84,8 +92,11 @@ not an outage, so `NewUnverified` returns nil for it.
 
 What a degraded boot costs: deploys fail closed with `503
 fence_unavailable`, team-membership reads go to the GitHub API, and a
-registry change reaches the pod on the TTL refresh instead of at once. The fix for that is a second Valkey replica,
-tracked in the infra wave `2026-09-11-gxy-platform-resilience` T2.
+registry change reaches the pod on the TTL refresh instead of at once.
+There is no fix for the last cost and none is planned. A second Valkey
+replica is refused by the infra wave `2026-09-11-gxy-platform-resilience`
+T2: the chart has no replication wiring and the ClusterIP Service
+round-robins, so two replicas would split the deploy fence.
 
 ## Paging
 
