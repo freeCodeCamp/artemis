@@ -9,35 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
 func newMaxConns2Repo(t *testing.T) *Repo {
 	t.Helper()
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, testPostgresImage,
-		postgres.WithDatabase("artemis_test"),
-		postgres.WithUsername("artemis"),
-		postgres.WithPassword("artemis"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	poolCfg, err := pgxpool.ParseConfig(connStr)
+	poolCfg, err := pgxpool.ParseConfig(migratedTestDSN(t))
 	require.NoError(t, err)
 	poolCfg.MaxConns = 2
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { go pool.Close() })
-	require.NoError(t, Migrate(ctx, pool))
 	return &Repo{pool: pool}
 }
 

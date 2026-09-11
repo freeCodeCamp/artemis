@@ -6,25 +6,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 func TestMigrations(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, testPostgresImage,
-		postgres.WithDatabase("artemis_test"),
-		postgres.WithUsername("artemis"),
-		postgres.WithPassword("artemis"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	connStr := blankTestDSN(t)
 
 	db, err := New(ctx, Config{DatabaseURL: connStr})
 	require.NoError(t, err)
@@ -93,20 +79,8 @@ func TestMigrations(t *testing.T) {
 }
 
 func TestReleaseAdvisoryLock_FreesLockOnCanceledCallerCtx(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, testPostgresImage,
-		postgres.WithDatabase("artemis_test"),
-		postgres.WithUsername("artemis"),
-		postgres.WithPassword("artemis"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	connStr := blankTestDSN(t)
 
 	poolCfg, err := pgxpool.ParseConfig(connStr)
 	require.NoError(t, err)
@@ -171,20 +145,8 @@ func TestAdvisoryLockKeysAreDistinct(t *testing.T) {
 }
 
 func TestMigrateConcurrent_RecoversFromSameNameLeftoverIndex(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, testPostgresImage,
-		postgres.WithDatabase("artemis_test"),
-		postgres.WithUsername("artemis"),
-		postgres.WithPassword("artemis"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	connStr := blankTestDSN(t)
 
 	db, err := New(ctx, Config{DatabaseURL: connStr})
 	require.NoError(t, err)
