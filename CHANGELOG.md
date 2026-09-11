@@ -2,6 +2,17 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.12.4](https://github.com/freeCodeCamp/artemis/compare/v1.12.3...v1.12.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* **boot:** drop the unreachable team-cache nil check ([fc327e3](https://github.com/freeCodeCamp/artemis/commit/fc327e3c2f9dc5218a4b9c1a44ce9aa0ff8d70ba))
+* **boot:** survive a valkey outage after the cutover ([9898b91](https://github.com/freeCodeCamp/artemis/commit/9898b911e0dae4f8da6e421f7a1fc3d993729b10))
+* **readyz:** degrade on valkey, do not fail closed ([50df4ba](https://github.com/freeCodeCamp/artemis/commit/50df4ba5217f6a547838794a371a179485118f3a))
+* **sentry:** class dial faults as transient net.dial ([84d57d9](https://github.com/freeCodeCamp/artemis/commit/84d57d9e79ff8fbc3a3c661da3a965a5f1ce5a04))
+* **test:** drop the dsn prefix coupling in the pg suite ([0f04b9b](https://github.com/freeCodeCamp/artemis/commit/0f04b9b101fcbf401c7074c2d97e307e0a2faadb))
+
 ## [1.12.3](https://github.com/freeCodeCamp/artemis/compare/v1.12.2...v1.12.3) (2026-09-11)
 
 
