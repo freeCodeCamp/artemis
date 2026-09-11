@@ -11,6 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The package path and the call are split across concatenations so this
+// file does not match the registry scan in scripts/quarantine-check.sh,
+// which greps for the package-qualified Skip call and for a dot-import
+// of the package. Joining them makes `just quarantine-check` read these
+// fixtures as real call sites. Keep any new comment here clear of the
+// same two forms.
 const (
 	pkgPath = "github.com/freeCodeCamp/artemis/internal/testutil/" + "quarantine"
 	skipFn  = "quarantine" + ".Skip"
