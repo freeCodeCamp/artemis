@@ -2,6 +2,13 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.12.3](https://github.com/freeCodeCamp/artemis/compare/v1.12.2...v1.12.3) (2026-09-11)
+
+
+### Bug Fixes
+
+* **deploy:** fence finalize per mode ([25ad06e](https://github.com/freeCodeCamp/artemis/commit/25ad06ebcde81659face85bbae9db3192c0ebea7))
+
 ## [1.12.2](https://github.com/freeCodeCamp/artemis/compare/v1.12.1...v1.12.2) (2026-09-10)
 
 
