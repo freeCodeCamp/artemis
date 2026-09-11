@@ -17,7 +17,10 @@ func (h *Handlers) fenceFinalizedDeploy(ctx context.Context, site sitekey.Slug, 
 				"later upload with the same token can overwrite what is live")
 		return
 	}
-	if err := h.DeployFence.MarkDeployFinalized(ctx, site, deployID, mode, h.DeployJWTTTL); err != nil {
+	err := retryIdempotentCommit(ctx, func(ctx context.Context) error {
+		return h.DeployFence.MarkDeployFinalized(ctx, site, deployID, mode, h.DeployJWTTTL)
+	})
+	if err != nil {
 		slog.ErrorContext(ctx, "deploy.fence.failed", "site", site, "deployId", deployID, "mode", mode, "err", err,
 			"detail", "neither the upload fence nor the mode fence was written, so the permit can still "+
 				"overwrite this deploy or repoint its alias until it expires")
