@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -80,22 +81,9 @@ func startSharedPostgres() {
 }
 
 func dsnFor(name string) string {
-	return fmt.Sprintf("postgres://artemis:artemis@%s/%s?sslmode=disable", hostPortOf(sharedBaseURL), name)
+	return strings.Replace(sharedBaseURL, "/"+testAdminDB+"?", "/"+name+"?", 1)
 }
 
-func hostPortOf(url string) string {
-	rest := url[len("postgres://artemis:artemis@"):]
-	for i := range rest {
-		if rest[i] == '/' {
-			return rest[:i]
-		}
-	}
-	return rest
-}
-
-// newTestDatabase returns a DSN for a database of its own, cloned from the
-// migrated template. One container serves the package; the clone costs a
-// CREATE DATABASE rather than a container start.
 func newTestDatabase(t *testing.T, template string) string {
 	t.Helper()
 	testcontainers.SkipIfProviderIsNotHealthy(t)

@@ -900,9 +900,21 @@ cooled to one event per op per 24 hours per pod. This is the same trade entry 18
 resolver class, and the same mitigation applies: a wrong connection target fails at boot, and a boot
 failure is a crashloop that pod alerting sees.
 
-**Scope.** Only the dial phase. A mid-stream `*net.OpError` with `Op` of `read` or `write` stays
-`unclassified`, because a fault after the connection is up has a different remedy. NXDOMAIN still
-outranks the dial wrapper and keeps `net.dns_notfound`, which is not transient.
+**Scope, and it is wider than the Postgres case above.** `CaptureBackground` keys the cooldown on
+`(op, class)` and applies it to every caller, so `net.dial` now cools a connect failure to Valkey,
+R2 or the GitHub API as well, not only to `artemis-pg-rw`. The phase is the narrow part: a
+mid-stream `*net.OpError` with `Op` of `read` or `write` stays `unclassified`, because a fault after
+the connection is up has a different remedy, and NXDOMAIN still outranks the dial wrapper and keeps
+`net.dns_notfound`, which is not transient.
+
+**The residual gap, stated as entry 18 states its own.** Entry 18 keeps one signal for a resolver
+outage: a pod restarted mid-outage crashloops and pod alerting sees it. The same holds for a dial
+fault at boot — `pg.NewWithRetry` gives up after 45 seconds, `run` returns, and
+`observability.CaptureFatal` pages at `LevelFatal` without consulting `errorClass` or the cooldown.
+It does **not** hold for a dial fault that appears mid-run: a NetworkPolicy change that starts
+refusing connections on a pod that is already up cools to one event per op per pod per 24 hours,
+plus a Warn log, and nothing else pages. Watch `error_class:net.dial` volume rather than issue
+count if that class matters to you.
 
 **Bucket move.** Events under `error_class:unclassified` that were dial faults open a new issue
 under `net.dial`. ARTEMIS-M is the existing issue and it goes stale.
