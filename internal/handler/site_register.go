@@ -409,7 +409,7 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 				return nil
 			}
 		}
-		if served {
+		if served || headErr != nil {
 			h.purgeEdge(slug, modes...)
 		}
 		until := h.Now().UTC().Add(h.ReservationGrace)

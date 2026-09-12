@@ -329,6 +329,7 @@ type fakeR2 struct {
 	deleteAliasKeys []string
 	deleteAliasFail map[string]error
 	putAliasFail    map[string]error
+	getAliasFail    map[string]error
 	putObjectKeys   []string
 	movePrefixSrcs  []string
 }
@@ -396,6 +397,9 @@ func (f *fakeR2) GetAlias(_ context.Context, aliasKey string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getAliasKeys = append(f.getAliasKeys, aliasKey)
+	if err := f.getAliasFail[aliasKey]; err != nil {
+		return "", err
+	}
 	v, ok := f.aliases[aliasKey]
 	if !ok {
 		return "", r2.ErrNotFound

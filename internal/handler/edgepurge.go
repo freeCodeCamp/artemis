@@ -14,6 +14,7 @@ import (
 const (
 	opEdgePurge      = "edge.purge"
 	edgePurgeTimeout = 20 * time.Second
+	edgePurgeHoldCap = 4
 )
 
 type EdgePurger interface {
@@ -45,11 +46,15 @@ func (h *Handlers) purgeEdge(site sitekey.Slug, modes ...string) {
 	}
 	if batch, ok := h.edgePurgePending[site]; ok && batch.timer.Stop() {
 		batch.add(hosts)
-		batch.timer.Reset(h.EdgePurgeDelay)
-		slog.Info("edge.purge.coalesced", "site", site, "hosts", batch.hosts, "delay", h.EdgePurgeDelay)
+		wait := h.EdgePurgeDelay
+		if left := time.Until(batch.deadline); left < wait {
+			wait = left
+		}
+		batch.timer.Reset(wait)
+		slog.Info("edge.purge.coalesced", "site", site, "hosts", batch.hosts, "delay", wait)
 		return
 	}
-	batch := &edgePurgeBatch{}
+	batch := &edgePurgeBatch{deadline: time.Now().Add(edgePurgeHoldCap * h.EdgePurgeDelay)}
 	batch.add(hosts)
 	h.edgePurgePending[site] = batch
 	slog.Info("edge.purge.scheduled", "site", site, "hosts", hosts, "delay", h.EdgePurgeDelay)
@@ -64,8 +69,9 @@ func (h *Handlers) purgeEdge(site sitekey.Slug, modes ...string) {
 }
 
 type edgePurgeBatch struct {
-	timer *time.Timer
-	hosts []string
+	timer    *time.Timer
+	deadline time.Time
+	hosts    []string
 }
 
 func (b *edgePurgeBatch) add(hosts []string) {

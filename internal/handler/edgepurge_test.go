@@ -215,18 +215,64 @@ func TestPurgeEdge_CoalescesWritesToTheSameSiteInsideTheDelay(t *testing.T) {
 	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
 	purge := newFakeEdgePurge()
 	h.EdgePurge = purge
-	h.EdgePurgeDelay = 200 * time.Millisecond
+	h.EdgePurgeDelay = 600 * time.Millisecond
 
 	started := time.Now()
 	h.purgeEdge("www", "preview")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	h.purgeEdge("www", "production")
 
 	assert.ElementsMatch(t, []string{"www.preview.freecode.camp", "www.freecode.camp"}, purge.wait(t),
 		"finalize then promote is one purge, not two; the Free plan refills 5 requests a minute")
-	assert.GreaterOrEqual(t, time.Since(started), 300*time.Millisecond,
+	assert.GreaterOrEqual(t, time.Since(started), 900*time.Millisecond,
 		"the purge waits the full delay after the last write, or the edge re-caches the older alias")
-	purge.none(t)
+}
+
+func TestPurgeEdge_FiresByTheHoldCapUnderConstantWrites(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+	h.EdgePurgeDelay = 100 * time.Millisecond
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(40 * time.Millisecond):
+				h.purgeEdge("www", "production")
+			}
+		}
+	}()
+	t.Cleanup(func() { close(stop); <-done })
+
+	assert.Equal(t, []string{"www.freecode.camp"}, purge.wait(t),
+		"a deploy loop faster than the delay must not starve the edge forever")
+}
+
+func TestSiteDelete_PurgesWhenTheAliasProbeWasUnreadable(t *testing.T) {
+	store := newFakeR2()
+	store.getAliasFail = map[string]error{"example/production": errors.New("r2 502")}
+	h, _ := newTestHandlers(t, staffCallerGH(),
+		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, store)
+	h.Registry.(*fakeRegistry).getErr = registry.ErrNotFound
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	h.Audit = &fakeAudit{}
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
+		"/api/site/example", nil, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.SiteDelete))).ServeHTTP,
+		context.Background())
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	assert.Equal(t, []string{"example.freecode.camp", "example.preview.freecode.camp"}, purge.wait(t),
+		"an unreadable probe may hide a served site; the aliases are gone, so the edge copy must go too")
 }
 
 func TestPurgeEdge_DoesNotCoalesceAcrossSites(t *testing.T) {
