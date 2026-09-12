@@ -68,7 +68,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --address ":9000" --certs-dir /certs
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -79,7 +79,7 @@ services:
       - "${MINIO_HOST_PORT:-59000}:9000"
 
   minio-setup:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       - minio
     entrypoint:

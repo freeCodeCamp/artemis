@@ -155,9 +155,9 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 Both or neither. A partial pair refuses the boot. When set, every alias write (finalize, promote, rollback, delete, undelete) purges the site host at the Cloudflare edge 16 s later, after the caddy alias cache expires. A purge failure logs `edge.purge.failed` and never fails the request.
 
-| Variable             | Default         | Description                                            |
-| -------------------- | --------------- | ------------------------------------------------------ |
-| `CF_ZONE_ID`         | _(empty → off)_ | Cloudflare zone id that fronts the public site hosts   |
+| Variable             | Default         | Description                                             |
+| -------------------- | --------------- | ------------------------------------------------------- |
+| `CF_ZONE_ID`         | _(empty → off)_ | Cloudflare zone id that fronts the public site hosts    |
 | `CF_PURGE_API_TOKEN` | _(empty → off)_ | API token with `Zone.Cache Purge` on that zone (secret) |
 
 **Postgres + retention GC + Hatchet** (feature-gated on `DATABASE_URL`; see [local ADR 0001](design/0001-durable-execution-model.md))
@@ -346,14 +346,14 @@ just integration          # live-deployment E2E (see Integration testing below)
 
 A fully offline stack — no real GitHub, no real R2, no secrets — that exercises the repo command surface end to end. `docker-compose.yml` wires six services:
 
-| Service       | Image / build             | Role                                                    |
-| ------------- | ------------------------- | ------------------------------------------------------- |
-| `postgres`    | `postgres:<major>-alpine` | Deploy index, outbox, audit log, tombstones, repo queue |
-| `valkey`      | `valkey/valkey:8-alpine`  | Registry + name-claim store                             |
-| `minio`       | `minio/minio:latest`      | S3-compatible R2 stand-in (path-style)                  |
-| `minio-setup` | `minio/mc:latest`         | One-shot: seeds the bucket, then exits                  |
-| `fakegithub`  | `Dockerfile.fakegithub`   | In-memory GitHub API double (`cmd/fakegithub`)          |
-| `artemis`     | `Dockerfile`              | The service under test, pointed at the fakes via env    |
+| Service       | Image / build                                      | Role                                                    |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| `postgres`    | `postgres:<major>-alpine`                          | Deploy index, outbox, audit log, tombstones, repo queue |
+| `valkey`      | `valkey/valkey:8-alpine`                           | Registry + name-claim store                             |
+| `minio`       | `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z` | S3-compatible R2 stand-in (path-style)                  |
+| `minio-setup` | `quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z`    | One-shot: seeds the bucket, then exits                  |
+| `fakegithub`  | `Dockerfile.fakegithub`                            | In-memory GitHub API double (`cmd/fakegithub`)          |
+| `artemis`     | `Dockerfile`                                       | The service under test, pointed at the fakes via env    |
 
 `cmd/fakegithub` validates the App JWT (RS256 signature + `iss` + ≤600s `exp` cap, like real GitHub) and serves the identity (`/user`, `/user/teams`, team membership) and App (`access_tokens`, repo create/generate/get/list/contents) endpoints artemis calls. One staff user (`smoke-bot`) is a member of `staff` + `apollo-11-approvers`.
 
