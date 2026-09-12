@@ -25,8 +25,11 @@ func (h *Handlers) purgeEdge(site sitekey.Slug, modes ...string) {
 	}
 	hosts := make([]string, 0, len(modes))
 	for _, mode := range modes {
-		u, err := url.Parse(h.publicURL(site, mode))
+		public := h.publicURL(site, mode)
+		u, err := url.Parse(public)
 		if err != nil || u.Host == "" {
+			slog.Warn("edge.purge.skipped", "site", site, "mode", mode, "url", public,
+				"detail", "the public url format yields no host; set a scheme in PUBLIC_URL_*_FORMAT")
 			continue
 		}
 		hosts = append(hosts, u.Host)

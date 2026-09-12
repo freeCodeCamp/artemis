@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -66,12 +67,21 @@ func (c *Client) PurgeHosts(ctx context.Context, hosts []string) error {
 	if resp.StatusCode/100 == 2 && body.Success {
 		return nil
 	}
-	return fmt.Errorf("edgecache: purge failed: status=%d %s", resp.StatusCode, describe(body.Errors))
+	return fmt.Errorf("edgecache: purge failed: status=%d %s", resp.StatusCode, describe(body.Errors, raw))
 }
 
-func describe(errs []apiError) string {
+const errorBodySnippet = 256
+
+func describe(errs []apiError, raw []byte) string {
 	if len(errs) == 0 {
-		return "no error detail"
+		snippet := strings.TrimSpace(string(raw))
+		if len(snippet) > errorBodySnippet {
+			snippet = snippet[:errorBodySnippet]
+		}
+		if snippet == "" {
+			return "no error detail"
+		}
+		return "body=" + strconv.Quote(snippet)
 	}
 	parts := make([]string, 0, len(errs))
 	for _, e := range errs {

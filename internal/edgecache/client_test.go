@@ -79,3 +79,13 @@ func TestPurgeHosts_RefusesAnEmptyHostList(t *testing.T) {
 	require.Error(t, c.PurgeHosts(context.Background(), nil))
 	assert.Empty(t, got.method, "no request must leave for an empty purge")
 }
+
+func TestPurgeHosts_QuotesANonJSONErrorBody(t *testing.T) {
+	c, _ := startZone(t, http.StatusBadGateway, "<html>bad gateway from the proxy</html>")
+
+	err := c.PurgeHosts(context.Background(), []string{"www.freecode.camp"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status=502")
+	assert.Contains(t, err.Error(), "bad gateway from the proxy")
+}

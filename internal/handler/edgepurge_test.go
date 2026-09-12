@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/freeCodeCamp/artemis/internal/registry"
 	"github.com/freeCodeCamp/artemis/internal/sitekey"
 )
 
@@ -144,4 +147,66 @@ func TestDeployFinalize_WaitsForTheOriginAliasCacheBeforeThePurge(t *testing.T) 
 
 	assert.GreaterOrEqual(t, time.Since(started), 300*time.Millisecond,
 		"caddy caches the alias for cache_ttl; a purge before that re-caches the old deploy")
+}
+
+func TestPurgeEdge_WarnsWhenTheHostFormatHasNoScheme(t *testing.T) {
+	logs := captureAccessLog(t)
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	h.PublicProductionURLFmt = "<site>.freecode.camp"
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	h.purgeEdge("www", "production")
+
+	purge.none(t)
+	assert.Equal(t, 1, logs.countMessage("edge.purge.skipped"),
+		"a schemeless PUBLIC_URL_*_FORMAT parses to an empty host; a silent skip hides a dead feature")
+}
+
+func TestSiteDelete_PurgesBothHosts(t *testing.T) {
+	store := newFakeR2()
+	store.aliases["example/production"] = "20260420-141522-abc1234"
+	store.aliases["example/preview"] = "20260421-090000-def5678"
+	h, _ := newTestHandlers(t, staffCallerGH(),
+		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, store)
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	h.Audit = &fakeAudit{}
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
+		"/api/site/example", nil, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.SiteDelete))).ServeHTTP,
+		context.Background())
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	assert.Equal(t, []string{"example.freecode.camp", "example.preview.freecode.camp"}, purge.wait(t))
+}
+
+func TestSiteUndelete_PurgesOnlyTheHostsItRestored(t *testing.T) {
+	store := newFakeR2()
+	store.putAliasFail = map[string]error{"www/preview": errors.New("r2 down")}
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), store)
+	rr := &reservedRegistry{RegistryWriter: h.Registry, reservation: registry.Reservation{
+		PrevProduction: "20260420-141522-abc1234",
+		PrevPreview:    "20260421-090000-def5678",
+	}}
+	h.Registry = rr
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	h.Audit = &fakeAudit{}
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	r := chi.NewRouter()
+	r.Post("/api/site/{slug}/undelete", h.SiteUndelete)
+	req := httptest.NewRequest(http.MethodPost, "/api/site/www/undelete", nil).
+		WithContext(contextWithLogin(context.Background(), "alice", "tok"))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+	assert.Equal(t, []string{"www.freecode.camp"}, purge.wait(t),
+		"production went back to R2 before preview failed; the edge must drop the stale production copy")
 }

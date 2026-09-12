@@ -385,8 +385,8 @@ func Load() (*Config, error) {
 	cfg.Repo.App.InstallationID = os.Getenv("GH_APP_INSTALLATION_ID")
 	cfg.Repo.App.PrivateKeyPEM = os.Getenv("GH_APP_PRIVATE_KEY")
 
-	cfg.EdgeCache.ZoneID = os.Getenv("CF_ZONE_ID")
-	cfg.EdgeCache.APIToken = os.Getenv("CF_PURGE_API_TOKEN")
+	cfg.EdgeCache.ZoneID = strings.TrimSpace(os.Getenv("CF_ZONE_ID"))
+	cfg.EdgeCache.APIToken = strings.TrimSpace(os.Getenv("CF_PURGE_API_TOKEN"))
 
 	cfg.Sentry.DSN = os.Getenv("SENTRY_DSN")
 	cfg.Sentry.Environment = os.Getenv("ENVIRONMENT")

@@ -43,3 +43,13 @@ func TestLoad_EdgeCachePartialConfigFails(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_EdgeCacheBlankZoneIsPartial(t *testing.T) {
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
+	t.Setenv("CF_ZONE_ID", "  ")
+	t.Setenv("CF_PURGE_API_TOKEN", "tok")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "partial")
+}
