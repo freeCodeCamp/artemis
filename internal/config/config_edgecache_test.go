@@ -53,3 +53,14 @@ func TestLoad_EdgeCacheBlankZoneIsPartial(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "partial")
 }
+
+func TestLoad_EdgeCacheTrimsTheToken(t *testing.T) {
+	configtest.Hermetic(t, EnvKeys(), requiredEnv())
+	t.Setenv("CF_ZONE_ID", "zone123")
+	t.Setenv("CF_PURGE_API_TOKEN", "tok\n")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "tok", cfg.EdgeCache.APIToken, "a k8s secret often carries a trailing newline")
+}

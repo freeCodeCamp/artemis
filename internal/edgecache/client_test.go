@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,11 +82,13 @@ func TestPurgeHosts_RefusesAnEmptyHostList(t *testing.T) {
 }
 
 func TestPurgeHosts_QuotesANonJSONErrorBody(t *testing.T) {
-	c, _ := startZone(t, http.StatusBadGateway, "<html>bad gateway from the proxy</html>")
+	body := "<html>bad gateway\nfrom the proxy</html>" + strings.Repeat("x", 300)
+	c, _ := startZone(t, http.StatusBadGateway, body)
 
 	err := c.PurgeHosts(context.Background(), []string{"www.freecode.camp"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status=502")
-	assert.Contains(t, err.Error(), "bad gateway from the proxy")
+	assert.Contains(t, err.Error(), `bad gateway\nfrom the proxy`, "control characters are escaped, not raw")
+	assert.NotContains(t, err.Error(), strings.Repeat("x", 257), "the body is cut to 256 bytes")
 }
