@@ -153,6 +153,8 @@ type Handlers struct {
 	DeployJWTTTL           time.Duration
 	EdgePurge              EdgePurger
 	EdgePurgeDelay         time.Duration
+	edgePurgeMu            sync.Mutex
+	edgePurgePending       map[sitekey.Slug]*edgePurgeBatch
 	Tombstones             TombstoneStore
 	Reservations           ReservationStore
 	NameReleaser           NameReleaser

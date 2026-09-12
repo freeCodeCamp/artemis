@@ -153,7 +153,7 @@ Loaded + validated in `internal/config/config.go` (`Load()` — fails fast on th
 
 ### Edge cache purge (optional)
 
-Both or neither. A partial pair refuses the boot. When set, every alias write (finalize, promote, rollback, delete, undelete) purges the site host at the Cloudflare edge 16 s later, after the caddy alias cache expires. A purge failure logs `edge.purge.failed` and never fails the request.
+Both or neither. A partial pair refuses the boot. When set, every alias write (finalize, promote, rollback, delete, undelete) purges the site host at the Cloudflare edge 16 s later, after the caddy alias cache expires. Writes to the same site inside that window merge into one purge request, timed from the last write. A delete of a site that served nothing sends no purge. A purge failure logs `edge.purge.failed` and never fails the request. The Free plan allows 5 purge requests a minute with a burst of 25.
 
 | Variable             | Default         | Description                                             |
 | -------------------- | --------------- | ------------------------------------------------------- |

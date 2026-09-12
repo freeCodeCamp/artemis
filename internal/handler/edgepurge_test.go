@@ -210,3 +210,63 @@ func TestSiteUndelete_PurgesOnlyTheHostsItRestored(t *testing.T) {
 	assert.Equal(t, []string{"www.freecode.camp"}, purge.wait(t),
 		"production went back to R2 before preview failed; the edge must drop the stale production copy")
 }
+
+func TestPurgeEdge_CoalescesWritesToTheSameSiteInsideTheDelay(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+	h.EdgePurgeDelay = 200 * time.Millisecond
+
+	started := time.Now()
+	h.purgeEdge("www", "preview")
+	time.Sleep(100 * time.Millisecond)
+	h.purgeEdge("www", "production")
+
+	assert.ElementsMatch(t, []string{"www.preview.freecode.camp", "www.freecode.camp"}, purge.wait(t),
+		"finalize then promote is one purge, not two; the Free plan refills 5 requests a minute")
+	assert.GreaterOrEqual(t, time.Since(started), 300*time.Millisecond,
+		"the purge waits the full delay after the last write, or the edge re-caches the older alias")
+	purge.none(t)
+}
+
+func TestPurgeEdge_DoesNotCoalesceAcrossSites(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	h.purgeEdge("www", "production")
+	h.purgeEdge("docs", "production")
+
+	assert.ElementsMatch(t, [][]string{{"www.freecode.camp"}, {"docs.freecode.camp"}},
+		[][]string{purge.wait(t), purge.wait(t)})
+}
+
+func TestPurgeEdge_PurgesAgainAfterTheBatchFired(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(), standardSites(), newFakeR2())
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	h.purgeEdge("www", "production")
+	purge.wait(t)
+	h.purgeEdge("www", "production")
+
+	assert.Equal(t, []string{"www.freecode.camp"}, purge.wait(t))
+}
+
+func TestSiteDelete_SkipsThePurgeWhenNothingWasServed(t *testing.T) {
+	h, _ := newTestHandlers(t, staffCallerGH(),
+		&fakeSites{bySite: map[sitekey.Slug][]string{"example": {"team-eng"}}}, newFakeR2())
+	h.Reservations = &fakeReservations{}
+	h.ReservationGrace = 72 * time.Hour
+	h.Audit = &fakeAudit{}
+	purge := newFakeEdgePurge()
+	h.EdgePurge = purge
+
+	w := withChiRoute(http.MethodDelete, "/api/site/{slug}",
+		"/api/site/example", nil, bearerTok(),
+		RequestID(h.RequireGitHubBearer(http.HandlerFunc(h.SiteDelete))).ServeHTTP,
+		context.Background())
+
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	purge.none(t)
+}

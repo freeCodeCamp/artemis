@@ -409,7 +409,9 @@ func (h *Handlers) siteDeleteReserving(w http.ResponseWriter, r *http.Request, s
 				return nil
 			}
 		}
-		h.purgeEdge(slug, modes...)
+		if served {
+			h.purgeEdge(slug, modes...)
+		}
 		until := h.Now().UTC().Add(h.ReservationGrace)
 		if _, err := h.Reservations.Reserve(opCtx, slug, dirname, until, LoginFromContext(r.Context()), observed); err != nil {
 			if errors.Is(err, registry.ErrNotFound) && (served || headErr != nil) {
