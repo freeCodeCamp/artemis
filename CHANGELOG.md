@@ -2,6 +2,24 @@
 
 All notable changes to artemis are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with the pre-1.0 caveat noted in `docs/RELEASING.md`.
 
+## [1.13.0](https://github.com/freeCodeCamp/artemis/compare/v1.12.5...v1.13.0) (2026-09-12)
+
+
+### Features
+
+* **deploy:** purge the edge after an alias flip ([8ef42fc](https://github.com/freeCodeCamp/artemis/commit/8ef42fc209957a5980984f9a7b543e44acc117cb))
+
+
+### Bug Fixes
+
+* **edgecache:** harden purge config and error detail ([bfe8a3e](https://github.com/freeCodeCamp/artemis/commit/bfe8a3ec85b1799953fd45dd6c0dfcab0eac888f))
+* **edgecache:** purge on unreadable probe, cap the hold ([66c30fd](https://github.com/freeCodeCamp/artemis/commit/66c30fd5f7ea57ef61e7b0b64de334d9310174c5))
+
+
+### Performance Improvements
+
+* **edgecache:** coalesce purges per site ([606b1a4](https://github.com/freeCodeCamp/artemis/commit/606b1a46622cd55e6bf1a06303fa82c5b62ca9e4))
+
 ## [1.12.5](https://github.com/freeCodeCamp/artemis/compare/v1.12.4...v1.12.5) (2026-09-11)
 
 
